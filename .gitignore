@@ -1,0 +1,11 @@
+/build/
+/build-*/
+/cmake-build-*/
+/.kaixa/
+*.o
+*.a
+*.exe
+*.pdb
+*.ilk
+.cache/
+compile_commands.json
