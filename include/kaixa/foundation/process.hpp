@@ -3,8 +3,10 @@
 #include <kaixa/foundation/diagnostic.hpp>
 
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kaixa {
@@ -20,5 +22,6 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<ProcessResult> run_process(const ProcessRequest& request);
+    [[nodiscard]] std::optional<std::string> environment_variable(std::string_view name);
     [[nodiscard]] std::string format_command(std::span<const std::string> argv);
 }

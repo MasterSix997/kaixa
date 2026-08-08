@@ -1,0 +1,4 @@
+[package]
+name = "hello_cmake"
+version = "0.1.0"
+resolver = "cmake"

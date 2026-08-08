@@ -1,0 +1,8 @@
+[package]
+name = "demo_app"
+version = "0.1.0"
+resolver = "cmake"
+
+[dependencies]
+demo_math = { path = "packages/math" }
+assets = { path = "assets" }

@@ -61,7 +61,10 @@ add_executable(kaixa_tests
     tests/support/test_main.cpp
     tests/smoke.cpp
     tests/mvp.cpp
+    tests/examples.cpp
+    tests/workspace_errors.cpp
 )
+target_compile_definitions(kaixa_tests PRIVATE KAIXA_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 target_link_libraries(kaixa_tests PRIVATE
     kaixa_core
     kaixa_plugins

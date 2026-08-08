@@ -1,8 +1,10 @@
 #include <kaixa/plugin/cmake/resolver.hpp>
 
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/foundation/process.hpp>
 
 #include <filesystem>
+#include <string_view>
 #include <utility>
 
 namespace kaixa::plugin::cmake {
@@ -17,6 +19,28 @@ namespace kaixa::plugin::cmake {
             if (profile == "minsizerel")
                 return "MinSizeRel";
             return profile;
+        }
+
+        bool uses_multiple_configurations(const std::optional<std::string>& requested) {
+            const std::optional<std::string> environment = environment_variable("CMAKE_GENERATOR");
+            std::string_view generator;
+            if (requested) {
+                generator = *requested;
+            } else if (environment) {
+                generator = *environment;
+            }
+
+            if (!generator.empty()) {
+                return generator.contains("Visual Studio")
+                    || generator.contains("Xcode")
+                    || generator.contains("Multi-Config");
+            }
+
+#ifdef _WIN32
+            return true;
+#else
+            return false;
+#endif
         }
 
         class ResolverImpl final : public Resolver {
@@ -78,9 +102,10 @@ namespace kaixa::plugin::cmake {
                 configure.argv = {
                     "cmake",
                     "-S", source.string(),
-                    "-B", output.string(),
-                    "-DCMAKE_BUILD_TYPE=" + configuration
+                    "-B", output.string()
                 };
+                if (!uses_multiple_configurations(generator))
+                    configure.argv.push_back("-DCMAKE_BUILD_TYPE=" + configuration);
                 if (generator) {
                     configure.argv.push_back("-G");
                     configure.argv.push_back(*generator);

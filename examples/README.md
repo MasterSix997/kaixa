@@ -1,3 +1,4 @@
 # Examples
 
-Executable or workspace examples will be added here as the public configuration and plugin APIs stabilize.
+- [`hello_cmake`](hello_cmake/) is one managed package backed by an existing CMake project.
+- [`local_workspace`](local_workspace/) has a managed local dependency and an opaque asset folder.

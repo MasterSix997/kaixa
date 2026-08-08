@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <system_error>
@@ -97,6 +98,24 @@ namespace kaixa {
             command += quote(argument);
         }
         return command;
+    }
+
+    std::optional<std::string> environment_variable(const std::string_view name) {
+#ifdef _WIN32
+        char* value = nullptr;
+        std::size_t size = 0;
+        const std::string owned_name(name);
+        if (_dupenv_s(&value, &size, owned_name.c_str()) != 0 || !value)
+            return std::nullopt;
+
+        std::string result(value);
+        std::free(value);
+        return result;
+#else
+        const std::string owned_name(name);
+        const char* value = std::getenv(owned_name.c_str());
+        return value ? std::optional<std::string>(value) : std::nullopt;
+#endif
     }
 
     Result<ProcessResult> run_process(const ProcessRequest& request) {

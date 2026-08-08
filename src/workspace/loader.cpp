@@ -12,12 +12,24 @@ namespace kaixa {
             const SourceLocation& location = {}
         ) {
             std::error_code failure;
-            if (!std::filesystem::is_directory(path, failure)) {
-                const std::string reason = failure
-                    ? failure.message()
-                    : "directory does not exist";
-                return std::unexpected(error_at(location, reason + ": " + path.string()));
-            }
+            const bool exists = std::filesystem::exists(path, failure);
+            if (failure)
+                return std::unexpected(error_at(
+                    location,
+                    "cannot inspect path `" + path.string() + "`: " + failure.message()
+                ));
+            if (!exists)
+                return std::unexpected(error_at(
+                    location,
+                    "directory does not exist: " + path.string()
+                ));
+            if (!std::filesystem::is_directory(path, failure))
+                return std::unexpected(error_at(
+                    location,
+                    failure
+                        ? "cannot inspect path `" + path.string() + "`: " + failure.message()
+                        : "path is not a directory: " + path.string()
+                ));
 
             std::filesystem::path canonical = std::filesystem::canonical(path, failure);
             if (failure)
