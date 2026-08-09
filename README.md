@@ -1,8 +1,6 @@
 # Kaixa
 
-The MVP loads local package graphs from `Kaixa.toml` and builds managed packages through their
-existing CMake projects. Dependencies are local paths; downloads and registries are intentionally
-out of scope.
+Kaixa loads local package graphs from `Kaixa.toml` and builds managed packages through their existing CMake projects. Dependencies are currently local paths; downloads and registries are not implemented yet.
 
 ```toml
 [package]

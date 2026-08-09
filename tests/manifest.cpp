@@ -9,7 +9,7 @@
 
 using kaixa::testing::TempDirectory;
 
-KAIXA_TEST(manifest_reads_the_mvp_schema) {
+KAIXA_TEST(manifest_reads_the_current_schema) {
     const auto manifest = kaixa::parse_manifest_string(
         "[package]\n"
         "name = \"app\"\n"

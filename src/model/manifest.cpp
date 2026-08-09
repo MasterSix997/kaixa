@@ -36,7 +36,7 @@ namespace kaixa {
             auto table_result = TableReader::bind(entry.value, path);
             if (!table_result) {
                 return std::unexpected(std::move(table_result).error().add_note(
-                    "the MVP accepts local dependencies as `{ path = \"...\" }`"
+                    "local dependencies must use `{ path = \"...\" }`"
                 ));
             }
             TableReader table = std::move(*table_result);

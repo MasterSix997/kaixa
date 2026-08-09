@@ -64,7 +64,7 @@ target_link_libraries(kaixa_test_support PUBLIC kaixa_core)
 add_executable(kaixa_tests
     tests/support/test_main.cpp
     tests/smoke.cpp
-    tests/mvp.cpp
+    tests/manifest.cpp
     tests/configurations.cpp
     tests/workspace_fixtures.cpp
     tests/workspace_errors.cpp

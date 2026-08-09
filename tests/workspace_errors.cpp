@@ -49,7 +49,7 @@ KAIXA_TEST(manifest_requires_a_resolver_and_local_dependency_table) {
         context.check_contains(
             kaixa::format_diagnostic(shorthand.error()),
             "local dependencies",
-            "diagnostic explains the MVP syntax"
+            "diagnostic explains the local dependency syntax"
         );
     }
 }
