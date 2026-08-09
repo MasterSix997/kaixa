@@ -135,3 +135,12 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## License
+
+Kaixa is available under the Apache License 2.0 or the MIT License, at your option.
+See [LICENSE-APACHE](LICENSE-APACHE) and [LICENSE-MIT](LICENSE-MIT).
+Third-party components remain under their respective licenses.
+
+Contributions intentionally submitted for inclusion in Kaixa are dual-licensed under the same terms,
+unless explicitly stated otherwise and without additional conditions.
