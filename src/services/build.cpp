@@ -27,7 +27,7 @@ namespace kaixa {
                 ));
             }
 
-            auto planned = resolver->plan(package, environment, plan);
+            auto planned = resolver->plan(graph, package, environment, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }

@@ -130,7 +130,11 @@ KAIXA_TEST(cmake_options_select_the_source_and_generator) {
     }
 
     const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
-    const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "release"};
+    const kaixa::BuildEnvironment environment{
+        root.path(),
+        root.path() / "out",
+        "release"
+    };
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake package plans");
     if (!plan || plan->actions().empty())
@@ -150,4 +154,38 @@ KAIXA_TEST(cmake_options_select_the_source_and_generator) {
         std::ranges::find(command, (root.path() / "project").string()) != command.end(),
         "configured source directory is forwarded"
     );
+}
+
+KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
+    const TempDirectory root("cmake-dependency-mode");
+    root.write(
+        "Kaixa.toml",
+        "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
+        "\n[dependencies]\nmath = { path = \"math\" }\n"
+        "\n[cmake.dependencies]\nmath = \"magic\"\n"
+    );
+    root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+    root.write(
+        "math/Kaixa.toml",
+        "[package]\nname = \"math\"\nresolver = \"cmake\"\n"
+    );
+    root.write("math/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+
+    const auto graph = kaixa::load_workspace(root.path());
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(!plan.has_value(), "unknown mode is rejected");
+    if (!plan) {
+        context.check_contains(
+            kaixa::format_diagnostic(plan.error()),
+            "expected `add-subdirectory` or `find-package`",
+            "diagnostic lists supported modes"
+        );
+    }
 }

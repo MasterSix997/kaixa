@@ -1,0 +1,7 @@
+[package]
+name = "test_source_app"
+resolver = "cmake"
+
+[dependencies]
+test_source_math = { path = "packages/math" }
+assets = { path = "assets" }

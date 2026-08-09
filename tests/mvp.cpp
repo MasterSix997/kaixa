@@ -92,7 +92,13 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "CMake resolver creates a plan");
     if (plan)
-        context.check_equal(plan->actions().size(), std::size_t{4}, "configure and build actions");
+        context.check_equal(
+            plan->actions().size(),
+            std::size_t{2},
+            "one composed configure and build"
+        );
+    if (plan)
+        context.check_equal(plan->generated_files().size(), std::size_t{1}, "integration file");
 }
 
 KAIXA_TEST(graph_rejects_dependency_cycles) {

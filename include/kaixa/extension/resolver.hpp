@@ -3,7 +3,7 @@
 #include <kaixa/build/layout.hpp>
 #include <kaixa/build/plan.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
-#include <kaixa/model/package.hpp>
+#include <kaixa/model/graph.hpp>
 
 #include <string>
 
@@ -19,6 +19,7 @@ namespace kaixa {
 
         [[nodiscard]] virtual ResolverInfo info() const = 0;
         [[nodiscard]] virtual Result<void> plan(
+            const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment,
             BuildPlan& plan

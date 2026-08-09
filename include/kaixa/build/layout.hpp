@@ -6,7 +6,7 @@
 namespace kaixa {
     struct BuildEnvironment {
         std::filesystem::path workspace;
-        std::filesystem::path output;
+        std::filesystem::path state_root;
         std::string profile = "debug";
     };
 }

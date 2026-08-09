@@ -1,0 +1,10 @@
+[package]
+name = "package_app"
+version = "0.1.0"
+resolver = "cmake"
+
+[dependencies]
+package_math = { path = "packages/math" }
+
+[cmake.dependencies]
+package_math = "find-package"

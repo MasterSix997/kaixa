@@ -1,7 +1,7 @@
 # Hello CMake
 
 A minimal managed package. Kaixa reads `Kaixa.toml`, delegates planning to the CMake resolver and
-places the external build under `.kaixa/build/hello_cmake`.
+places the external build under `.kaixa/build/cmake/hello_cmake`.
 
 ```sh
 kaixa inspect .

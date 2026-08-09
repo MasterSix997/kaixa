@@ -52,7 +52,7 @@ namespace {
         const std::filesystem::path workspace = (*graph)[graph->root()].directory;
         const kaixa::BuildEnvironment environment{
             workspace,
-            workspace / ".kaixa" / "build",
+            workspace / ".kaixa",
             std::move(profile)
         };
         const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();

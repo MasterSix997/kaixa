@@ -14,6 +14,18 @@ resolver = "cmake"
 math = { path = "libs/math" }
 ```
 
+CMake dependencies are composed from source with `add_subdirectory` by default. A consumer that
+uses a dependency as an exported CMake package can opt into the isolated `install` + `find_package`
+flow:
+
+```toml
+[cmake.dependencies]
+math = "find-package"
+```
+
+Kaixa keeps resolver-owned build files and package artifacts under `.kaixa/`; these paths are not
+part of the core resolver contract.
+
 ```sh
 kaixa inspect .
 kaixa build .
