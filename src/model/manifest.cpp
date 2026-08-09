@@ -123,6 +123,11 @@ namespace kaixa {
             dependencies.take_all();
         }
 
+        auto configurations = read_configuration_set(root);
+        if (!configurations)
+            return std::unexpected(configurations.error());
+        manifest.configurations = std::move(*configurations);
+
         if (const Value* options = root.take(manifest.resolver)) {
             if (!options->is_table()) {
                 return std::unexpected(error_at(

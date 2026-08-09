@@ -3,6 +3,12 @@ name = "generated_hello"
 version = "0.1.0"
 resolver = "cmake"
 
+[build]
+default-configs = ["dev"]
+
+[build.configs.dev]
+profile = "debug"
+
 [cmake]
 languages = ["CXX"]
 

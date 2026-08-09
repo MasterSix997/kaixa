@@ -53,16 +53,53 @@ Supported target types are `executable`, `static-library`, `shared-library` and 
 Kaixa updates only a `CMakeLists.txt` carrying its generated-file marker;
 it refuses to overwrite a manually maintained file.
 
-Generator, compilers, toolchain and other machine-specific settings are build inputs.
-Pass native CMake configure arguments after `--`:
+## Build configurations
 
-```sh
-kaixa build . -- -G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_TOOLCHAIN_FILE=cmake/toolchain.cmake -DBUILD_TESTING=OFF
+Named configurations are composable fragments. Published configurations live in the root
+`Kaixa.toml`; configurations from dependencies do not control the consuming build:
+
+```toml
+[build]
+default-configs = ["dev"]
+
+[build.configs.dev]
+profile = "debug"
+
+[build.configs.dev.resolvers.cmake]
+arguments = ["-DBUILD_TESTING=ON"]
 ```
 
-These arguments apply to every CMake build unit in the requested workspace.
-Generator, compiler and toolchain are cached by CMake; after changing them, remove the corresponding package directory
-under `.kaixa/build/cmake/` before rebuilding.
+Machine-specific configurations can live in the user's config file
+or in the ignored `Kaixa.user.toml` beside the root manifest:
+
+```toml
+[build]
+default-configs = ["clang"]
+
+[build.configs.clang.resolvers.cmake]
+generator = "Ninja"
+c-compiler = "clang"
+cxx-compiler = "clang++"
+toolchain = "C:/Toolchains/clang.cmake"
+```
+
+The user config is `%APPDATA%/Kaixa/config.toml` on Windows 
+and `$XDG_CONFIG_HOME/kaixa/config.toml` (falling back to `~/.config/kaixa/config.toml`) elsewhere.
+
+```sh
+kaixa build . --config editor --config clang
+```
+
+Raw resolver arguments are an explicit, temporary override. A block ends at the next `--for`:
+
+```sh
+kaixa build . --for cmake -G Ninja -DBUILD_TESTING=OFF --for lua --trace
+```
+
+Arguments are delivered only to the named resolver. Build options such as `--profile` and
+`--config` must appear before the first `--for` block.
+The effective profile and resolver settings form part of the CMake build-directory identity,
+so configurations using different generators or compilers do not share a `CMakeCache.txt`.
 
 ```sh
 kaixa inspect .

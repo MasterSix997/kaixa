@@ -5,6 +5,8 @@
 #include "configuration.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -18,6 +20,7 @@ namespace kaixa::plugin::cmake {
         using detail::DependencyMode;
         using detail::Options;
         using detail::dependency_mode;
+        using detail::read_build_options;
         using detail::read_options;
 
         std::string configuration_name(const std::string& profile) {
@@ -71,15 +74,61 @@ namespace kaixa::plugin::cmake {
 #endif
         }
 
-        std::filesystem::path cmake_build_root(const BuildEnvironment& environment) {
-            return environment.state_root / "build" / "cmake";
+        std::string build_variant(
+            const BuildEnvironment& environment,
+            const detail::BuildOptions& options,
+            const std::vector<std::string>& arguments
+        ) {
+            std::uint64_t hash = 14695981039346656037ull;
+            const auto absorb = [&](const std::string_view value) {
+                for (const char character: value) {
+                    const auto byte = static_cast<unsigned char>(character);
+                    hash ^= byte;
+                    hash *= 1099511628211ull;
+                }
+                hash ^= 0xffu;
+                hash *= 1099511628211ull;
+            };
+
+            absorb(environment.configuration.profile);
+            if (options.generator)
+                absorb(*options.generator);
+            if (options.c_compiler)
+                absorb(*options.c_compiler);
+            if (options.cxx_compiler)
+                absorb(*options.cxx_compiler);
+            if (options.toolchain)
+                absorb(options.toolchain->generic_string());
+            for (const std::string& argument: arguments)
+                absorb(argument);
+
+            char encoded[16];
+            const auto converted = std::to_chars(encoded, encoded + sizeof(encoded), hash, 16);
+            std::string profile = environment.configuration.profile;
+            for (char& character: profile) {
+                const bool valid = (character >= 'a' && character <= 'z')
+                    || (character >= 'A' && character <= 'Z')
+                    || (character >= '0' && character <= '9')
+                    || character == '-' || character == '_';
+                if (!valid)
+                    character = '_';
+            }
+            return profile + '-' + std::string(encoded, converted.ptr);
+        }
+
+        std::filesystem::path cmake_build_root(
+            const BuildEnvironment& environment,
+            const std::string_view variant
+        ) {
+            return environment.state_root / "build" / "cmake" / variant;
         }
 
         std::filesystem::path artifact_directory(
             const BuildEnvironment& environment,
-            const PackageNode& package
+            const PackageNode& package,
+            const std::string_view variant
         ) {
-            return environment.state_root / "artifacts" / "cmake" / package.name;
+            return environment.state_root / "artifacts" / "cmake" / variant / package.name;
         }
 
         Result<bool> requires_install(
@@ -141,6 +190,7 @@ namespace kaixa::plugin::cmake {
             const Graph& graph,
             const PackageId id,
             const BuildEnvironment& environment,
+            const std::string_view variant,
             std::vector<bool>& visited,
             std::vector<bool>& added,
             std::vector<std::filesystem::path>& prefixes
@@ -162,13 +212,14 @@ namespace kaixa::plugin::cmake {
                 if (dependency_mode(*options, dependency) == DependencyMode::find_package
                     && !added[dependency.index]) {
                     added[dependency.index] = true;
-                    prefixes.push_back(artifact_directory(environment, target));
+                    prefixes.push_back(artifact_directory(environment, target, variant));
                 }
 
                 auto collected = collect_package_prefixes(
                     graph,
                     dependency,
                     environment,
+                    variant,
                     visited,
                     added,
                     prefixes
@@ -266,8 +317,32 @@ namespace kaixa::plugin::cmake {
                 auto root_options = read_options(graph, package);
                 if (!root_options)
                     return std::unexpected(root_options.error());
-                const std::optional<std::string> generator = requested_generator(
-                    environment.resolver_arguments
+
+                const ResolverBuildConfiguration* resolver_configuration =
+                    environment.configuration.find("cmake");
+                auto build_options = read_build_options(
+                    resolver_configuration && resolver_configuration->settings
+                        ? &*resolver_configuration->settings
+                        : nullptr
+                );
+                if (!build_options)
+                    return std::unexpected(build_options.error());
+
+                std::vector<std::string> resolver_arguments = build_options->arguments;
+                if (resolver_configuration) {
+                    resolver_arguments.insert(
+                        resolver_arguments.end(),
+                        resolver_configuration->arguments.begin(),
+                        resolver_configuration->arguments.end()
+                    );
+                }
+                std::optional<std::string> generator = requested_generator(resolver_arguments);
+                if (!generator)
+                    generator = build_options->generator;
+                const std::string variant = build_variant(
+                    environment,
+                    *build_options,
+                    resolver_arguments
                 );
 
                 std::vector<bool> source_visited(graph.size(), false);
@@ -288,10 +363,10 @@ namespace kaixa::plugin::cmake {
                 }
 
                 const std::filesystem::path build_directory =
-                    cmake_build_root(environment) / package.name;
+                    cmake_build_root(environment, variant) / package.name;
                 const std::filesystem::path integration_file =
                     environment.state_root / "generated" / "cmake"
-                    / package.name / "dependencies.cmake";
+                    / variant / package.name / "dependencies.cmake";
 
                 std::string integration =
                     "# Generated by Kaixa.\n"
@@ -322,6 +397,7 @@ namespace kaixa::plugin::cmake {
                     graph,
                     package.id,
                     environment,
+                    variant,
                     prefix_visited,
                     prefix_added,
                     prefixes
@@ -329,7 +405,9 @@ namespace kaixa::plugin::cmake {
                 if (!prefix_result)
                     return std::unexpected(prefix_result.error());
 
-                const std::string configuration = configuration_name(environment.profile);
+                const std::string configuration = configuration_name(
+                    environment.configuration.profile
+                );
                 Action configure;
                 configure.description = "configure " + package.name;
                 configure.argv = {
@@ -339,7 +417,8 @@ namespace kaixa::plugin::cmake {
                 };
                 if (*install) {
                     configure.argv.push_back(
-                        "-DCMAKE_INSTALL_PREFIX=" + artifact_directory(environment, package).string()
+                        "-DCMAKE_INSTALL_PREFIX="
+                            + artifact_directory(environment, package, variant).string()
                     );
                 }
                 configure.argv.push_back(
@@ -349,10 +428,32 @@ namespace kaixa::plugin::cmake {
                 configure.argv.push_back("-DKAIXA_CMAKE_PREFIX_PATH=" + join_prefixes(prefixes));
                 if (!uses_multiple_configurations(generator))
                     configure.argv.push_back("-DCMAKE_BUILD_TYPE=" + configuration);
+                if (build_options->generator && !requested_generator(resolver_arguments)) {
+                    configure.argv.push_back("-G");
+                    configure.argv.push_back(*build_options->generator);
+                }
+                if (build_options->c_compiler)
+                    configure.argv.push_back("-DCMAKE_C_COMPILER=" + *build_options->c_compiler);
+                if (build_options->cxx_compiler) {
+                    configure.argv.push_back(
+                        "-DCMAKE_CXX_COMPILER=" + *build_options->cxx_compiler
+                    );
+                }
+                if (build_options->toolchain) {
+                    if (!std::filesystem::is_regular_file(*build_options->toolchain)) {
+                        return std::unexpected(error(
+                            "CMake toolchain file does not exist: "
+                                + build_options->toolchain->string()
+                        ));
+                    }
+                    configure.argv.push_back(
+                        "-DCMAKE_TOOLCHAIN_FILE=" + build_options->toolchain->string()
+                    );
+                }
                 configure.argv.insert(
                     configure.argv.end(),
-                    environment.resolver_arguments.begin(),
-                    environment.resolver_arguments.end()
+                    resolver_arguments.begin(),
+                    resolver_arguments.end()
                 );
                 configure.working_directory = package.directory;
                 configure.inputs.push_back(root_options->source / "CMakeLists.txt");
@@ -372,7 +473,11 @@ namespace kaixa::plugin::cmake {
                 plan.add(std::move(build));
 
                 if (*install) {
-                    const std::filesystem::path destination = artifact_directory(environment, package);
+                    const std::filesystem::path destination = artifact_directory(
+                        environment,
+                        package,
+                        variant
+                    );
                     Action install_action;
                     install_action.description = "install " + package.name;
                     install_action.argv = {

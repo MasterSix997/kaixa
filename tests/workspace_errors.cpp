@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <vector>
@@ -130,11 +131,13 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
     }
 
     const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    kaixa::EffectiveBuildConfiguration configuration;
+    configuration.profile = "release";
+    configuration.resolvers.push_back({"cmake", std::nullopt, {"-G", "Ninja"}});
     const kaixa::BuildEnvironment environment{
         root.path(),
         root.path() / "out",
-        "release",
-        {"-G", "Ninja"}
+        std::move(configuration)
     };
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake package plans");
@@ -207,10 +210,11 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     }
 
     const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
-    const kaixa::BuildEnvironment environment{
-        root.path(),
-        root.path() / "out",
-        "debug",
+    kaixa::EffectiveBuildConfiguration configuration;
+    configuration.profile = "debug";
+    configuration.resolvers.push_back({
+        "cmake",
+        std::nullopt,
         {
             "-G", "Ninja",
             "-DCMAKE_C_COMPILER=clang",
@@ -219,6 +223,11 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
             "-DBUILD_TESTING=OFF",
             "--fresh"
         }
+    });
+    const kaixa::BuildEnvironment environment{
+        root.path(),
+        root.path() / "out",
+        std::move(configuration)
     };
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "CMake configure options plan");

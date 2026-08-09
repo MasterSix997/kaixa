@@ -132,11 +132,15 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
         "consumer configures after provider"
     );
 
-    const std::string expected_prefix = "-DKAIXA_CMAKE_PREFIX_PATH="
-        + (environment.state_root / "artifacts" / "cmake" / "test_package_math").string();
+    const std::string artifact_root =
+        (environment.state_root / "artifacts" / "cmake").string();
     const std::vector<std::string> configure = plan->actions()[3].argv;
     context.check(
-        std::ranges::find(configure, expected_prefix) != configure.end(),
+        std::ranges::find_if(configure, [&](const std::string& argument) {
+            return argument.starts_with("-DKAIXA_CMAKE_PREFIX_PATH=")
+                && argument.contains(artifact_root)
+                && argument.ends_with("test_package_math");
+        }) != configure.end(),
         "consumer receives the package prefix"
     );
 }

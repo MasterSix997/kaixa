@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kaixa/config/value.hpp>
+#include <kaixa/config/build_configuration.hpp>
 #include <kaixa/model/version.hpp>
 
 #include <filesystem>
@@ -21,6 +22,7 @@ namespace kaixa {
         std::optional<Version> version;
         std::string resolver;
         std::vector<DependencySpec> dependencies;
+        ConfigurationSet configurations;
         std::optional<Value> resolver_options;
         std::filesystem::path source;
         SourceLocation location;

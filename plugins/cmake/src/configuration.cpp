@@ -274,6 +274,53 @@ namespace kaixa::plugin::cmake::detail {
         return result;
     }
 
+    Result<BuildOptions> read_build_options(const Value* settings) {
+        BuildOptions result;
+        if (!settings)
+            return result;
+
+        auto options_result = TableReader::bind(*settings);
+        if (!options_result)
+            return std::unexpected(options_result.error());
+        TableReader options = std::move(*options_result);
+
+        auto generator = options.optional_string("generator");
+        if (!generator)
+            return std::unexpected(generator.error());
+        result.generator = std::move(*generator);
+
+        auto c_compiler = options.optional_string("c-compiler");
+        if (!c_compiler)
+            return std::unexpected(c_compiler.error());
+        result.c_compiler = std::move(*c_compiler);
+
+        auto cxx_compiler = options.optional_string("cxx-compiler");
+        if (!cxx_compiler)
+            return std::unexpected(cxx_compiler.error());
+        result.cxx_compiler = std::move(*cxx_compiler);
+
+        const SourceLocation toolchain_location = options.location_of("toolchain");
+        auto toolchain = options.optional_string("toolchain");
+        if (!toolchain)
+            return std::unexpected(toolchain.error());
+        if (*toolchain) {
+            std::filesystem::path path = **toolchain;
+            if (path.is_relative() && !toolchain_location.source.empty())
+                path = std::filesystem::path(toolchain_location.source).parent_path() / path;
+            result.toolchain = std::move(path);
+        }
+
+        auto arguments = string_array(options, "arguments");
+        if (!arguments)
+            return std::unexpected(arguments.error());
+        result.arguments = std::move(*arguments);
+
+        auto finished = options.finish();
+        if (!finished)
+            return std::unexpected(finished.error());
+        return result;
+    }
+
     DependencyMode dependency_mode(const Options& options, const PackageId dependency) {
         const auto selected = std::ranges::find_if(
             options.dependencies,

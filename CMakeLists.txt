@@ -27,6 +27,7 @@ add_library(kaixa_core STATIC
     src/config/value.cpp
     src/config/parser.cpp
     src/config/table_reader.cpp
+    src/config/build_configuration.cpp
     src/model/manifest.cpp
     src/model/graph.cpp
     src/workspace/loader.cpp
@@ -62,6 +63,7 @@ add_executable(kaixa_tests
     tests/support/test_main.cpp
     tests/smoke.cpp
     tests/mvp.cpp
+    tests/configurations.cpp
     tests/workspace_fixtures.cpp
     tests/workspace_errors.cpp
 )
