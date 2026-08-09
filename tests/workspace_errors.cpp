@@ -225,7 +225,7 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     if (!plan || plan->actions().empty())
         return;
 
-    const std::vector<std::string>& command = plan->actions().front().argv;
+    const std::vector<std::string> command = plan->actions().front().argv;
     for (const std::string& expected: {
              std::string("Ninja"),
              std::string("-DCMAKE_C_COMPILER=clang"),

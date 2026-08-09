@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 namespace {
     const std::filesystem::path workspaces_directory =
@@ -90,7 +91,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
                 "add_subdirectory",
                 "source dependency is composed"
             );
-            const auto& configure = plan->actions()[0].argv;
+            const std::vector<std::string> configure = plan->actions()[0].argv;
             context.check(
                 std::ranges::find_if(configure, [](const std::string& argument) {
                     return argument.starts_with("-DCMAKE_PROJECT_INCLUDE=");
@@ -133,7 +134,7 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
 
     const std::string expected_prefix = "-DKAIXA_CMAKE_PREFIX_PATH="
         + (environment.state_root / "artifacts" / "cmake" / "test_package_math").string();
-    const auto& configure = plan->actions()[3].argv;
+    const std::vector<std::string> configure = plan->actions()[3].argv;
     context.check(
         std::ranges::find(configure, expected_prefix) != configure.end(),
         "consumer receives the package prefix"
