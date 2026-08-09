@@ -4,8 +4,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <concepts>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -28,6 +30,20 @@ namespace kaixa {
     class Value {
     public:
         Value() noexcept;
+        Value(bool value);
+        Value(std::int64_t value);
+        Value(double value);
+        Value(const char* value);
+        Value(std::string value);
+        Value(std::string_view value);
+
+        template<typename Integer>
+            requires std::integral<Integer>
+                && (!std::same_as<std::remove_cv_t<Integer>, bool>)
+                && (!std::same_as<std::remove_cv_t<Integer>, std::int64_t>)
+        Value(const Integer value) : Value(static_cast<std::int64_t>(value)) {
+        }
+
         ~Value();
         Value(const Value& other);
         Value(Value&& other) noexcept;

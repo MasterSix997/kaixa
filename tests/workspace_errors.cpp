@@ -56,10 +56,7 @@ KAIXA_TEST(manifest_requires_a_resolver_and_local_dependency_table) {
 
 KAIXA_TEST(find_manifest_walks_from_a_nested_file) {
     const TempDirectory root("manifest-search");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"root\"\nresolver = \"cmake\"\n"
-    );
+    root.write_manifest("Kaixa.toml", kaixa::Manifest{"root", "cmake"});
     root.write("nested/deeper/file.txt", "content\n");
 
     const auto manifest = kaixa::find_manifest(root.path() / "nested" / "deeper" / "file.txt");
@@ -75,15 +72,10 @@ KAIXA_TEST(find_manifest_walks_from_a_nested_file) {
 
 KAIXA_TEST(workspace_rejects_a_dependency_with_the_wrong_package_name) {
     const TempDirectory root("name-mismatch");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
-        "\n[dependencies]\nmath = { path = \"math\" }\n"
-    );
-    root.write(
-        "math/Kaixa.toml",
-        "[package]\nname = \"not_math\"\nresolver = \"cmake\"\n"
-    );
+    kaixa::Manifest app{"app", "cmake"};
+    app.dependencies.emplace_back("math", "math");
+    root.write_manifest("Kaixa.toml", app);
+    root.write_manifest("math/Kaixa.toml", kaixa::Manifest{"not_math", "cmake"});
 
     const auto graph = kaixa::load_workspace(root.path());
     context.check(!graph.has_value(), "mismatched package name is rejected");
@@ -98,11 +90,9 @@ KAIXA_TEST(workspace_rejects_a_dependency_with_the_wrong_package_name) {
 
 KAIXA_TEST(workspace_rejects_a_missing_local_dependency) {
     const TempDirectory root("missing-dependency");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
-        "\n[dependencies]\nmissing = { path = \"does-not-exist\" }\n"
-    );
+    kaixa::Manifest app{"app", "cmake"};
+    app.dependencies.emplace_back("missing", "does-not-exist");
+    root.write_manifest("Kaixa.toml", app);
 
     const auto graph = kaixa::load_workspace(root.path());
     context.check(!graph.has_value(), "missing dependency is rejected");
@@ -117,11 +107,9 @@ KAIXA_TEST(workspace_rejects_a_missing_local_dependency) {
 
 KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_generator) {
     const TempDirectory root("cmake-options");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"configured\"\nresolver = \"cmake\"\n"
-        "\n[cmake]\nsource = \"project\"\n"
-    );
+    kaixa::Manifest manifest{"configured", "cmake"};
+    manifest.resolver_options = kaixa::Value::table({{"source", "project"}});
+    root.write_manifest("Kaixa.toml", manifest);
     root.write("project/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 
     const auto graph = kaixa::load_workspace(root.path());
@@ -162,17 +150,14 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
 
 KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
     const TempDirectory root("cmake-dependency-mode");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
-        "\n[dependencies]\nmath = { path = \"math\" }\n"
-        "\n[cmake.dependencies]\nmath = \"magic\"\n"
-    );
+    kaixa::Manifest app{"app", "cmake"};
+    app.dependencies.emplace_back("math", "math");
+    app.resolver_options = kaixa::Value::table({
+        {"dependencies", kaixa::Value::table({{"math", "magic"}})}
+    });
+    root.write_manifest("Kaixa.toml", app);
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
-    root.write(
-        "math/Kaixa.toml",
-        "[package]\nname = \"math\"\nresolver = \"cmake\"\n"
-    );
+    root.write_manifest("math/Kaixa.toml", kaixa::Manifest{"math", "cmake"});
     root.write("math/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 
     const auto graph = kaixa::load_workspace(root.path());
@@ -196,10 +181,7 @@ KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
 
 KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     const TempDirectory root("cmake-configure-options");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"configured\"\nresolver = \"cmake\"\n"
-    );
+    root.write_manifest("Kaixa.toml", kaixa::Manifest{"configured", "cmake"});
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
     root.write("toolchain.cmake", "# test fixture\n");
 
@@ -252,11 +234,9 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
 
 KAIXA_TEST(cmake_rejects_machine_configuration_in_the_package) {
     const TempDirectory root("cmake-package-machine-config");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"portable\"\nresolver = \"cmake\"\n"
-        "\n[cmake]\ngenerator = \"Ninja\"\n"
-    );
+    kaixa::Manifest manifest{"portable", "cmake"};
+    manifest.resolver_options = kaixa::Value::table({{"generator", "Ninja"}});
+    root.write_manifest("Kaixa.toml", manifest);
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 
     const auto graph = kaixa::load_workspace(root.path());

@@ -23,6 +23,24 @@ namespace kaixa {
     }
 
     Value::Value() noexcept = default;
+    Value::Value(const bool value) : Value(Storage{value}, {}) {
+    }
+
+    Value::Value(const std::int64_t value) : Value(Storage{value}, {}) {
+    }
+
+    Value::Value(const double value) : Value(Storage{value}, {}) {
+    }
+
+    Value::Value(const char* value) : Value(std::string(value)) {
+    }
+
+    Value::Value(std::string value) : Value(Storage{std::move(value)}, {}) {
+    }
+
+    Value::Value(const std::string_view value) : Value(std::string(value)) {
+    }
+
     Value::~Value() = default;
     Value::Value(const Value& other) = default;
     Value::Value(Value&& other) noexcept = default;

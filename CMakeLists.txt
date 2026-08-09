@@ -29,6 +29,7 @@ add_library(kaixa_core STATIC
     src/config/table_reader.cpp
     src/config/build_configuration.cpp
     src/model/manifest.cpp
+    src/model/manifest_writer.cpp
     src/model/graph.cpp
     src/workspace/loader.cpp
     src/build/executor.cpp
@@ -58,6 +59,7 @@ add_library(kaixa_test_support STATIC
     tests/support/test_support.cpp
 )
 target_include_directories(kaixa_test_support PUBLIC tests/support)
+target_link_libraries(kaixa_test_support PUBLIC kaixa_core)
 
 add_executable(kaixa_tests
     tests/support/test_main.cpp

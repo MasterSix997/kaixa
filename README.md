@@ -53,6 +53,29 @@ Supported target types are `executable`, `static-library`, `shared-library` and 
 Kaixa updates only a `CMakeLists.txt` carrying its generated-file marker;
 it refuses to overwrite a manually maintained file.
 
+## Programmatic manifests
+
+`Manifest` is also the in-memory authoring model used by tools.
+`format_manifest` returns TOML without touching the filesystem, while `write_manifest_file` writes the same representation accepted by the parser.
+
+```cpp
+kaixa::Manifest manifest{"game", "cmake"};
+manifest.version = kaixa::Version{"0.1.0"};
+manifest.dependencies.emplace_back("math", "packages/math");
+manifest.resolver_options = kaixa::Value::table({
+    {"source", "project"},
+    {"target", kaixa::Value::table({
+        {"type", "executable"},
+        {"sources", kaixa::Value::array({"src/main.cpp"})},
+        {"cxx-standard", 23}
+    })}
+});
+
+auto written = kaixa::write_manifest_file("Kaixa.toml", manifest);
+```
+
+Resolver-specific typed helpers can encode their options into `Value`;
+
 ## Build configurations
 
 Named configurations are composable fragments. Published configurations live in the root

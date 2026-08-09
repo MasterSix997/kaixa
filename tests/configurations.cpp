@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 using kaixa::testing::TempDirectory;
@@ -78,14 +79,20 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
 
 KAIXA_TEST(cmake_consumes_a_named_configuration) {
     const TempDirectory root("cmake-named-configuration");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"configured\"\nresolver = \"cmake\"\n"
-        "\n[build]\ndefault-configs = [\"clang\"]\n"
-        "\n[build.configs.clang.resolvers.cmake]\n"
-        "generator = \"Ninja\"\ncxx-compiler = \"clang++\"\n"
-        "arguments = [\"-DBUILD_TESTING=OFF\"]\n"
-    );
+    kaixa::Manifest manifest{"configured", "cmake"};
+    manifest.configurations.defaults.push_back("clang");
+    kaixa::ConfigurationDefinition clang;
+    clang.name = "clang";
+    clang.resolvers.push_back({
+        "cmake",
+        kaixa::Value::table({
+            {"generator", "Ninja"},
+            {"cxx-compiler", "clang++"},
+            {"arguments", kaixa::Value::array({"-DBUILD_TESTING=OFF"})}
+        })
+    });
+    manifest.configurations.definitions.push_back(std::move(clang));
+    root.write_manifest("Kaixa.toml", manifest);
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 
     const auto graph = kaixa::load_workspace(root.path());

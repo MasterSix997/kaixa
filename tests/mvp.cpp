@@ -5,6 +5,7 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
 
 using kaixa::testing::TempDirectory;
 
@@ -54,17 +55,81 @@ KAIXA_TEST(manifest_rejects_unknown_keys) {
     }
 }
 
+KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
+    kaixa::Manifest authored{"app", "cmake"};
+    authored.version = kaixa::Version{"0.1.0"};
+    authored.dependencies.emplace_back("math", "../math");
+    authored.configurations.defaults.push_back("dev");
+
+    kaixa::ConfigurationDefinition dev;
+    dev.name = "dev";
+    dev.profile = "debug";
+    dev.resolvers.push_back({
+        "cmake",
+        kaixa::Value::table({
+            {"generator", "Ninja"},
+            {"arguments", kaixa::Value::array({"-DDEV=ON"})}
+        })
+    });
+    authored.configurations.definitions.push_back(std::move(dev));
+    authored.resolver_options = kaixa::Value::table({
+        {"source", "project"},
+        {"target", kaixa::Value::table({
+            {"type", "executable"},
+            {"sources", kaixa::Value::array({"src/main.cpp"})},
+            {"cxx-standard", 23}
+        })}
+    });
+
+    const auto text = kaixa::format_manifest(authored);
+    context.check(text.has_value(), "programmatic manifest formats");
+    if (!text) {
+        context.fail(kaixa::format_diagnostic(text.error()));
+        return;
+    }
+
+    const auto parsed = kaixa::parse_manifest_string(*text, "generated-manifest");
+    context.check(parsed.has_value(), "formatted manifest parses");
+    if (!parsed) {
+        context.fail(kaixa::format_diagnostic(parsed.error()));
+        return;
+    }
+    context.check_equal(parsed->name, authored.name, "package name round-trips");
+    context.check_equal(
+        parsed->dependencies.front().name,
+        std::string("math"),
+        "dependency round-trips"
+    );
+    context.check_equal(
+        parsed->configurations.defaults.front(),
+        std::string("dev"),
+        "configuration round-trips"
+    );
+    context.check(parsed->resolver_options.has_value(), "resolver options round-trip");
+}
+
+KAIXA_TEST(programmatic_manifest_rejects_invalid_data) {
+    kaixa::Manifest manifest{"app", "cmake"};
+    manifest.dependencies.emplace_back("math", "first");
+    manifest.dependencies.emplace_back("math", "second");
+
+    const auto text = kaixa::format_manifest(manifest);
+    context.check(!text.has_value(), "invalid programmatic manifest is rejected");
+    if (!text) {
+        context.check_contains(
+            kaixa::format_diagnostic(text.error()),
+            "duplicate dependency `math`",
+            "diagnostic explains invalid model"
+        );
+    }
+}
+
 KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
     const TempDirectory root("workspace");
-    root.write(
-        "Kaixa.toml",
-        "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
-        "\n[dependencies]\nmath = { path = \"math\" }\n"
-    );
-    root.write(
-        "math/Kaixa.toml",
-        "[package]\nname = \"math\"\nresolver = \"cmake\"\n"
-    );
+    kaixa::Manifest app{"app", "cmake"};
+    app.dependencies.emplace_back("math", "math");
+    root.write_manifest("Kaixa.toml", app);
+    root.write_manifest("math/Kaixa.toml", kaixa::Manifest{"math", "cmake"});
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
     root.write("math/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 

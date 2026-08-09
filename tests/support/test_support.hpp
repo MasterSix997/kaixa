@@ -1,5 +1,7 @@
 #pragma once
 
+#include <kaixa/model/manifest.hpp>
+
 #include <cstddef>
 #include <filesystem>
 #include <iosfwd>
@@ -74,6 +76,7 @@ namespace kaixa::testing {
 
         [[nodiscard]] const std::filesystem::path& path() const noexcept { return m_path; }
         void copy_from(const std::filesystem::path& source) const;
+        void write_manifest(std::string_view relative, const Manifest& manifest) const;
         void write(std::string_view relative, std::string_view content) const;
 
     private:
@@ -81,8 +84,8 @@ namespace kaixa::testing {
     };
 }
 
-#define KAIXA_TEST(name)                                                                  \
-    static void name(kaixa::testing::TestContext& context);                               \
-    static const bool kaixa_registered_##name =                                           \
-        kaixa::testing::TestRegistry::instance().add(#name, name);                         \
+#define KAIXA_TEST(name)                                           \
+    static void name(kaixa::testing::TestContext& context);        \
+    static const bool kaixa_registered_##name =                    \
+        kaixa::testing::TestRegistry::instance().add(#name, name); \
     static void name(kaixa::testing::TestContext& context)

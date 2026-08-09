@@ -187,11 +187,14 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
 
 KAIXA_TEST(generated_project_refuses_to_replace_a_manual_cmakelists) {
     const kaixa::testing::TempDirectory workspace("manual-cmakelists");
-    workspace.write(
-        "Kaixa.toml",
-        "[package]\nname = \"manual\"\nresolver = \"cmake\"\n"
-        "\n[cmake.target]\ntype = \"executable\"\nsources = [\"main.cpp\"]\n"
-    );
+    kaixa::Manifest manifest{"manual", "cmake"};
+    manifest.resolver_options = kaixa::Value::table({
+        {"target", kaixa::Value::table({
+            {"type", "executable"},
+            {"sources", kaixa::Value::array({"main.cpp"})}
+        })}
+    });
+    workspace.write_manifest("Kaixa.toml", manifest);
     workspace.write("main.cpp", "int main() { return 0; }\n");
     workspace.write("CMakeLists.txt", "# This file belongs to the user.\n");
 
