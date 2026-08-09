@@ -1,0 +1,9 @@
+[package]
+name = "test_generated_math"
+resolver = "cmake"
+
+[cmake.target]
+type = "static-library"
+sources = ["src/math.cpp"]
+public-include-directories = ["include"]
+cxx-standard = 23

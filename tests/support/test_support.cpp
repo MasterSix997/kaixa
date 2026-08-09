@@ -106,6 +106,43 @@ namespace kaixa::testing {
         std::filesystem::remove_all(m_path, ignored);
     }
 
+    void TempDirectory::copy_from(const std::filesystem::path& source) const {
+        std::error_code failure;
+        for (std::filesystem::recursive_directory_iterator iterator(source, failure), end;
+             iterator != end;
+             iterator.increment(failure)) {
+            if (failure)
+                throw std::runtime_error("cannot copy test fixture: " + failure.message());
+
+            const std::filesystem::path relative = std::filesystem::relative(
+                iterator->path(),
+                source,
+                failure
+            );
+            if (failure)
+                throw std::runtime_error("cannot resolve test fixture path: " + failure.message());
+            const std::filesystem::path destination = m_path / relative;
+
+            if (iterator->is_directory(failure)) {
+                std::filesystem::create_directories(destination, failure);
+            } else if (iterator->is_regular_file(failure)) {
+                std::filesystem::create_directories(destination.parent_path(), failure);
+                if (!failure) {
+                    std::filesystem::copy_file(
+                        iterator->path(),
+                        destination,
+                        std::filesystem::copy_options::overwrite_existing,
+                        failure
+                    );
+                }
+            }
+            if (failure)
+                throw std::runtime_error("cannot copy test fixture: " + failure.message());
+        }
+        if (failure)
+            throw std::runtime_error("cannot inspect test fixture: " + failure.message());
+    }
+
     void TempDirectory::write(
         const std::string_view relative,
         const std::string_view content

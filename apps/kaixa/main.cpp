@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
     void print_usage() {
@@ -13,7 +14,7 @@ namespace {
             << "Kaixa " << kaixa::version() << "\n\n"
             << "Usage:\n"
             << "  kaixa inspect [path]\n"
-            << "  kaixa build [path] [--profile name]\n"
+            << "  kaixa build [path] [--profile name] [-- <resolver arguments...>]\n"
             << "  kaixa --version\n";
     }
 
@@ -44,7 +45,11 @@ namespace {
         return 0;
     }
 
-    int build_workspace(const std::filesystem::path& path, std::string profile) {
+    int build_workspace(
+        const std::filesystem::path& path,
+        std::string profile,
+        std::vector<std::string> resolver_arguments
+    ) {
         auto graph = kaixa::load_workspace(path);
         if (!graph)
             return fail(graph.error());
@@ -53,7 +58,8 @@ namespace {
         const kaixa::BuildEnvironment environment{
             workspace,
             workspace / ".kaixa",
-            std::move(profile)
+            std::move(profile),
+            std::move(resolver_arguments)
         };
         const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
 
@@ -91,9 +97,15 @@ int main(const int argc, char** argv) {
 
     std::filesystem::path path = ".";
     std::string profile = "debug";
+    std::vector<std::string> resolver_arguments;
     bool has_path = false;
     for (int index = 2; index < argc; ++index) {
         const std::string_view argument = argv[index];
+        if (argument == "--") {
+            for (++index; index < argc; ++index)
+                resolver_arguments.emplace_back(argv[index]);
+            break;
+        }
         if (argument == "--profile") {
             if (++index == argc) {
                 std::cerr << "error: --profile requires a value\n";
@@ -110,10 +122,19 @@ int main(const int argc, char** argv) {
         has_path = true;
     }
 
-    if (command == "inspect")
+    if (command == "inspect") {
+        if (!resolver_arguments.empty()) {
+            std::cerr << "error: resolver arguments are only valid with `build`\n";
+            return 2;
+        }
         return inspect_workspace(path);
+    }
     if (command == "build")
-        return build_workspace(path, std::move(profile));
+        return build_workspace(
+            path,
+            std::move(profile),
+            std::move(resolver_arguments)
+        );
 
     std::cerr << "error: unknown command `" << command << "`\n";
     print_usage();

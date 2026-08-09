@@ -1,0 +1,12 @@
+[package]
+name = "generated_hello"
+version = "0.1.0"
+resolver = "cmake"
+
+[cmake]
+languages = ["CXX"]
+
+[cmake.target]
+type = "executable"
+sources = ["src/main.cpp"]
+cxx-standard = 23

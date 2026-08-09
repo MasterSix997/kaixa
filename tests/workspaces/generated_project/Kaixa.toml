@@ -1,0 +1,15 @@
+[package]
+name = "test_generated"
+resolver = "cmake"
+
+[dependencies]
+test_generated_math = { path = "packages/math" }
+
+[cmake]
+languages = ["CXX"]
+
+[cmake.target]
+type = "executable"
+sources = ["src/main.cpp"]
+link-libraries = ["test_generated_math"]
+cxx-standard = 23

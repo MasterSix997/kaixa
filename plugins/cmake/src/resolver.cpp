@@ -1,10 +1,12 @@
 #include <kaixa/plugin/cmake/resolver.hpp>
 
-#include <kaixa/config/table_reader.hpp>
 #include <kaixa/foundation/process.hpp>
+
+#include "configuration.hpp"
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -13,21 +15,10 @@
 
 namespace kaixa::plugin::cmake {
     namespace {
-        enum class DependencyMode {
-            add_subdirectory,
-            find_package
-        };
-
-        struct DependencyOption {
-            PackageId package;
-            DependencyMode mode = DependencyMode::add_subdirectory;
-        };
-
-        struct Options {
-            std::filesystem::path source;
-            std::optional<std::string> generator;
-            std::vector<DependencyOption> dependencies;
-        };
+        using detail::DependencyMode;
+        using detail::Options;
+        using detail::dependency_mode;
+        using detail::read_options;
 
         std::string configuration_name(const std::string& profile) {
             if (profile == "debug")
@@ -39,6 +30,23 @@ namespace kaixa::plugin::cmake {
             if (profile == "minsizerel")
                 return "MinSizeRel";
             return profile;
+        }
+
+        std::optional<std::string> requested_generator(
+            const std::vector<std::string>& arguments
+        ) {
+            for (std::size_t index = 0; index < arguments.size(); ++index) {
+                const std::string& argument = arguments[index];
+                if ((argument == "-G" || argument == "--generator")
+                    && index + 1 < arguments.size()) {
+                    return arguments[index + 1];
+                }
+                if (argument.starts_with("-G") && argument.size() > 2)
+                    return argument.substr(2);
+                if (argument.starts_with("--generator="))
+                    return argument.substr(std::string("--generator=").size());
+            }
+            return std::nullopt;
         }
 
         bool uses_multiple_configurations(const std::optional<std::string>& requested) {
@@ -61,95 +69,6 @@ namespace kaixa::plugin::cmake {
 #else
             return false;
 #endif
-        }
-
-        Result<Options> read_options(const Graph& graph, const PackageNode& package) {
-            Options result{package.directory, std::nullopt, {}};
-            if (!package.manifest || !package.manifest->resolver_options)
-                return result;
-
-            auto options_result = TableReader::bind(*package.manifest->resolver_options, "cmake");
-            if (!options_result)
-                return std::unexpected(options_result.error());
-            TableReader options = std::move(*options_result);
-
-            auto source = options.optional_string("source");
-            if (!source)
-                return std::unexpected(source.error());
-            if (*source)
-                result.source /= **source;
-
-            auto generator = options.optional_string("generator");
-            if (!generator)
-                return std::unexpected(generator.error());
-            result.generator = std::move(*generator);
-
-            auto dependencies_result = options.optional_table("dependencies");
-            if (!dependencies_result)
-                return std::unexpected(dependencies_result.error());
-            if (*dependencies_result) {
-                TableReader dependencies = std::move(**dependencies_result);
-                for (const TableEntry& entry: dependencies.entries()) {
-                    const std::string* mode_name = entry.value.as_string();
-                    SourceLocation location = entry.value.location();
-                    location.config_path = join_config_path(dependencies.path(), entry.key);
-                    if (!mode_name) {
-                        return std::unexpected(error_at(
-                            std::move(location),
-                            "expected a string, found "
-                                + std::string(value_kind_name(entry.value.kind()))
-                        ));
-                    }
-
-                    const auto dependency = std::ranges::find_if(
-                        package.dependencies,
-                        [&](const PackageId id) { return graph[id].name == entry.key; }
-                    );
-                    if (dependency == package.dependencies.end()) {
-                        return std::unexpected(error_at(
-                            std::move(location),
-                            "`" + entry.key + "` is not a dependency of `" + package.name + "`"
-                        ));
-                    }
-                    if (graph[*dependency].kind != PackageKind::managed
-                        || graph[*dependency].resolver != "cmake") {
-                        return std::unexpected(error_at(
-                            std::move(location),
-                            "CMake integration can only be selected for a managed CMake dependency"
-                        ));
-                    }
-
-                    DependencyMode mode;
-                    if (*mode_name == "add-subdirectory") {
-                        mode = DependencyMode::add_subdirectory;
-                    } else if (*mode_name == "find-package") {
-                        mode = DependencyMode::find_package;
-                    } else {
-                        return std::unexpected(error_at(
-                            std::move(location),
-                            "unknown CMake dependency mode `" + *mode_name
-                                + "`; expected `add-subdirectory` or `find-package`"
-                        ));
-                    }
-                    result.dependencies.push_back({*dependency, mode});
-                }
-                dependencies.take_all();
-            }
-
-            auto finished = options.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
-            return result;
-        }
-
-        DependencyMode dependency_mode(const Options& options, const PackageId dependency) {
-            const auto selected = std::ranges::find_if(
-                options.dependencies,
-                [&](const DependencyOption& option) { return option.package == dependency; }
-            );
-            return selected == options.dependencies.end()
-                ? DependencyMode::add_subdirectory
-                : selected->mode;
         }
 
         std::filesystem::path cmake_build_root(const BuildEnvironment& environment) {
@@ -278,15 +197,42 @@ namespace kaixa::plugin::cmake {
             return "[" + equals + "[" + value + "]" + equals + "]";
         }
 
-        Result<std::filesystem::path> validate_project(
+        Result<std::filesystem::path> prepare_project(
             const Graph& graph,
-            const PackageNode& package
+            const PackageNode& package,
+            BuildPlan& plan
         ) {
             auto options = read_options(graph, package);
             if (!options)
                 return std::unexpected(options.error());
 
             const std::filesystem::path project = options->source / "CMakeLists.txt";
+            if (options->target) {
+                if (std::filesystem::is_regular_file(project)) {
+                    std::ifstream input(project, std::ios::binary);
+                    std::string first_line;
+                    if (!input || !std::getline(input, first_line)) {
+                        return std::unexpected(error(
+                            "cannot inspect existing `" + project.string() + "`"
+                        ));
+                    }
+                    if (first_line.ends_with('\r'))
+                        first_line.pop_back();
+                    if (first_line != detail::generated_marker) {
+                        SourceLocation location;
+                        if (package.manifest)
+                            location = package.manifest->location;
+                        return std::unexpected(error_at(
+                            std::move(location),
+                            "refusing to overwrite `" + project.string()
+                                + "` because it was not generated by Kaixa"
+                        ));
+                    }
+                }
+                plan.generate({project, detail::generate_project(package, *options)});
+                return project;
+            }
+
             if (!std::filesystem::is_regular_file(project)) {
                 SourceLocation location;
                 if (package.manifest)
@@ -302,7 +248,7 @@ namespace kaixa::plugin::cmake {
         class ResolverImpl final : public Resolver {
         public:
             [[nodiscard]] ResolverInfo info() const override {
-                return {"cmake", "adopts and composes existing CMake projects"};
+                return {"cmake", "generates, adopts and composes CMake projects"};
             }
 
             [[nodiscard]] Result<void> plan(
@@ -320,6 +266,9 @@ namespace kaixa::plugin::cmake {
                 auto root_options = read_options(graph, package);
                 if (!root_options)
                     return std::unexpected(root_options.error());
+                const std::optional<std::string> generator = requested_generator(
+                    environment.resolver_arguments
+                );
 
                 std::vector<bool> source_visited(graph.size(), false);
                 std::vector<PackageId> source_packages;
@@ -333,7 +282,7 @@ namespace kaixa::plugin::cmake {
                     return std::unexpected(source_result.error());
 
                 for (const PackageId id: source_packages) {
-                    auto project = validate_project(graph, graph[id]);
+                    auto project = prepare_project(graph, graph[id], plan);
                     if (!project)
                         return std::unexpected(project.error());
                 }
@@ -398,12 +347,13 @@ namespace kaixa::plugin::cmake {
                 );
                 configure.inputs.push_back(integration_file);
                 configure.argv.push_back("-DKAIXA_CMAKE_PREFIX_PATH=" + join_prefixes(prefixes));
-                if (!uses_multiple_configurations(root_options->generator))
+                if (!uses_multiple_configurations(generator))
                     configure.argv.push_back("-DCMAKE_BUILD_TYPE=" + configuration);
-                if (root_options->generator) {
-                    configure.argv.push_back("-G");
-                    configure.argv.push_back(*root_options->generator);
-                }
+                configure.argv.insert(
+                    configure.argv.end(),
+                    environment.resolver_arguments.begin(),
+                    environment.resolver_arguments.end()
+                );
                 configure.working_directory = package.directory;
                 configure.inputs.push_back(root_options->source / "CMakeLists.txt");
                 configure.outputs.push_back(build_directory / "CMakeCache.txt");

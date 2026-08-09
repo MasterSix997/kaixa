@@ -114,12 +114,12 @@ KAIXA_TEST(workspace_rejects_a_missing_local_dependency) {
     }
 }
 
-KAIXA_TEST(cmake_options_select_the_source_and_generator) {
+KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_generator) {
     const TempDirectory root("cmake-options");
     root.write(
         "Kaixa.toml",
         "[package]\nname = \"configured\"\nresolver = \"cmake\"\n"
-        "\n[cmake]\nsource = \"project\"\ngenerator = \"Ninja\"\n"
+        "\n[cmake]\nsource = \"project\"\n"
     );
     root.write("project/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
 
@@ -133,7 +133,8 @@ KAIXA_TEST(cmake_options_select_the_source_and_generator) {
     const kaixa::BuildEnvironment environment{
         root.path(),
         root.path() / "out",
-        "release"
+        "release",
+        {"-G", "Ninja"}
     };
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake package plans");
@@ -186,6 +187,84 @@ KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
             kaixa::format_diagnostic(plan.error()),
             "expected `add-subdirectory` or `find-package`",
             "diagnostic lists supported modes"
+        );
+    }
+}
+
+KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
+    const TempDirectory root("cmake-configure-options");
+    root.write(
+        "Kaixa.toml",
+        "[package]\nname = \"configured\"\nresolver = \"cmake\"\n"
+    );
+    root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+    root.write("toolchain.cmake", "# test fixture\n");
+
+    const auto graph = kaixa::load_workspace(root.path());
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{
+        root.path(),
+        root.path() / "out",
+        "debug",
+        {
+            "-G", "Ninja",
+            "-DCMAKE_C_COMPILER=clang",
+            "-DCMAKE_CXX_COMPILER=clang++",
+            "-DCMAKE_TOOLCHAIN_FILE=" + (root.path() / "toolchain.cmake").string(),
+            "-DBUILD_TESTING=OFF",
+            "--fresh"
+        }
+    };
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "CMake configure options plan");
+    if (!plan || plan->actions().empty())
+        return;
+
+    const std::vector<std::string>& command = plan->actions().front().argv;
+    for (const std::string& expected: {
+             std::string("Ninja"),
+             std::string("-DCMAKE_C_COMPILER=clang"),
+             std::string("-DCMAKE_CXX_COMPILER=clang++"),
+             std::string("-DCMAKE_TOOLCHAIN_FILE=") + (root.path() / "toolchain.cmake").string(),
+             std::string("-DBUILD_TESTING=OFF"),
+             std::string("--fresh")
+         }) {
+        context.check(
+            std::ranges::find(command, expected) != command.end(),
+            "configure command contains " + expected
+        );
+    }
+}
+
+KAIXA_TEST(cmake_rejects_machine_configuration_in_the_package) {
+    const TempDirectory root("cmake-package-machine-config");
+    root.write(
+        "Kaixa.toml",
+        "[package]\nname = \"portable\"\nresolver = \"cmake\"\n"
+        "\n[cmake]\ngenerator = \"Ninja\"\n"
+    );
+    root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+
+    const auto graph = kaixa::load_workspace(root.path());
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(!plan.has_value(), "package cannot select a local generator");
+    if (!plan) {
+        context.check_contains(
+            kaixa::format_diagnostic(plan.error()),
+            "unknown key `cmake.generator`",
+            "diagnostic rejects machine configuration"
         );
     }
 }

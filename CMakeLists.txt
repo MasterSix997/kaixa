@@ -39,6 +39,7 @@ target_compile_definitions(kaixa_core PRIVATE TOML_EXCEPTIONS=0)
 
 add_library(kaixa_plugins STATIC
     plugins/bundle/src/plugins.cpp
+    plugins/cmake/src/configuration.cpp
     plugins/cmake/src/resolver.cpp
 )
 target_include_directories(kaixa_plugins PUBLIC

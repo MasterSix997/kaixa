@@ -73,6 +73,7 @@ namespace kaixa::testing {
         ~TempDirectory();
 
         [[nodiscard]] const std::filesystem::path& path() const noexcept { return m_path; }
+        void copy_from(const std::filesystem::path& source) const;
         void write(std::string_view relative, std::string_view content) const;
 
     private:
