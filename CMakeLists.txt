@@ -12,6 +12,7 @@ if(PROJECT_IS_TOP_LEVEL)
 endif()
 
 if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     add_compile_options(/W4 /permissive-)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
