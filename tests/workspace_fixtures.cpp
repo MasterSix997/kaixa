@@ -207,6 +207,12 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
             "target_compile_definitions",
             "compile definitions"
         );
+        context.check_contains(generated->content, "cxx_std_20", "target overrides default");
+        context.check_contains(
+            generated->content,
+            "CMAKE_RUNTIME_OUTPUT_DIRECTORY",
+            "project output policy"
+        );
         context.check_contains(generated->content, "add_test", "CTest registration");
         context.check_contains(generated->content, "cxx_std_23", "C++ standard");
     }

@@ -44,6 +44,86 @@ namespace kaixa {
             return result;
         }
 
+        Result<ConfigurationDefinition> read_definition(
+            TableReader definition,
+            std::optional<std::string> external_name = std::nullopt
+        ) {
+            ConfigurationDefinition result;
+            if (external_name) {
+                result.name = std::move(*external_name);
+            } else {
+                auto name = definition.string("name");
+                if (!name)
+                    return std::unexpected(name.error());
+                result.name = std::move(*name);
+            }
+            result.location = definition.location_of(external_name ? "profile" : "name");
+            if (result.name.empty())
+                return std::unexpected(error_at(result.location, "configuration name cannot be empty"));
+
+            auto profile = definition.optional_string("profile");
+            if (!profile)
+                return std::unexpected(profile.error());
+            result.profile = std::move(*profile);
+
+            auto append_resolver = [&](const TableEntry& entry, const std::string& path) -> Result<void> {
+                if (!entry.value.is_table()) {
+                    SourceLocation location = entry.value.location();
+                    location.config_path = path;
+                    return std::unexpected(wrong_kind(
+                        std::move(location),
+                        "a resolver settings table",
+                        entry.value.kind()
+                    ));
+                }
+                if (std::ranges::any_of(result.resolvers,
+                        [&](const ResolverConfigurationDefinition& resolver) {
+                            return resolver.resolver == entry.key;
+                        }
+                    )) {
+                    return std::unexpected(error_at(
+                        entry.value.location(),
+                        "duplicate resolver `" + entry.key + "` in configuration `" + result.name + "`"
+                    ));
+                }
+                result.resolvers.push_back({entry.key, entry.value});
+                return {};
+            };
+
+            auto legacy_resolvers = definition.optional_table("resolvers");
+            if (!legacy_resolvers)
+                return std::unexpected(legacy_resolvers.error());
+            if (*legacy_resolvers) {
+                TableReader resolvers = std::move(**legacy_resolvers);
+                for (const TableEntry& resolver: resolvers.entries()) {
+                    auto appended = append_resolver(
+                        resolver,
+                        join_config_path(resolvers.path(), resolver.key)
+                    );
+                    if (!appended)
+                        return std::unexpected(appended.error());
+                }
+                resolvers.take_all();
+            }
+
+            for (const TableEntry& entry: definition.entries()) {
+                if (entry.key == "name" || entry.key == "profile" || entry.key == "resolvers")
+                    continue;
+                definition.take(entry.key);
+                auto appended = append_resolver(
+                    entry,
+                    join_config_path(definition.path(), entry.key)
+                );
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+
+            auto finished = definition.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+            return result;
+        }
+
         Value merge_values(const Value& base, const Value& overlay) {
             const std::vector<TableEntry>* base_table = base.as_table();
             const std::vector<TableEntry>* overlay_table = overlay.as_table();
@@ -105,76 +185,76 @@ namespace kaixa {
         auto build_result = root.optional_table("build");
         if (!build_result)
             return std::unexpected(build_result.error());
-        if (!*build_result)
-            return result;
-        TableReader build = std::move(**build_result);
+        if (*build_result) {
+            TableReader build = std::move(**build_result);
+            auto defaults = optional_string_array(build, "default-configs");
+            if (!defaults)
+                return std::unexpected(defaults.error());
 
-        auto defaults = optional_string_array(build, "default-configs");
-        if (!defaults)
-            return std::unexpected(defaults.error());
-        result.defaults = std::move(*defaults);
+            result.defaults = std::move(*defaults);
 
-        auto configurations_result = build.optional_table("configs");
-        if (!configurations_result)
-            return std::unexpected(configurations_result.error());
-        if (!*configurations_result) {
+            auto configurations_result = build.optional_table("configs");
+            if (!configurations_result)
+                return std::unexpected(configurations_result.error());
+
+            if (*configurations_result) {
+                TableReader configurations = std::move(**configurations_result);
+                for (const TableEntry& entry: configurations.entries()) {
+                    auto definition_result = TableReader::bind(
+                        entry.value,
+                        join_config_path(configurations.path(), entry.key)
+                    );
+                    if (!definition_result)
+                        return std::unexpected(definition_result.error());
+
+                    auto parsed = read_definition(std::move(*definition_result), entry.key);
+                    if (!parsed)
+                        return std::unexpected(parsed.error());
+
+                    result.definitions.push_back(std::move(*parsed));
+                }
+                configurations.take_all();
+            }
+
             auto finished = build.finish();
             if (!finished)
                 return std::unexpected(finished.error());
-            return result;
         }
 
-        TableReader configurations = std::move(**configurations_result);
-        for (const TableEntry& entry: configurations.entries()) {
-            auto definition_result = TableReader::bind(
-                entry.value,
-                join_config_path(configurations.path(), entry.key)
-            );
-            if (!definition_result)
-                return std::unexpected(definition_result.error());
-            TableReader definition = std::move(*definition_result);
-
-            ConfigurationDefinition parsed;
-            parsed.name = entry.key;
-            parsed.location = entry.value.location();
-            parsed.location.config_path = definition.path();
-            if (parsed.name.empty())
-                return std::unexpected(error_at(parsed.location, "configuration name cannot be empty"));
-
-            auto profile = definition.optional_string("profile");
-            if (!profile)
-                return std::unexpected(profile.error());
-            parsed.profile = std::move(*profile);
-
-            auto resolvers_result = definition.optional_table("resolvers");
-            if (!resolvers_result)
-                return std::unexpected(resolvers_result.error());
-            if (*resolvers_result) {
-                TableReader resolvers = std::move(**resolvers_result);
-                for (const TableEntry& resolver: resolvers.entries()) {
-                    if (!resolver.value.is_table()) {
-                        SourceLocation location = resolver.value.location();
-                        location.config_path = join_config_path(resolvers.path(), resolver.key);
-                        return std::unexpected(wrong_kind(
-                            std::move(location),
-                            "a resolver settings table",
-                            resolver.value.kind()
-                        ));
-                    }
-                    parsed.resolvers.push_back({resolver.key, resolver.value});
-                }
-                resolvers.take_all();
+        if (const Value* configurations_value = root.take("config")) {
+            const std::vector<Value>* configurations = configurations_value->as_array();
+            if (!configurations) {
+                return std::unexpected(wrong_kind(
+                    root.location_of("config"),
+                    "an array of configuration tables",
+                    configurations_value->kind()
+                ));
             }
+            for (std::size_t index = 0; index < configurations->size(); ++index) {
+                auto definition_result = TableReader::bind(
+                    (*configurations)[index],
+                    "config." + std::to_string(index)
+                );
+                if (!definition_result)
+                    return std::unexpected(definition_result.error());
 
-            auto finished = definition.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
-            result.definitions.push_back(std::move(parsed));
+                auto parsed = read_definition(std::move(*definition_result));
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (std::ranges::any_of(result.definitions,
+                        [&](const ConfigurationDefinition& definition) {
+                            return definition.name == parsed->name;
+                        }
+                    )) {
+                    return std::unexpected(error_at(
+                        parsed->location,
+                        "duplicate configuration `" + parsed->name + "`"
+                    ));
+                }
+                result.definitions.push_back(std::move(*parsed));
+            }
         }
-        configurations.take_all();
-        auto finished = build.finish();
-        if (!finished)
-            return std::unexpected(finished.error());
         return result;
     }
 

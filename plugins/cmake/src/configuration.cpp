@@ -58,9 +58,14 @@ namespace kaixa::plugin::cmake::detail {
             return *integer;
         }
 
-        Result<TargetOptions> read_target(std::string name, TableReader target) {
+        Result<TargetOptions> read_target(
+            std::string name,
+            TableReader& target,
+            const std::optional<std::int64_t> default_standard
+        ) {
             TargetOptions result;
             result.name = std::move(name);
+            result.cxx_standard = default_standard;
 
             auto type = target.string("type");
             if (!type)
@@ -143,7 +148,8 @@ namespace kaixa::plugin::cmake::detail {
             auto standard = optional_integer(target, "cxx-standard");
             if (!standard)
                 return std::unexpected(standard.error());
-            result.cxx_standard = *standard;
+            if (*standard)
+                result.cxx_standard = *standard;
 
             if (result.type != TargetType::interface_library && result.sources.empty()) {
                 return std::unexpected(error_at(
@@ -168,13 +174,10 @@ namespace kaixa::plugin::cmake::detail {
                 ));
             }
 
-            auto finished = target.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
             return result;
         }
 
-        Result<TestOptions> read_test(std::string name, TableReader test) {
+        Result<TestOptions> read_test(std::string name, TableReader& test) {
             TestOptions result;
             result.name = std::move(name);
 
@@ -188,10 +191,18 @@ namespace kaixa::plugin::cmake::detail {
                 return std::unexpected(arguments.error());
             result.arguments = std::move(*arguments);
 
-            auto finished = test.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
             return result;
+        }
+
+        Result<TableReader> indexed_table(
+            const Value& value,
+            const std::string_view collection,
+            const std::size_t index
+        ) {
+            return TableReader::bind(
+                value,
+                std::string(collection) + "." + std::to_string(index)
+            );
         }
 
         std::string quote(const std::string_view value) {
@@ -199,6 +210,42 @@ namespace kaixa::plugin::cmake::detail {
             while (value.contains("]" + equals + "]"))
                 equals += '=';
             return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
+        }
+
+        std::string quoted_string(const std::string_view value) {
+            std::string result = "\"";
+            for (const char character: value) {
+                if (character == '\\' || character == '"')
+                    result.push_back('\\');
+                result.push_back(character);
+            }
+            result.push_back('"');
+            return result;
+        }
+
+        std::string output_directory(const std::filesystem::path& path) {
+            const std::string value = path.generic_string();
+            return path.is_absolute()
+                ? quoted_string(value)
+                : quoted_string("${CMAKE_BINARY_DIR}/" + value);
+        }
+
+        std::string project_version(const PackageNode& package) {
+            if (!package.manifest || !package.manifest->version)
+                return {};
+
+            std::string value = package.manifest->version->text;
+            const std::size_t suffix = value.find_first_of("-+");
+            if (suffix != std::string::npos)
+                value.resize(suffix);
+            if (value.empty() || value.front() == '.' || value.back() == '.')
+                return {};
+            if (!std::ranges::all_of(value, [](const char character) {
+                    return (character >= '0' && character <= '9') || character == '.';
+                })) {
+                return {};
+            }
+            return value;
         }
 
         void emit_values(
@@ -271,6 +318,51 @@ namespace kaixa::plugin::cmake::detail {
             }
         }
 
+        auto runtime = options.optional_string("msvc-runtime");
+        if (!runtime)
+            return std::unexpected(runtime.error());
+
+        if (*runtime) {
+            if (**runtime == "static") {
+                result.msvc_runtime = MsvcRuntime::static_runtime;
+            } else if (**runtime == "dynamic") {
+                result.msvc_runtime = MsvcRuntime::dynamic_runtime;
+            } else {
+                return std::unexpected(error_at(
+                    options.location_of("msvc-runtime"),
+                    "unknown MSVC runtime `" + **runtime + "`; expected `static` or `dynamic`"
+                ));
+            }
+        }
+
+        auto output_result = options.optional_table("output");
+        if (!output_result)
+            return std::unexpected(output_result.error());
+        if (*output_result) {
+            TableReader output = std::move(**output_result);
+            auto runtime_output = output.optional_string("runtime");
+            if (!runtime_output)
+                return std::unexpected(runtime_output.error());
+            if (*runtime_output)
+                result.runtime_output = **runtime_output;
+
+            auto library_output = output.optional_string("library");
+            if (!library_output)
+                return std::unexpected(library_output.error());
+            if (*library_output)
+                result.library_output = **library_output;
+
+            auto archive_output = output.optional_string("archive");
+            if (!archive_output)
+                return std::unexpected(archive_output.error());
+            if (*archive_output)
+                result.archive_output = **archive_output;
+
+            auto finished = output.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+        }
+
         const Value* languages_value = options.take("languages");
         if (languages_value) {
             const std::vector<Value>* languages = languages_value->as_array();
@@ -303,71 +395,187 @@ namespace kaixa::plugin::cmake::detail {
             }
         }
 
-        auto target_result = options.optional_table("target");
-        if (!target_result)
-            return std::unexpected(target_result.error());
-        if (*target_result) {
-            auto target = read_target(package.name, std::move(**target_result));
-            if (!target)
-                return std::unexpected(target.error());
-            result.targets.push_back(std::move(*target));
+        auto default_standard = optional_integer(options, "cxx-standard");
+        if (!default_standard)
+            return std::unexpected(default_standard.error());
+        if (*default_standard && **default_standard <= 0) {
+            return std::unexpected(error_at(
+                options.location_of("cxx-standard"),
+                "C++ standard must be positive"
+            ));
         }
 
-        auto targets_result = options.optional_table("targets");
-        if (!targets_result)
-            return std::unexpected(targets_result.error());
-        if (*target_result && *targets_result) {
+        const bool direct_target = std::ranges::any_of(
+            options.entries(),
+            [](const TableEntry& entry) { return entry.key == "type"; }
+        );
+        const Value* target_value = options.take("target");
+        const Value* legacy_targets_value = options.take("targets");
+        if (direct_target && (target_value || legacy_targets_value)) {
+            return std::unexpected(error_at(
+                options.location_of("type"),
+                "target fields in `cmake` cannot be combined with target entries"
+            ));
+        }
+        if (target_value && legacy_targets_value) {
             return std::unexpected(error_at(
                 options.location_of("targets"),
                 "`cmake.target` and `cmake.targets` cannot be used together"
             ));
         }
-        if (*targets_result) {
-            TableReader targets = std::move(**targets_result);
-            for (const TableEntry& entry: targets.entries()) {
-                const std::string path = join_config_path(targets.path(), entry.key);
-                if (!is_valid_identifier(entry.key)) {
-                    SourceLocation location = entry.value.location();
-                    location.config_path = path;
-                    return std::unexpected(error_at(
-                        std::move(location),
-                        "`" + entry.key + "` is not a valid CMake target name"
-                    ));
+
+        auto append_target = [&](std::string name, TableReader& table) -> Result<void> {
+            if (!is_valid_identifier(name)) {
+                return std::unexpected(error_at(
+                    table.location_of("name"),
+                    "`" + name + "` is not a valid CMake target name"
+                ));
+            }
+            if (std::ranges::any_of(result.targets,
+                [&](const TargetOptions& target) {
+                    return target.name == name;
+                })) {
+                return std::unexpected(error_at(
+                    table.location_of("name"),
+                    "duplicate CMake target `" + name + "`"
+                ));
+            }
+
+            auto target = read_target(std::move(name), table, *default_standard);
+            if (!target)
+                return std::unexpected(target.error());
+
+            auto finished = table.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+
+            result.targets.push_back(std::move(*target));
+            return {};
+        };
+
+        if (direct_target) {
+            auto target = read_target(package.name, options, *default_standard);
+            if (!target)
+                return std::unexpected(target.error());
+
+            result.targets.push_back(std::move(*target));
+        } else if (target_value) {
+            if (const std::vector<Value>* targets = target_value->as_array()) {
+                for (std::size_t index = 0; index < targets->size(); ++index) {
+                    auto table_result = indexed_table((*targets)[index], "cmake.target", index);
+                    if (!table_result)
+                        return std::unexpected(table_result.error());
+
+                    TableReader table = std::move(*table_result);
+                    auto name = table.string("name");
+                    if (!name)
+                        return std::unexpected(name.error());
+
+                    auto appended = append_target(std::move(*name), table);
+                    if (!appended)
+                        return std::unexpected(appended.error());
                 }
-                auto table = TableReader::bind(entry.value, path);
-                if (!table)
-                    return std::unexpected(table.error());
-                auto target = read_target(entry.key, std::move(*table));
-                if (!target)
-                    return std::unexpected(target.error());
-                result.targets.push_back(std::move(*target));
+            } else if (target_value->is_table()) {
+                auto table_result = TableReader::bind(*target_value, "cmake.target");
+                if (!table_result)
+                    return std::unexpected(table_result.error());
+
+                TableReader table = std::move(*table_result);
+                auto appended = append_target(package.name, table);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            } else {
+                return std::unexpected(wrong_kind(
+                    options.location_of("target"),
+                    "an array of target tables",
+                    target_value->kind()
+                ));
+            }
+        } else if (legacy_targets_value) {
+            auto targets_result = TableReader::bind(*legacy_targets_value, "cmake.targets");
+            if (!targets_result)
+                return std::unexpected(targets_result.error());
+            TableReader targets = std::move(*targets_result);
+            for (const TableEntry& entry: targets.entries()) {
+                auto table_result = TableReader::bind(
+                    entry.value,
+                    join_config_path(targets.path(), entry.key)
+                );
+                if (!table_result)
+                    return std::unexpected(table_result.error());
+                TableReader table = std::move(*table_result);
+                auto appended = append_target(entry.key, table);
+                if (!appended)
+                    return std::unexpected(appended.error());
             }
             targets.take_all();
         }
 
-        auto tests_result = options.optional_table("tests");
-        if (!tests_result)
-            return std::unexpected(tests_result.error());
-        if (*tests_result) {
-            TableReader tests = std::move(**tests_result);
+        auto append_test = [&](std::string name, TableReader& table) -> Result<void> {
+            auto test = read_test(std::move(name), table);
+            if (!test)
+                return std::unexpected(test.error());
+
+            auto finished = table.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+            if (std::ranges::none_of(result.targets,
+                [&](const TargetOptions& target) {
+                    return target.name == test->target;
+                })) {
+                return std::unexpected(error_at(
+                    table.location_of("target"),
+                    "test `" + test->name + "` references unknown target `"
+                        + test->target + "`"
+                ));
+            }
+            result.tests.push_back(std::move(*test));
+            return {};
+        };
+
+        if (const Value* tests_value = options.take("test")) {
+            const std::vector<Value>* tests = tests_value->as_array();
+            if (!tests) {
+                return std::unexpected(wrong_kind(
+                    options.location_of("test"),
+                    "an array of test tables",
+                    tests_value->kind()
+                ));
+            }
+            for (std::size_t index = 0; index < tests->size(); ++index) {
+                auto table_result = indexed_table((*tests)[index], "cmake.test", index);
+                if (!table_result)
+                    return std::unexpected(table_result.error());
+
+                TableReader table = std::move(*table_result);
+                auto name = table.string("name");
+                if (!name)
+                    return std::unexpected(name.error());
+
+                auto appended = append_test(std::move(*name), table);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+        }
+
+        if (const Value* legacy_tests_value = options.take("tests")) {
+            auto tests_result = TableReader::bind(*legacy_tests_value, "cmake.tests");
+            if (!tests_result)
+                return std::unexpected(tests_result.error());
+
+            TableReader tests = std::move(*tests_result);
             for (const TableEntry& entry: tests.entries()) {
-                const std::string path = join_config_path(tests.path(), entry.key);
-                auto table = TableReader::bind(entry.value, path);
-                if (!table)
-                    return std::unexpected(table.error());
-                auto test = read_test(entry.key, std::move(*table));
-                if (!test)
-                    return std::unexpected(test.error());
-                if (std::ranges::none_of(result.targets, [&](const TargetOptions& target) {
-                        return target.name == test->target;
-                    })) {
-                    return std::unexpected(error_at(
-                        entry.value.location(),
-                        "test `" + entry.key + "` references unknown target `"
-                            + test->target + "`"
-                    ));
-                }
-                result.tests.push_back(std::move(*test));
+                auto table_result = TableReader::bind(
+                    entry.value,
+                    join_config_path(tests.path(), entry.key)
+                );
+                if (!table_result)
+                    return std::unexpected(table_result.error());
+
+                TableReader table = std::move(*table_result);
+                auto appended = append_test(entry.key, table);
+                if (!appended)
+                    return std::unexpected(appended.error());
             }
             tests.take_all();
         }
@@ -483,12 +691,41 @@ namespace kaixa::plugin::cmake::detail {
     }
 
     std::string generate_project(const PackageNode& package, const Options& options) {
+        const std::string version = project_version(package);
         std::string output = std::string(generated_marker) + "\n"
             + "cmake_minimum_required(VERSION 3.20)\n"
-            + "project(" + package.name + " LANGUAGES";
+            + "project(" + package.name;
+        if (!version.empty())
+            output += " VERSION " + version;
+        output += " LANGUAGES";
         for (const std::string& language: options.languages)
             output += " " + language;
         output += ")\n\n";
+
+        if (options.runtime_output || options.library_output || options.archive_output) {
+            output += "if(PROJECT_IS_TOP_LEVEL)\n";
+            if (options.runtime_output) {
+                output += "    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "
+                    + output_directory(*options.runtime_output) + ")\n";
+            }
+            if (options.library_output) {
+                output += "    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY "
+                    + output_directory(*options.library_output) + ")\n";
+            }
+            if (options.archive_output) {
+                output += "    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "
+                    + output_directory(*options.archive_output) + ")\n";
+            }
+            output += "endif()\n\n";
+        }
+
+        if (options.msvc_runtime != MsvcRuntime::default_runtime) {
+            const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime
+                ? "MultiThreaded"
+                : "MultiThreadedDLL";
+            output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime
+                + "$<$<CONFIG:Debug>:Debug>\")\n\n";
+        }
 
         for (const TargetOptions& target: options.targets) {
             switch (target.type) {
@@ -594,6 +831,8 @@ namespace kaixa::plugin::cmake::detail {
                     : (executable ? "PRIVATE" : "PUBLIC");
                 output += "target_compile_features(" + target.name + " " + scope
                     + " cxx_std_" + std::to_string(*target.cxx_standard) + ")\n\n";
+                output += "set_target_properties(" + target.name
+                    + " PROPERTIES CXX_EXTENSIONS OFF)\n\n";
             }
         }
 

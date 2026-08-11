@@ -1,7 +1,7 @@
 # Generated CMake
 
 This package has no handwritten `CMakeLists.txt`. Running the build creates one from the
-`[cmake.target]` section in `Kaixa.toml`, then configures and builds it normally:
+target fields in the `[cmake]` section of `Kaixa.toml`, then configures and builds it normally:
 
 ```sh
 kaixa build .

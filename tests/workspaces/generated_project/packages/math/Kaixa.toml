@@ -4,8 +4,6 @@ resolver = "cmake"
 
 [cmake]
 generation = "state"
-
-[cmake.target]
 type = "static-library"
 sources = ["src/math.cpp"]
 public-include-directories = ["include"]

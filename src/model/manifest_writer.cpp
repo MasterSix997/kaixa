@@ -140,6 +140,65 @@ namespace kaixa {
             return {};
         }
 
+        void append_header(std::string& output, std::initializer_list<std::string_view> path);
+        void append_array_header(std::string& output, std::initializer_list<std::string_view> path);
+
+        Result<void> append_resolver_document(
+            std::string& output,
+            const std::string_view resolver,
+            const Value& value
+        ) {
+            const std::vector<TableEntry>* entries = value.as_table();
+            if (!entries)
+                return std::unexpected(error("manifest resolver settings must be a table"));
+
+            append_header(output, {resolver});
+            for (std::size_t index = 0; index < entries->size(); ++index) {
+                const TableEntry& entry = (*entries)[index];
+                const auto duplicate = std::ranges::find_if(
+                    entries->begin(),
+                    entries->begin() + static_cast<std::ptrdiff_t>(index),
+                    [&](const TableEntry& candidate) { return candidate.key == entry.key; }
+                );
+                if (duplicate != entries->begin() + static_cast<std::ptrdiff_t>(index)) {
+                    return std::unexpected(error(
+                        "duplicate manifest value key `" + entry.key + "`"
+                    ));
+                }
+
+                const std::vector<Value>* array = entry.value.as_array();
+                const bool tables = array && !array->empty() && std::ranges::all_of(*array,
+                    [](const Value& item) {
+                        return item.is_table();
+                    });
+                if (tables)
+                    continue;
+
+                auto formatted = format_value(entry.value);
+                if (!formatted)
+                    return std::unexpected(formatted.error());
+
+                output += key(entry.key) + " = " + *formatted + '\n';
+            }
+
+            for (const TableEntry& entry: *entries) {
+                const std::vector<Value>* array = entry.value.as_array();
+                if (!array || array->empty() || !std::ranges::all_of(*array,
+                    [](const Value& item) {
+                        return item.is_table();
+                    })) {
+                    continue;
+                }
+                for (const Value& item: *array) {
+                    append_array_header(output, {resolver, entry.key});
+                    auto appended = append_table(output, item);
+                    if (!appended)
+                        return std::unexpected(appended.error());
+                }
+            }
+            return {};
+        }
+
         void append_header(std::string& output, const std::initializer_list<std::string_view> path) {
             if (!output.empty() && output.back() != '\n')
                 output.push_back('\n');
@@ -154,6 +213,26 @@ namespace kaixa {
                 first = false;
             }
             output += "]\n";
+        }
+
+        void append_array_header(std::string& output, const std::initializer_list<std::string_view> path) {
+            if (!output.empty() && output.back() != '\n')
+                output.push_back('\n');
+
+            if (!output.empty())
+                output.push_back('\n');
+
+            output += "[[";
+            bool first = true;
+            for (const std::string_view component: path) {
+                if (!first)
+                    output.push_back('.');
+
+                output += key(component);
+                first = false;
+            }
+
+            output += "]]\n";
         }
 
         Result<void> validate_manifest(const Manifest& manifest) {
@@ -255,8 +334,8 @@ namespace kaixa {
         }
 
         if (!manifest.configurations.defaults.empty() || !manifest.configurations.definitions.empty()) {
-            append_header(output, {"build"});
             if (!manifest.configurations.defaults.empty()) {
+                append_header(output, {"build"});
                 output += "default-configs = [";
                 for (std::size_t index = 0; index < manifest.configurations.defaults.size(); ++index) {
                     if (index != 0)
@@ -267,14 +346,12 @@ namespace kaixa {
             }
 
             for (const ConfigurationDefinition& configuration: manifest.configurations.definitions) {
-                append_header(output, {"build", "configs", configuration.name});
+                append_array_header(output, {"config"});
+                output += "name = " + toml_string(configuration.name) + '\n';
                 if (configuration.profile)
                     output += "profile = " + toml_string(*configuration.profile) + '\n';
                 for (const ResolverConfigurationDefinition& resolver: configuration.resolvers) {
-                    append_header(
-                        output,
-                        {"build", "configs", configuration.name, "resolvers", resolver.resolver}
-                    );
+                    append_header(output, {"config", resolver.resolver});
                     auto appended = append_table(output, resolver.settings);
                     if (!appended)
                         return std::unexpected(appended.error());
@@ -283,8 +360,11 @@ namespace kaixa {
         }
 
         if (manifest.resolver_options) {
-            append_header(output, {manifest.resolver});
-            auto appended = append_table(output, *manifest.resolver_options);
+            auto appended = append_resolver_document(
+                output,
+                manifest.resolver,
+                *manifest.resolver_options
+            );
             if (!appended)
                 return std::unexpected(appended.error());
         }

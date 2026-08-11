@@ -74,11 +74,12 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     authored.configurations.definitions.push_back(std::move(dev));
     authored.resolver_options = kaixa::Value::table({
         {"source", "project"},
-        {"target", kaixa::Value::table({
+        {"cxx-standard", 23},
+        {"target", kaixa::Value::array({kaixa::Value::table({
+            {"name", "app"},
             {"type", "executable"},
-            {"sources", kaixa::Value::array({"src/main.cpp"})},
-            {"cxx-standard", 23}
-        })}
+            {"sources", kaixa::Value::array({"src/main.cpp"})}
+        })})}
     });
 
     const auto text = kaixa::format_manifest(authored);
@@ -87,6 +88,8 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
         context.fail(kaixa::format_diagnostic(text.error()));
         return;
     }
+    context.check_contains(*text, "[[config]]", "canonical configuration syntax");
+    context.check_contains(*text, "[[cmake.target]]", "canonical target syntax");
 
     const auto parsed = kaixa::parse_manifest_string(*text, "generated-manifest");
     context.check(parsed.has_value(), "formatted manifest parses");

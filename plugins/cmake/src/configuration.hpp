@@ -27,6 +27,12 @@ namespace kaixa::plugin::cmake::detail {
         state
     };
 
+    enum class MsvcRuntime {
+        default_runtime,
+        static_runtime,
+        dynamic_runtime
+    };
+
     struct DependencyOption {
         PackageId package;
         DependencyMode mode = DependencyMode::add_subdirectory;
@@ -59,6 +65,10 @@ namespace kaixa::plugin::cmake::detail {
         std::filesystem::path source;
         std::vector<std::string> languages;
         GenerationMode generation = GenerationMode::source;
+        MsvcRuntime msvc_runtime = MsvcRuntime::default_runtime;
+        std::optional<std::filesystem::path> runtime_output;
+        std::optional<std::filesystem::path> library_output;
+        std::optional<std::filesystem::path> archive_output;
         std::vector<TargetOptions> targets;
         std::vector<TestOptions> tests;
         std::vector<DependencyOption> dependencies;

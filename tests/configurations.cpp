@@ -17,13 +17,14 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     root.write(
         "published.toml",
         "[build]\ndefault-configs = [\"dev\"]\n"
-        "\n[build.configs.dev]\nprofile = \"debug\"\n"
-        "\n[build.configs.dev.resolvers.cmake]\narguments = [\"-DDEV=ON\"]\n"
+        "\n[[config]]\nname = \"dev\"\nprofile = \"debug\"\n"
+        "\n[config.cmake]\narguments = [\"-DDEV=ON\"]\n"
     );
     root.write(
         "user.toml",
         "[build]\ndefault-configs = [\"clang\"]\n"
-        "\n[build.configs.clang.resolvers.cmake]\n"
+        "\n[[config]]\nname = \"clang\"\n"
+        "\n[config.cmake]\n"
         "generator = \"Ninja\"\ncxx-compiler = \"clang++\"\n"
     );
 

@@ -78,7 +78,8 @@ namespace kaixa::plugin::cmake {
         std::string build_variant(
             const BuildEnvironment& environment,
             const detail::BuildOptions& options,
-            const std::vector<std::string>& arguments
+            const std::vector<std::string>& arguments,
+            const Options& project
         ) {
             std::uint64_t hash = 14695981039346656037ull;
             const auto absorb = [&](const std::string_view value) {
@@ -92,6 +93,8 @@ namespace kaixa::plugin::cmake {
             };
 
             absorb(environment.configuration.profile);
+            absorb(project.source.generic_string());
+            absorb(project.generation == GenerationMode::source ? "source" : "state");
             if (options.generator)
                 absorb(*options.generator);
             if (options.c_compiler)
@@ -328,6 +331,10 @@ namespace kaixa::plugin::cmake {
                 if (package.id != graph.root() && !*install)
                     return {};
 
+                auto root_options = read_options(graph, package);
+                if (!root_options)
+                    return std::unexpected(root_options.error());
+
                 const ResolverBuildConfiguration* resolver_configuration =
                     environment.configuration.find("cmake");
                 auto build_options = read_build_options(
@@ -352,7 +359,8 @@ namespace kaixa::plugin::cmake {
                 const std::string variant = build_variant(
                     environment,
                     *build_options,
-                    resolver_arguments
+                    resolver_arguments,
+                    *root_options
                 );
 
                 std::vector<bool> source_visited(graph.size(), false);

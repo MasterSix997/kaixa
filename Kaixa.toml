@@ -5,9 +5,13 @@ resolver = "cmake"
 
 [cmake]
 languages = ["CXX"]
-generation = "state"
+generation = "source"
+cxx-standard = 23
+msvc-runtime = "static"
+output = { runtime = "bin", library = "lib", archive = "lib" }
 
-[cmake.targets.kaixa_core]
+[[cmake.target]]
+name = "kaixa_core"
 type = "static-library"
 sources = [
     "src/kaixa.cpp",
@@ -28,9 +32,9 @@ sources = [
 public-include-directories = ["include"]
 system-include-directories = ["third_party"]
 compile-definitions = ["TOML_EXCEPTIONS=0"]
-cxx-standard = 23
 
-[cmake.targets.kaixa_plugins]
+[[cmake.target]]
+name = "kaixa_plugins"
 type = "static-library"
 sources = [
     "plugins/bundle/src/plugins.cpp",
@@ -42,22 +46,22 @@ public-include-directories = [
     "plugins/cmake/include",
 ]
 public-link-libraries = ["kaixa_core"]
-cxx-standard = 23
 
-[cmake.targets.kaixa]
+[[cmake.target]]
+name = "kaixa"
 type = "executable"
 sources = ["apps/kaixa/main.cpp"]
 link-libraries = ["kaixa_core", "kaixa_plugins"]
-cxx-standard = 23
 
-[cmake.targets.kaixa_test_support]
+[[cmake.target]]
+name = "kaixa_test_support"
 type = "static-library"
 sources = ["tests/support/test_support.cpp"]
 public-include-directories = ["tests/support"]
 public-link-libraries = ["kaixa_core"]
-cxx-standard = 23
 
-[cmake.targets.kaixa_tests]
+[[cmake.target]]
+name = "kaixa_tests"
 type = "executable"
 sources = [
     "tests/support/test_main.cpp",
@@ -72,7 +76,7 @@ link-libraries = [
     "kaixa_plugins",
     "kaixa_test_support",
 ]
-cxx-standard = 23
 
-[cmake.tests.kaixa]
+[[cmake.test]]
+name = "kaixa"
 target = "kaixa_tests"

@@ -6,13 +6,12 @@ resolver = "cmake"
 [build]
 default-configs = ["dev"]
 
-[build.configs.dev]
+[[config]]
+name = "dev"
 profile = "debug"
 
 [cmake]
 languages = ["CXX"]
-
-[cmake.target]
 type = "executable"
 sources = ["src/main.cpp"]
 cxx-standard = 23
