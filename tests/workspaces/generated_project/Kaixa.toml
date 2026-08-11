@@ -7,9 +7,24 @@ test_generated_math = { path = "packages/math" }
 
 [cmake]
 languages = ["CXX"]
+generation = "state"
 
-[cmake.target]
+[cmake.targets.test_generated_support]
+type = "static-library"
+sources = ["src/support.cpp"]
+public-system-include-directories = ["third_party"]
+compile-definitions = ["TEST_GENERATED_SUPPORT=42"]
+compile-options = [
+    "$<$<CXX_COMPILER_ID:MSVC>:/W3>",
+    "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>",
+]
+cxx-standard = 23
+
+[cmake.targets.test_generated]
 type = "executable"
 sources = ["src/main.cpp"]
-link-libraries = ["test_generated_math"]
+link-libraries = ["test_generated_math", "test_generated_support"]
 cxx-standard = 23
+
+[cmake.tests.generated]
+target = "test_generated"

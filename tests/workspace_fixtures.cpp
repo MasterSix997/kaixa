@@ -11,7 +11,7 @@
 
 namespace {
     const std::filesystem::path workspaces_directory =
-        std::filesystem::path(KAIXA_TESTS_DIR) / "workspaces";
+        std::filesystem::path(__FILE__).parent_path() / "workspaces";
 }
 
 KAIXA_TEST(single_package_workspace_loads_and_plans) {
@@ -166,15 +166,49 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     if (!plan)
         return;
 
-    const std::filesystem::path generated = workspace.path() / "CMakeLists.txt";
-    const auto file = std::ranges::find_if(
+    const auto generated = std::ranges::find_if(
         plan->generated_files(),
-        [&](const kaixa::GeneratedFile& candidate) { return candidate.path == generated; }
+        [](const kaixa::GeneratedFile& candidate) {
+            return candidate.path.filename() == "CMakeLists.txt"
+                && candidate.path.parent_path().filename() == "project"
+                && candidate.path.parent_path().parent_path().filename() == "test_generated";
+        }
     );
-    context.check(file != plan->generated_files().end(), "root CMakeLists.txt is generated");
-    if (file != plan->generated_files().end()) {
-        context.check_contains(file->content, "add_executable(test_generated", "target command");
-        context.check_contains(file->content, "cxx_std_23", "C++ standard");
+    context.check(
+        generated != plan->generated_files().end(),
+        "CMakeLists.txt is generated in Kaixa state"
+    );
+    context.check(
+        !std::filesystem::exists(workspace.path() / "CMakeLists.txt"),
+        "source root remains clean"
+    );
+    context.check(
+        !std::filesystem::exists(workspace.path() / "packages/math/CMakeLists.txt"),
+        "dependency source remains clean"
+    );
+    if (generated != plan->generated_files().end()) {
+        context.check_contains(
+            generated->content,
+            "add_library(test_generated_support STATIC",
+            "library target command"
+        );
+        context.check_contains(
+            generated->content,
+            "add_executable(test_generated",
+            "executable target command"
+        );
+        context.check_contains(
+            generated->content,
+            "SYSTEM PUBLIC",
+            "system include scope"
+        );
+        context.check_contains(
+            generated->content,
+            "target_compile_definitions",
+            "compile definitions"
+        );
+        context.check_contains(generated->content, "add_test", "CTest registration");
+        context.check_contains(generated->content, "cxx_std_23", "C++ standard");
     }
 
     const auto report = kaixa::execute(*plan);

@@ -58,8 +58,9 @@ namespace kaixa::plugin::cmake::detail {
             return *integer;
         }
 
-        Result<TargetOptions> read_target(TableReader target) {
+        Result<TargetOptions> read_target(std::string name, TableReader target) {
             TargetOptions result;
+            result.name = std::move(name);
 
             auto type = target.string("type");
             if (!type)
@@ -96,6 +97,19 @@ namespace kaixa::plugin::cmake::detail {
                 return std::unexpected(public_includes.error());
             result.public_include_directories = std::move(*public_includes);
 
+            auto system_includes = string_array(target, "system-include-directories");
+            if (!system_includes)
+                return std::unexpected(system_includes.error());
+            result.system_include_directories = std::move(*system_includes);
+
+            auto public_system_includes = string_array(
+                target,
+                "public-system-include-directories"
+            );
+            if (!public_system_includes)
+                return std::unexpected(public_system_includes.error());
+            result.public_system_include_directories = std::move(*public_system_includes);
+
             auto links = string_array(target, "link-libraries");
             if (!links)
                 return std::unexpected(links.error());
@@ -105,6 +119,26 @@ namespace kaixa::plugin::cmake::detail {
             if (!public_links)
                 return std::unexpected(public_links.error());
             result.public_link_libraries = std::move(*public_links);
+
+            auto definitions = string_array(target, "compile-definitions");
+            if (!definitions)
+                return std::unexpected(definitions.error());
+            result.compile_definitions = std::move(*definitions);
+
+            auto public_definitions = string_array(target, "public-compile-definitions");
+            if (!public_definitions)
+                return std::unexpected(public_definitions.error());
+            result.public_compile_definitions = std::move(*public_definitions);
+
+            auto compile_options = string_array(target, "compile-options");
+            if (!compile_options)
+                return std::unexpected(compile_options.error());
+            result.compile_options = std::move(*compile_options);
+
+            auto public_compile_options = string_array(target, "public-compile-options");
+            if (!public_compile_options)
+                return std::unexpected(public_compile_options.error());
+            result.public_compile_options = std::move(*public_compile_options);
 
             auto standard = optional_integer(target, "cxx-standard");
             if (!standard)
@@ -119,10 +153,12 @@ namespace kaixa::plugin::cmake::detail {
             }
             if (result.type == TargetType::interface_library
                 && (!result.sources.empty() || !result.include_directories.empty()
-                    || !result.link_libraries.empty())) {
+                    || !result.system_include_directories.empty()
+                    || !result.link_libraries.empty() || !result.compile_definitions.empty()
+                    || !result.compile_options.empty())) {
                 return std::unexpected(error_at(
                     target.location_of("type"),
-                    "an interface library cannot have private sources, includes or links"
+                    "an interface library cannot have private target properties"
                 ));
             }
             if (result.cxx_standard && *result.cxx_standard <= 0) {
@@ -133,6 +169,26 @@ namespace kaixa::plugin::cmake::detail {
             }
 
             auto finished = target.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+            return result;
+        }
+
+        Result<TestOptions> read_test(std::string name, TableReader test) {
+            TestOptions result;
+            result.name = std::move(name);
+
+            auto target = test.string("target");
+            if (!target)
+                return std::unexpected(target.error());
+            result.target = std::move(*target);
+
+            auto arguments = string_array(test, "arguments");
+            if (!arguments)
+                return std::unexpected(arguments.error());
+            result.arguments = std::move(*arguments);
+
+            auto finished = test.finish();
             if (!finished)
                 return std::unexpected(finished.error());
             return result;
@@ -159,6 +215,25 @@ namespace kaixa::plugin::cmake::detail {
                 output += "    " + quote(value) + "\n";
             output += ")\n\n";
         }
+
+        std::vector<std::string> project_paths(
+            const Options& options,
+            const std::vector<std::string>& values
+        ) {
+            if (options.generation == GenerationMode::source)
+                return values;
+
+            std::vector<std::string> result;
+            result.reserve(values.size());
+            for (const std::string& value: values) {
+                const std::filesystem::path path = value;
+                if (path.is_absolute() || value.starts_with("$<"))
+                    result.push_back(value);
+                else
+                    result.push_back((options.source / path).lexically_normal().generic_string());
+            }
+            return result;
+        }
     }
 
     Result<Options> read_options(const Graph& graph, const PackageNode& package) {
@@ -178,6 +253,23 @@ namespace kaixa::plugin::cmake::detail {
             return std::unexpected(source.error());
         if (*source)
             result.source /= **source;
+
+        auto generation = options.optional_string("generation");
+        if (!generation)
+            return std::unexpected(generation.error());
+        if (*generation) {
+            if (**generation == "source") {
+                result.generation = GenerationMode::source;
+            } else if (**generation == "state") {
+                result.generation = GenerationMode::state;
+            } else {
+                return std::unexpected(error_at(
+                    options.location_of("generation"),
+                    "unknown CMake generation location `" + **generation
+                        + "`; expected `source` or `state`"
+                ));
+            }
+        }
 
         const Value* languages_value = options.take("languages");
         if (languages_value) {
@@ -215,10 +307,69 @@ namespace kaixa::plugin::cmake::detail {
         if (!target_result)
             return std::unexpected(target_result.error());
         if (*target_result) {
-            auto target = read_target(std::move(**target_result));
+            auto target = read_target(package.name, std::move(**target_result));
             if (!target)
                 return std::unexpected(target.error());
-            result.target = std::move(*target);
+            result.targets.push_back(std::move(*target));
+        }
+
+        auto targets_result = options.optional_table("targets");
+        if (!targets_result)
+            return std::unexpected(targets_result.error());
+        if (*target_result && *targets_result) {
+            return std::unexpected(error_at(
+                options.location_of("targets"),
+                "`cmake.target` and `cmake.targets` cannot be used together"
+            ));
+        }
+        if (*targets_result) {
+            TableReader targets = std::move(**targets_result);
+            for (const TableEntry& entry: targets.entries()) {
+                const std::string path = join_config_path(targets.path(), entry.key);
+                if (!is_valid_identifier(entry.key)) {
+                    SourceLocation location = entry.value.location();
+                    location.config_path = path;
+                    return std::unexpected(error_at(
+                        std::move(location),
+                        "`" + entry.key + "` is not a valid CMake target name"
+                    ));
+                }
+                auto table = TableReader::bind(entry.value, path);
+                if (!table)
+                    return std::unexpected(table.error());
+                auto target = read_target(entry.key, std::move(*table));
+                if (!target)
+                    return std::unexpected(target.error());
+                result.targets.push_back(std::move(*target));
+            }
+            targets.take_all();
+        }
+
+        auto tests_result = options.optional_table("tests");
+        if (!tests_result)
+            return std::unexpected(tests_result.error());
+        if (*tests_result) {
+            TableReader tests = std::move(**tests_result);
+            for (const TableEntry& entry: tests.entries()) {
+                const std::string path = join_config_path(tests.path(), entry.key);
+                auto table = TableReader::bind(entry.value, path);
+                if (!table)
+                    return std::unexpected(table.error());
+                auto test = read_test(entry.key, std::move(*table));
+                if (!test)
+                    return std::unexpected(test.error());
+                if (std::ranges::none_of(result.targets, [&](const TargetOptions& target) {
+                        return target.name == test->target;
+                    })) {
+                    return std::unexpected(error_at(
+                        entry.value.location(),
+                        "test `" + entry.key + "` references unknown target `"
+                            + test->target + "`"
+                    ));
+                }
+                result.tests.push_back(std::move(*test));
+            }
+            tests.take_all();
         }
 
         auto dependencies_result = options.optional_table("dependencies");
@@ -332,7 +483,6 @@ namespace kaixa::plugin::cmake::detail {
     }
 
     std::string generate_project(const PackageNode& package, const Options& options) {
-        const TargetOptions& target = *options.target;
         std::string output = std::string(generated_marker) + "\n"
             + "cmake_minimum_required(VERSION 3.20)\n"
             + "project(" + package.name + " LANGUAGES";
@@ -340,66 +490,121 @@ namespace kaixa::plugin::cmake::detail {
             output += " " + language;
         output += ")\n\n";
 
-        switch (target.type) {
-            case TargetType::executable:
-                output += "add_executable(" + package.name;
-                break;
-            case TargetType::static_library:
-                output += "add_library(" + package.name + " STATIC";
-                break;
-            case TargetType::shared_library:
-                output += "add_library(" + package.name + " SHARED";
-                break;
-            case TargetType::interface_library:
-                output += "add_library(" + package.name + " INTERFACE";
-                break;
-        }
-        if (target.sources.empty()) {
-            output += ")\n\n";
-        } else {
-            output += "\n";
-            for (const std::string& source: target.sources)
-                output += "    " + quote(source) + "\n";
-            output += ")\n\n";
+        for (const TargetOptions& target: options.targets) {
+            switch (target.type) {
+                case TargetType::executable:
+                    output += "add_executable(" + target.name;
+                    break;
+                case TargetType::static_library:
+                    output += "add_library(" + target.name + " STATIC";
+                    break;
+                case TargetType::shared_library:
+                    output += "add_library(" + target.name + " SHARED";
+                    break;
+                case TargetType::interface_library:
+                    output += "add_library(" + target.name + " INTERFACE";
+                    break;
+            }
+            const std::vector<std::string> sources = project_paths(options, target.sources);
+            if (sources.empty()) {
+                output += ")\n\n";
+            } else {
+                output += "\n";
+                for (const std::string& source: sources)
+                    output += "    " + quote(source) + "\n";
+                output += ")\n\n";
+            }
+
+            const bool interface_target = target.type == TargetType::interface_library;
+            const bool executable = target.type == TargetType::executable;
+            emit_values(
+                output,
+                "target_include_directories",
+                target.name,
+                interface_target ? "INTERFACE" : "PRIVATE",
+                project_paths(options, target.include_directories)
+            );
+            emit_values(
+                output,
+                "target_include_directories",
+                target.name,
+                interface_target ? "INTERFACE" : "PUBLIC",
+                project_paths(options, target.public_include_directories)
+            );
+            emit_values(
+                output,
+                "target_include_directories",
+                target.name,
+                interface_target ? "SYSTEM INTERFACE" : "SYSTEM PRIVATE",
+                project_paths(options, target.system_include_directories)
+            );
+            emit_values(
+                output,
+                "target_include_directories",
+                target.name,
+                interface_target ? "SYSTEM INTERFACE" : "SYSTEM PUBLIC",
+                project_paths(options, target.public_system_include_directories)
+            );
+            emit_values(
+                output,
+                "target_link_libraries",
+                target.name,
+                interface_target ? "INTERFACE" : "PRIVATE",
+                target.link_libraries
+            );
+            emit_values(
+                output,
+                "target_link_libraries",
+                target.name,
+                interface_target ? "INTERFACE" : "PUBLIC",
+                target.public_link_libraries
+            );
+            emit_values(
+                output,
+                "target_compile_definitions",
+                target.name,
+                interface_target ? "INTERFACE" : "PRIVATE",
+                target.compile_definitions
+            );
+            emit_values(
+                output,
+                "target_compile_definitions",
+                target.name,
+                interface_target ? "INTERFACE" : "PUBLIC",
+                target.public_compile_definitions
+            );
+            emit_values(
+                output,
+                "target_compile_options",
+                target.name,
+                interface_target ? "INTERFACE" : "PRIVATE",
+                target.compile_options
+            );
+            emit_values(
+                output,
+                "target_compile_options",
+                target.name,
+                interface_target ? "INTERFACE" : "PUBLIC",
+                target.public_compile_options
+            );
+
+            if (target.cxx_standard) {
+                const std::string scope = interface_target
+                    ? "INTERFACE"
+                    : (executable ? "PRIVATE" : "PUBLIC");
+                output += "target_compile_features(" + target.name + " " + scope
+                    + " cxx_std_" + std::to_string(*target.cxx_standard) + ")\n\n";
+            }
         }
 
-        const bool interface_target = target.type == TargetType::interface_library;
-        const bool executable = target.type == TargetType::executable;
-        emit_values(
-            output,
-            "target_include_directories",
-            package.name,
-            interface_target ? "INTERFACE" : "PRIVATE",
-            target.include_directories
-        );
-        emit_values(
-            output,
-            "target_include_directories",
-            package.name,
-            interface_target ? "INTERFACE" : "PUBLIC",
-            target.public_include_directories
-        );
-        emit_values(
-            output,
-            "target_link_libraries",
-            package.name,
-            interface_target ? "INTERFACE" : "PRIVATE",
-            target.link_libraries
-        );
-        emit_values(
-            output,
-            "target_link_libraries",
-            package.name,
-            interface_target ? "INTERFACE" : "PUBLIC",
-            target.public_link_libraries
-        );
-
-        if (target.cxx_standard) {
-            const std::string scope = interface_target
-                ? "INTERFACE"
-                : (executable ? "PRIVATE" : "PUBLIC");
-            output += "target_compile_features(" + package.name + " " + scope
-                + " cxx_std_" + std::to_string(*target.cxx_standard) + ")\n";
+        if (!options.tests.empty()) {
+            output += "enable_testing()\n\n";
+            for (const TestOptions& test: options.tests) {
+                output += "add_test(NAME " + quote(test.name) + " COMMAND " + test.target;
+                for (const std::string& argument: test.arguments)
+                    output += " " + quote(argument);
+                output += ")\n";
+            }
         }
         return output;
     }

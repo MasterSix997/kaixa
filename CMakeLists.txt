@@ -70,7 +70,6 @@ add_executable(kaixa_tests
     tests/workspace_fixtures.cpp
     tests/workspace_errors.cpp
 )
-target_compile_definitions(kaixa_tests PRIVATE KAIXA_TESTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests")
 target_link_libraries(kaixa_tests PRIVATE
     kaixa_core
     kaixa_plugins

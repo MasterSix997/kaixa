@@ -179,6 +179,36 @@ KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
     }
 }
 
+KAIXA_TEST(cmake_rejects_singular_and_plural_target_forms_together) {
+    const TempDirectory root("cmake-target-forms");
+    root.write(
+        "Kaixa.toml",
+        "[package]\nname = \"mixed\"\nresolver = \"cmake\"\n"
+        "\n[cmake.target]\ntype = \"executable\"\nsources = [\"main.cpp\"]\n"
+        "\n[cmake.targets.other]\ntype = \"executable\"\nsources = [\"main.cpp\"]\n"
+    );
+    root.write("main.cpp", "int main() { return 0; }\n");
+
+    const auto graph = kaixa::load_workspace(root.path());
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(!plan.has_value(), "mixed target forms are rejected");
+    if (plan)
+        return;
+
+    context.check_contains(
+        kaixa::format_diagnostic(plan.error()),
+        "cannot be used together",
+        "diagnostic explains target form conflict"
+    );
+}
+
 KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     const TempDirectory root("cmake-configure-options");
     root.write_manifest("Kaixa.toml", kaixa::Manifest{"configured", "cmake"});

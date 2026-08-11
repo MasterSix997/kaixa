@@ -2,6 +2,9 @@
 name = "test_generated_math"
 resolver = "cmake"
 
+[cmake]
+generation = "state"
+
 [cmake.target]
 type = "static-library"
 sources = ["src/math.cpp"]

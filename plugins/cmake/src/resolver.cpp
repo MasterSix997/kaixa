@@ -18,6 +18,7 @@
 namespace kaixa::plugin::cmake {
     namespace {
         using detail::DependencyMode;
+        using detail::GenerationMode;
         using detail::Options;
         using detail::dependency_mode;
         using detail::read_build_options;
@@ -248,18 +249,31 @@ namespace kaixa::plugin::cmake {
             return "[" + equals + "[" + value + "]" + equals + "]";
         }
 
-        Result<std::filesystem::path> prepare_project(
+        struct PreparedProject {
+            std::filesystem::path source;
+            std::filesystem::path cmakelists;
+        };
+
+        Result<PreparedProject> prepare_project(
             const Graph& graph,
             const PackageNode& package,
+            const BuildEnvironment& environment,
+            const std::string_view variant,
             BuildPlan& plan
         ) {
             auto options = read_options(graph, package);
             if (!options)
                 return std::unexpected(options.error());
 
-            const std::filesystem::path project = options->source / "CMakeLists.txt";
-            if (options->target) {
-                if (std::filesystem::is_regular_file(project)) {
+            std::filesystem::path source = options->source;
+            if (!options->targets.empty() && options->generation == GenerationMode::state) {
+                source = environment.state_root / "generated" / "cmake"
+                    / variant / package.name / "project";
+            }
+            const std::filesystem::path project = source / "CMakeLists.txt";
+            if (!options->targets.empty()) {
+                if (options->generation == GenerationMode::source
+                    && std::filesystem::is_regular_file(project)) {
                     std::ifstream input(project, std::ios::binary);
                     std::string first_line;
                     if (!input || !std::getline(input, first_line)) {
@@ -281,7 +295,7 @@ namespace kaixa::plugin::cmake {
                     }
                 }
                 plan.generate({project, detail::generate_project(package, *options)});
-                return project;
+                return PreparedProject{std::move(source), project};
             }
 
             if (!std::filesystem::is_regular_file(project)) {
@@ -293,7 +307,7 @@ namespace kaixa::plugin::cmake {
                     "CMake package `" + package.name + "` has no `" + project.string() + "`"
                 ));
             }
-            return project;
+            return PreparedProject{std::move(source), project};
         }
 
         class ResolverImpl final : public Resolver {
@@ -313,10 +327,6 @@ namespace kaixa::plugin::cmake {
                     return std::unexpected(install.error());
                 if (package.id != graph.root() && !*install)
                     return {};
-
-                auto root_options = read_options(graph, package);
-                if (!root_options)
-                    return std::unexpected(root_options.error());
 
                 const ResolverBuildConfiguration* resolver_configuration =
                     environment.configuration.find("cmake");
@@ -356,10 +366,18 @@ namespace kaixa::plugin::cmake {
                 if (!source_result)
                     return std::unexpected(source_result.error());
 
+                std::vector<std::optional<PreparedProject>> projects(graph.size());
                 for (const PackageId id: source_packages) {
-                    auto project = prepare_project(graph, graph[id], plan);
+                    auto project = prepare_project(
+                        graph,
+                        graph[id],
+                        environment,
+                        variant,
+                        plan
+                    );
                     if (!project)
                         return std::unexpected(project.error());
+                    projects[id.index] = std::move(*project);
                 }
 
                 const std::filesystem::path build_directory =
@@ -379,11 +397,9 @@ namespace kaixa::plugin::cmake {
                     if (id == package.id)
                         continue;
                     const PackageNode& dependency = graph[id];
-                    auto options = read_options(graph, dependency);
-                    if (!options)
-                        return std::unexpected(options.error());
 
-                    integration += "  add_subdirectory(" + cmake_quote(options->source) + " "
+                    integration += "  add_subdirectory("
+                        + cmake_quote(projects[id.index]->source) + " "
                         + cmake_quote(build_directory / "_dependencies" / dependency.name)
                         + ")\n";
                 }
@@ -412,7 +428,7 @@ namespace kaixa::plugin::cmake {
                 configure.description = "configure " + package.name;
                 configure.argv = {
                     "cmake",
-                    "-S", root_options->source.string(),
+                    "-S", projects[package.id.index]->source.string(),
                     "-B", build_directory.string()
                 };
                 if (*install) {
@@ -456,7 +472,7 @@ namespace kaixa::plugin::cmake {
                     resolver_arguments.end()
                 );
                 configure.working_directory = package.directory;
-                configure.inputs.push_back(root_options->source / "CMakeLists.txt");
+                configure.inputs.push_back(projects[package.id.index]->cmakelists);
                 configure.outputs.push_back(build_directory / "CMakeCache.txt");
                 plan.add(std::move(configure));
 

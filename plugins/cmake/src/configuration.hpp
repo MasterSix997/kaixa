@@ -22,25 +22,45 @@ namespace kaixa::plugin::cmake::detail {
         interface_library
     };
 
+    enum class GenerationMode {
+        source,
+        state
+    };
+
     struct DependencyOption {
         PackageId package;
         DependencyMode mode = DependencyMode::add_subdirectory;
     };
 
     struct TargetOptions {
+        std::string name;
         TargetType type = TargetType::executable;
         std::vector<std::string> sources;
         std::vector<std::string> include_directories;
         std::vector<std::string> public_include_directories;
+        std::vector<std::string> system_include_directories;
+        std::vector<std::string> public_system_include_directories;
         std::vector<std::string> link_libraries;
         std::vector<std::string> public_link_libraries;
+        std::vector<std::string> compile_definitions;
+        std::vector<std::string> public_compile_definitions;
+        std::vector<std::string> compile_options;
+        std::vector<std::string> public_compile_options;
         std::optional<std::int64_t> cxx_standard;
+    };
+
+    struct TestOptions {
+        std::string name;
+        std::string target;
+        std::vector<std::string> arguments;
     };
 
     struct Options {
         std::filesystem::path source;
         std::vector<std::string> languages;
-        std::optional<TargetOptions> target;
+        GenerationMode generation = GenerationMode::source;
+        std::vector<TargetOptions> targets;
+        std::vector<TestOptions> tests;
         std::vector<DependencyOption> dependencies;
     };
 
