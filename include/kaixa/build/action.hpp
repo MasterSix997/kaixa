@@ -1,5 +1,7 @@
 #pragma once
 
+#include <kaixa/model/package.hpp>
+
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -45,6 +47,7 @@ namespace kaixa {
         std::vector<std::filesystem::path> inputs;
         std::vector<std::filesystem::path> outputs;
         std::optional<ActionState> checked_state;
+        std::optional<PackageId> package;
         ActionStage stage = ActionStage::build;
     };
 }

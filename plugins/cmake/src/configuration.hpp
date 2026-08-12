@@ -62,6 +62,7 @@ namespace kaixa::plugin::cmake::detail {
         std::string name;
         std::string target;
         std::vector<std::string> arguments;
+        bool discover = false;
     };
 
     struct Options {

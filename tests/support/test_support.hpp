@@ -49,6 +49,8 @@ namespace kaixa::testing {
         static TestRegistry& instance();
 
         bool add(std::string_view name, TestFunction function);
+        void list(std::ostream& out) const;
+        [[nodiscard]] int run(std::string_view name, std::ostream& out) const;
         [[nodiscard]] int run_all(std::ostream& out);
 
     private:
@@ -61,6 +63,8 @@ namespace kaixa::testing {
     };
 
     inline constexpr std::string_view echo_flag = "--kaixa-test-echo";
+    inline constexpr std::string_view list_flag = "--kaixa-test-list";
+    inline constexpr std::string_view run_flag = "--kaixa-test-run";
     [[nodiscard]] int run_echo_mode(int argc, char** argv);
 
     class TempDirectory {

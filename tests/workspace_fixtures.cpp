@@ -180,21 +180,36 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         return;
 
     context.check_equal(plan->actions().size(), std::size_t{3}, "configure, build and test actions");
-    if (plan->actions().size() == 3) {
+    const auto build_action = std::ranges::find_if(
+        plan->actions(),
+        [&](const kaixa::Action& action) {
+            return action.package == graph->root()
+                && action.stage == kaixa::ActionStage::build;
+        }
+    );
+    context.check(build_action != plan->actions().end(), "root build action is identifiable");
+    if (build_action != plan->actions().end()) {
         context.check(
-            std::ranges::find(plan->actions()[1].argv, "test_generated") != plan->actions()[1].argv.end(),
+            std::ranges::find(build_action->argv, "test_generated") != build_action->argv.end(),
             "selected test target restricts the build"
         );
+    }
+
+    const auto test_action = std::ranges::find_if(
+        plan->actions(),
+        [](const kaixa::Action& action) {
+            return action.stage == kaixa::ActionStage::test;
+        }
+    );
+    context.check(test_action != plan->actions().end(), "CTest action exists");
+    if (test_action != plan->actions().end()) {
         context.check(
-            plan->actions()[2].stage == kaixa::ActionStage::test,
-            "CTest action uses the test stage"
-        );
-        context.check(
-            std::ranges::find(plan->actions()[2].argv, "gener") != plan->actions()[2].argv.end(),
+            std::ranges::find(test_action->argv, "gener") != test_action->argv.end(),
             "test name filter reaches CTest"
         );
         context.check(
-            std::ranges::find(plan->actions()[2].argv, "^kaixa\\.target:test_generated$") != plan->actions()[2].argv.end(),
+            std::ranges::find(test_action->argv, "^kaixa\\.target:test_generated$")
+                != test_action->argv.end(),
             "target label restricts CTest"
         );
     }
@@ -247,6 +262,9 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
             "project output policy"
         );
         context.check_contains(generated->content, "add_test", "CTest registration");
+        context.check_contains(generated->content, "TEST_INCLUDE_FILES", "CTest discovery include");
+        context.check_contains(generated->content, "--kaixa-test-list", "test listing protocol");
+        context.check_contains(generated->content, "--kaixa-test-run", "single test protocol");
         context.check_contains(generated->content, "kaixa.target:test_generated", "CTest target label");
         context.check_contains(generated->content, "cxx_std_23", "C++ standard");
     }

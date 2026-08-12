@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <ranges>
 #include <stdexcept>
 #include <system_error>
 
@@ -55,6 +56,30 @@ namespace kaixa::testing {
     bool TestRegistry::add(const std::string_view name, const TestFunction function) {
         m_entries.push_back({std::string(name), function});
         return true;
+    }
+
+    void TestRegistry::list(std::ostream& out) const {
+        for (const Entry& entry: m_entries)
+            out << entry.name << '\n';
+    }
+
+    int TestRegistry::run(const std::string_view name, std::ostream& out) const {
+        const auto entry = std::ranges::find(m_entries, name, &Entry::name);
+        if (entry == m_entries.end()) {
+            out << "unknown test: " << name << '\n';
+            return 2;
+        }
+
+        TestContext context(entry->name, out);
+        try {
+            entry->function(context);
+        } catch (const std::exception& exception) {
+            context.fail(std::string("unexpected exception: ") + exception.what());
+        } catch (...) {
+            context.fail("unexpected non-standard exception");
+        }
+
+        return context.failures() == 0 ? 0 : 1;
     }
 
     int TestRegistry::run_all(std::ostream& out) {

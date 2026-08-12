@@ -32,3 +32,4 @@ link-libraries = ["test_generated_math", "test_generated_support"]
 [[cmake.test]]
 name = "generated"
 target = "test_generated"
+discover = true

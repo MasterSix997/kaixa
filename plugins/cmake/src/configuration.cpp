@@ -1,4 +1,5 @@
 #include "configuration.hpp"
+#include "testing.hpp"
 
 #include <kaixa/config/table_reader.hpp>
 
@@ -190,6 +191,18 @@ namespace kaixa::plugin::cmake::detail {
             if (!arguments)
                 return std::unexpected(arguments.error());
             result.arguments = std::move(*arguments);
+
+            if (const Value* discover = test.take("discover")) {
+                const bool* enabled = discover->as_boolean();
+                if (!enabled) {
+                    return std::unexpected(wrong_kind(
+                        discover->location(),
+                        "a boolean",
+                        discover->kind()
+                    ));
+                }
+                result.discover = *enabled;
+            }
 
             return result;
         }
@@ -836,17 +849,7 @@ namespace kaixa::plugin::cmake::detail {
             }
         }
 
-        if (!options.tests.empty()) {
-            output += "enable_testing()\n\n";
-            for (const TestOptions& test: options.tests) {
-                output += "add_test(NAME " + quote(test.name) + " COMMAND " + test.target;
-                for (const std::string& argument: test.arguments)
-                    output += " " + quote(argument);
-                output += ")\n";
-                output += "set_tests_properties(" + quote(test.name) + " PROPERTIES LABELS "
-                    + quote(std::string(test_target_label_prefix) + test.target) + ")\n";
-            }
-        }
+        generate_tests(output, options.tests);
         return output;
     }
 }

@@ -48,6 +48,7 @@ add_library(kaixa_plugins STATIC
     [[plugins/cmake/src/configuration.cpp]]
     [[plugins/cmake/src/file_api.cpp]]
     [[plugins/cmake/src/resolver.cpp]]
+    [[plugins/cmake/src/testing.cpp]]
 )
 
 target_include_directories(kaixa_plugins PUBLIC
@@ -65,6 +66,8 @@ set_target_properties(kaixa_plugins PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(kaixa
     [[apps/kaixa/main.cpp]]
+    [[apps/kaixa/command_line.cpp]]
+    [[apps/kaixa/application.cpp]]
 )
 
 target_link_libraries(kaixa PRIVATE
@@ -94,12 +97,18 @@ set_target_properties(kaixa_test_support PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(kaixa_tests
     [[tests/support/test_main.cpp]]
+    [[apps/kaixa/command_line.cpp]]
+    [[tests/command_line.cpp]]
     [[tests/smoke.cpp]]
     [[tests/manifest.cpp]]
     [[tests/configurations.cpp]]
     [[tests/build_operations.cpp]]
     [[tests/workspace_fixtures.cpp]]
     [[tests/workspace_errors.cpp]]
+)
+
+target_include_directories(kaixa_tests PRIVATE
+    [[apps/kaixa]]
 )
 
 target_link_libraries(kaixa_tests PRIVATE
@@ -114,5 +123,55 @@ set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 enable_testing()
 
-add_test(NAME [[kaixa]] COMMAND kaixa_tests)
-set_tests_properties([[kaixa]] PROPERTIES LABELS [[kaixa.target:kaixa_tests]])
+set(_kaixa_discovery_0 "${CMAKE_CURRENT_BINARY_DIR}/kaixa-discovery-0")
+if(CMAKE_CONFIGURATION_TYPES)
+  file(GENERATE OUTPUT "${_kaixa_discovery_0}-$<CONFIG>.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
+set(_kaixa_test_prefix [[kaixa]])
+set(_kaixa_test_label [[kaixa.target:kaixa_tests]])
+execute_process(
+  COMMAND "${_kaixa_test_executable}" --kaixa-test-list
+  RESULT_VARIABLE _kaixa_result
+  OUTPUT_VARIABLE _kaixa_output
+  ERROR_VARIABLE _kaixa_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _kaixa_result EQUAL 0)
+  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
+endif()
+string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
+foreach(_kaixa_case IN LISTS _kaixa_cases)
+  if(_kaixa_case STREQUAL "")
+    continue()
+  endif()
+  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
+  add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")
+  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
+endforeach()
+]=])
+  file(WRITE "${_kaixa_discovery_0}.cmake" "include(\"${_kaixa_discovery_0}-\${CTEST_CONFIGURATION_TYPE}.cmake\")\n")
+else()
+  file(GENERATE OUTPUT "${_kaixa_discovery_0}.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
+set(_kaixa_test_prefix [[kaixa]])
+set(_kaixa_test_label [[kaixa.target:kaixa_tests]])
+execute_process(
+  COMMAND "${_kaixa_test_executable}" --kaixa-test-list
+  RESULT_VARIABLE _kaixa_result
+  OUTPUT_VARIABLE _kaixa_output
+  ERROR_VARIABLE _kaixa_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _kaixa_result EQUAL 0)
+  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
+endif()
+string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
+foreach(_kaixa_case IN LISTS _kaixa_cases)
+  if(_kaixa_case STREQUAL "")
+    continue()
+  endif()
+  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
+  add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")
+  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
+endforeach()
+]=])
+endif()
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_kaixa_discovery_0}.cmake")
