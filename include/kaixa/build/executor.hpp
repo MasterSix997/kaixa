@@ -50,4 +50,5 @@ namespace kaixa {
         ActionStage stage
     );
     [[nodiscard]] Result<ExecutionReport> execute(const BuildPlan& plan);
+    [[nodiscard]] Result<ExecutionReport> test(const BuildPlan& plan);
 }

@@ -33,4 +33,29 @@ namespace kaixa {
         }
         return plan;
     }
+
+    Result<BuildPlan> plan_tests(
+        const Graph& graph,
+        const ResolverRegistry& registry,
+        const BuildEnvironment& environment,
+        const TestRequest& request
+    ) {
+        auto plan = plan_build(graph, registry, environment);
+        if (!plan)
+            return std::unexpected(plan.error());
+
+        const PackageNode& root = graph[graph.root()];
+        Resolver* resolver = registry.find(root.resolver);
+        if (!resolver) {
+            return std::unexpected(error(
+                "resolver `" + root.resolver + "` is not installed"
+            ));
+        }
+
+        auto planned = resolver->plan_tests(graph, root, environment, request, *plan);
+        if (!planned)
+            return std::unexpected(planned.error());
+
+        return plan;
+    }
 }

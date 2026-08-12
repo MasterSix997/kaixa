@@ -183,4 +183,17 @@ namespace kaixa {
         built->executed += generated->synchronized;
         return built;
     }
+
+    Result<ExecutionReport> test(const BuildPlan& plan) {
+        auto executed = execute(plan);
+        if (!executed)
+            return std::unexpected(executed.error());
+
+        auto tested = execute_actions(plan, ActionStage::test);
+        if (!tested)
+            return std::unexpected(tested.error());
+
+        executed->executed += tested->executed;
+        return executed;
+    }
 }

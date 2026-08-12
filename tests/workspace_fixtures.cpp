@@ -173,10 +173,31 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         workspace.path() / ".kaixa",
         "debug"
     };
-    const auto plan = kaixa::plan_build(*graph, registry, environment);
-    context.check(plan.has_value(), "generated project plans");
+    const kaixa::TestRequest request{"gener", "test_generated"};
+    const auto plan = kaixa::plan_tests(*graph, registry, environment, request);
+    context.check(plan.has_value(), "generated project test plans");
     if (!plan)
         return;
+
+    context.check_equal(plan->actions().size(), std::size_t{3}, "configure, build and test actions");
+    if (plan->actions().size() == 3) {
+        context.check(
+            std::ranges::find(plan->actions()[1].argv, "test_generated") != plan->actions()[1].argv.end(),
+            "selected test target restricts the build"
+        );
+        context.check(
+            plan->actions()[2].stage == kaixa::ActionStage::test,
+            "CTest action uses the test stage"
+        );
+        context.check(
+            std::ranges::find(plan->actions()[2].argv, "gener") != plan->actions()[2].argv.end(),
+            "test name filter reaches CTest"
+        );
+        context.check(
+            std::ranges::find(plan->actions()[2].argv, "^kaixa\\.target:test_generated$") != plan->actions()[2].argv.end(),
+            "target label restricts CTest"
+        );
+    }
 
     const auto generated = std::ranges::find_if(
         plan->generated_files(),
@@ -226,6 +247,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
             "project output policy"
         );
         context.check_contains(generated->content, "add_test", "CTest registration");
+        context.check_contains(generated->content, "kaixa.target:test_generated", "CTest target label");
         context.check_contains(generated->content, "cxx_std_23", "C++ standard");
     }
 
@@ -254,12 +276,12 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         }
     }
 
-    const auto report = kaixa::execute(*plan);
-    context.check(report.has_value(), "generated project configures and builds");
+    const auto report = kaixa::test(*plan);
+    context.check(report.has_value(), "generated project configures, builds and tests");
     if (!report)
         context.fail(kaixa::format_diagnostic(report.error()));
     else {
-        context.check_equal(report->executed, std::size_t{2}, "configure and build execute");
+        context.check_equal(report->executed, std::size_t{3}, "configure, build and test execute");
 
         const auto configured_plan = kaixa::plan_build(*graph, registry, environment);
         context.check(configured_plan.has_value(), "configured project plans again");

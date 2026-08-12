@@ -15,7 +15,8 @@ namespace kaixa {
 
     enum class ActionStage {
         synchronize,
-        build
+        build,
+        test
     };
 
     struct Action {

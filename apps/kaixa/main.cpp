@@ -19,6 +19,8 @@ namespace {
             << "  kaixa inspect [path]\n"
             << "  kaixa <check|generate|build> [path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
+            << "  kaixa test [filter] [--target name] [--path path] [--profile name] [--config name]...\n"
+            << "        [--for resolver <arguments...>]...\n"
             << "  kaixa --version\n";
     }
 
@@ -103,7 +105,8 @@ namespace {
     enum class WorkspaceOperation {
         check,
         generate,
-        build
+        build,
+        test
     };
 
     std::string_view state_name(const kaixa::GeneratedFileState state) {
@@ -128,6 +131,7 @@ namespace {
         switch (stage) {
             case kaixa::ActionStage::synchronize: return "synchronization";
             case kaixa::ActionStage::build: return "build";
+            case kaixa::ActionStage::test: return "test";
         }
         return "action";
     }
@@ -137,7 +141,8 @@ namespace {
         const std::filesystem::path& path,
         std::optional<std::string> profile,
         std::vector<std::string> configurations,
-        std::vector<kaixa::ResolverArgumentOverride> resolver_arguments
+        std::vector<kaixa::ResolverArgumentOverride> resolver_arguments,
+        kaixa::TestRequest test_request = {}
     ) {
         auto graph = kaixa::load_workspace(path);
         if (!graph)
@@ -182,7 +187,9 @@ namespace {
         };
         const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
 
-        auto plan = kaixa::plan_build(*graph, registry, environment);
+        auto plan = operation == WorkspaceOperation::test
+            ? kaixa::plan_tests(*graph, registry, environment, test_request)
+            : kaixa::plan_build(*graph, registry, environment);
         if (!plan)
             return fail(plan.error());
 
@@ -229,7 +236,9 @@ namespace {
             std::cout << action.description << ": " << kaixa::format_command(action.argv) << '\n';
         std::cout.flush();
 
-        auto report = kaixa::execute(*plan);
+        auto report = operation == WorkspaceOperation::test
+            ? kaixa::test(*plan)
+            : kaixa::execute(*plan);
         if (!report)
             return fail(report.error());
         std::cout << "completed " << report->executed << " action(s)\n";
@@ -255,11 +264,40 @@ int main(const int argc, char** argv) {
 
     std::filesystem::path path = ".";
     std::optional<std::string> profile;
+    std::optional<std::string> test_filter;
+    std::optional<std::string> test_target;
     std::vector<std::string> configurations;
     std::vector<kaixa::ResolverArgumentOverride> resolver_arguments;
     bool has_path = false;
     for (int index = 2; index < argc;) {
         const std::string_view argument = argv[index];
+        if (argument == "--path") {
+            if (command != "test") {
+                std::cerr << "error: --path is only valid with `test`\n";
+                return 2;
+            }
+            if (++index == argc) {
+                std::cerr << "error: --path requires a value\n";
+                return 2;
+            }
+            path = argv[index];
+            has_path = true;
+            ++index;
+            continue;
+        }
+        if (argument == "--target") {
+            if (command != "test") {
+                std::cerr << "error: --target is only valid with `test`\n";
+                return 2;
+            }
+            if (++index == argc) {
+                std::cerr << "error: --target requires a value\n";
+                return 2;
+            }
+            test_target = argv[index];
+            ++index;
+            continue;
+        }
         if (argument == "--profile") {
             if (++index == argc) {
                 std::cerr << "error: --profile requires a value\n";
@@ -309,12 +347,20 @@ int main(const int argc, char** argv) {
             }
             continue;
         }
-        if (has_path) {
-            std::cerr << "error: unexpected argument `" << argument << "`\n";
-            return 2;
+        if (command == "test") {
+            if (test_filter) {
+                std::cerr << "error: unexpected argument `" << argument << "`\n";
+                return 2;
+            }
+            test_filter = argument;
+        } else {
+            if (has_path) {
+                std::cerr << "error: unexpected argument `" << argument << "`\n";
+                return 2;
+            }
+            path = argument;
+            has_path = true;
         }
-        path = argument;
-        has_path = true;
         ++index;
     }
 
@@ -333,6 +379,8 @@ int main(const int argc, char** argv) {
         operation = WorkspaceOperation::generate;
     else if (command == "build")
         operation = WorkspaceOperation::build;
+    else if (command == "test")
+        operation = WorkspaceOperation::test;
 
     if (operation) {
         return process_workspace(
@@ -340,7 +388,8 @@ int main(const int argc, char** argv) {
             path,
             std::move(profile),
             std::move(configurations),
-            std::move(resolver_arguments)
+            std::move(resolver_arguments),
+            {std::move(test_filter), std::move(test_target)}
         );
     }
 

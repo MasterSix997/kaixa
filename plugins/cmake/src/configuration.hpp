@@ -7,9 +7,12 @@
 #include <filesystem>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace kaixa::plugin::cmake::detail {
+    inline constexpr std::string_view test_target_label_prefix = "kaixa.target:";
+
     enum class DependencyMode {
         add_subdirectory,
         find_package

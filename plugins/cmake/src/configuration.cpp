@@ -843,6 +843,8 @@ namespace kaixa::plugin::cmake::detail {
                 for (const std::string& argument: test.arguments)
                     output += " " + quote(argument);
                 output += ")\n";
+                output += "set_tests_properties(" + quote(test.name) + " PROPERTIES LABELS "
+                    + quote(std::string(test_target_label_prefix) + test.target) + ")\n";
             }
         }
         return output;

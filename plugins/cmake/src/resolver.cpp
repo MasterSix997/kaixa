@@ -253,6 +253,19 @@ namespace kaixa::plugin::cmake {
             return "[" + equals + "[" + value + "]" + equals + "]";
         }
 
+        std::string regex_escape(const std::string_view value) {
+            constexpr std::string_view special = R"(\.^$|()[]*+?{})";
+            std::string escaped;
+            escaped.reserve(value.size());
+            for (const char character: value) {
+                if (special.contains(character))
+                    escaped += '\\';
+
+                escaped += character;
+            }
+            return escaped;
+        }
+
         struct PreparedProject {
             std::filesystem::path source;
             std::filesystem::path cmakelists;
@@ -529,6 +542,101 @@ namespace kaixa::plugin::cmake {
                     install_action.stage = ActionStage::synchronize;
                     plan.add(std::move(install_action));
                 }
+                return {};
+            }
+
+            [[nodiscard]] Result<void> plan_tests(
+                const Graph& graph,
+                const PackageNode& package,
+                const BuildEnvironment& environment,
+                const TestRequest& request,
+                BuildPlan& plan
+            ) const override {
+                auto options = read_options(graph, package);
+                if (!options)
+                    return std::unexpected(options.error());
+
+                const ResolverBuildConfiguration* resolver_configuration =
+                    environment.configuration.find("cmake");
+                auto build_options = read_build_options(resolver_configuration && resolver_configuration->settings
+                    ? &*resolver_configuration->settings
+                    : nullptr
+                );
+                if (!build_options)
+                    return std::unexpected(build_options.error());
+
+                std::vector<std::string> resolver_arguments = build_options->arguments;
+                if (resolver_configuration) {
+                    resolver_arguments.insert(
+                        resolver_arguments.end(),
+                        resolver_configuration->arguments.begin(),
+                        resolver_configuration->arguments.end()
+                    );
+                }
+                const std::string variant = build_variant(
+                    environment,
+                    *build_options,
+                    resolver_arguments,
+                    *options
+                );
+                const std::string configuration = configuration_name(
+                    environment.configuration.profile
+                );
+                const std::filesystem::path build_directory =
+                    cmake_build_root(environment, variant) / package.name;
+
+                if (request.target) {
+                    const auto target = std::ranges::find_if(
+                        options->targets,
+                        [&](const detail::TargetOptions& candidate) {
+                            return candidate.name == *request.target;
+                        }
+                    );
+                    if (target == options->targets.end()) {
+                        return std::unexpected(error(
+                            "CMake target `" + *request.target + "` does not exist"
+                        ));
+                    }
+                    if (std::ranges::none_of(options->tests, [&](const detail::TestOptions& test) {
+                        return test.target == *request.target;
+                    })) {
+                        return std::unexpected(error(
+                            "CMake target `" + *request.target + "` does not declare tests"
+                        ));
+                    }
+
+                    const auto build = std::ranges::find_if(plan.actions(), [](const Action& action) {
+                        return action.stage == ActionStage::build;
+                    });
+                    if (build == plan.actions().end())
+                        return std::unexpected(error("CMake test plan has no build action"));
+
+                    build->argv.push_back("--target");
+                    build->argv.push_back(*request.target);
+                }
+
+                Action test_action;
+                test_action.description = "test " + package.name;
+                test_action.argv = {
+                    "ctest",
+                    "--test-dir", build_directory.string(),
+                    "--build-config", configuration,
+                    "--output-on-failure"
+                };
+                if (request.filter) {
+                    test_action.argv.push_back("--tests-regex");
+                    test_action.argv.push_back(regex_escape(*request.filter));
+                }
+                if (request.target) {
+                    test_action.argv.push_back("--label-regex");
+                    test_action.argv.push_back(
+                        "^" + regex_escape(detail::test_target_label_prefix)
+                            + regex_escape(*request.target) + "$"
+                    );
+                }
+                test_action.working_directory = package.directory;
+                test_action.stage = ActionStage::test;
+                plan.add(std::move(test_action));
                 return {};
             }
         };

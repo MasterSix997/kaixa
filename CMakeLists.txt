@@ -115,3 +115,4 @@ set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
 enable_testing()
 
 add_test(NAME [[kaixa]] COMMAND kaixa_tests)
+set_tests_properties([[kaixa]] PROPERTIES LABELS [[kaixa.target:kaixa_tests]])

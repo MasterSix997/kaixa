@@ -22,6 +22,7 @@ namespace kaixa {
         [[nodiscard]] std::span<const GeneratedFile> generated_files() const noexcept {
             return m_files;
         }
+        [[nodiscard]] std::span<Action> actions() noexcept { return m_actions; }
         [[nodiscard]] std::span<const Action> actions() const noexcept { return m_actions; }
         [[nodiscard]] bool empty() const noexcept {
             return m_files.empty() && m_actions.empty();

@@ -12,4 +12,11 @@ namespace kaixa {
         const ResolverRegistry& registry,
         const BuildEnvironment& environment
     );
+
+    [[nodiscard]] Result<BuildPlan> plan_tests(
+        const Graph& graph,
+        const ResolverRegistry& registry,
+        const BuildEnvironment& environment,
+        const TestRequest& request
+    );
 }
