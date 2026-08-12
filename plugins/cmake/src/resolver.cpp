@@ -3,6 +3,7 @@
 #include <kaixa/foundation/process.hpp>
 
 #include "configuration.hpp"
+#include "file_api.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -413,6 +414,7 @@ namespace kaixa::plugin::cmake {
                 }
                 integration += "endif()\n";
                 plan.generate({integration_file, std::move(integration)});
+                plan.generate({detail::file_api_query(build_directory), {}});
 
                 std::vector<bool> prefix_visited(graph.size(), false);
                 std::vector<bool> prefix_added(graph.size(), false);
@@ -480,8 +482,16 @@ namespace kaixa::plugin::cmake {
                     resolver_arguments.end()
                 );
                 configure.working_directory = package.directory;
-                configure.inputs.push_back(projects[package.id.index]->cmakelists);
+                configure.stage = ActionStage::synchronize;
+                for (const PackageId id: source_packages)
+                    configure.inputs.push_back(projects[id.index]->cmakelists);
+
                 configure.outputs.push_back(build_directory / "CMakeCache.txt");
+                auto checked_state = detail::configuration_state(
+                    build_directory,
+                    configure.inputs
+                );
+                configure.checked_state = checked_state ? *checked_state : ActionState::unknown;
                 plan.add(std::move(configure));
 
                 Action build;
@@ -494,6 +504,9 @@ namespace kaixa::plugin::cmake {
                 build.working_directory = package.directory;
                 build.inputs.push_back(build_directory / "CMakeCache.txt");
                 build.outputs.push_back(build_directory);
+                if (*install)
+                    build.stage = ActionStage::synchronize;
+
                 plan.add(std::move(build));
 
                 if (*install) {
@@ -513,6 +526,7 @@ namespace kaixa::plugin::cmake {
                     install_action.working_directory = package.directory;
                     install_action.inputs.push_back(build_directory);
                     install_action.outputs.push_back(destination);
+                    install_action.stage = ActionStage::synchronize;
                     plan.add(std::move(install_action));
                 }
                 return {};

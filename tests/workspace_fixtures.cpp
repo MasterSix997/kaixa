@@ -4,6 +4,7 @@
 #include <kaixa/plugin/bundle.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <filesystem>
 #include <string>
@@ -79,7 +80,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     context.check(plan.has_value(), "workspace example plans");
     if (plan) {
         context.check_equal(plan->actions().size(), std::size_t{2}, "one composed CMake build");
-        context.check_equal(plan->generated_files().size(), std::size_t{1}, "integration file");
+        context.check_equal(plan->generated_files().size(), std::size_t{2}, "integration and File API query");
         if (plan->actions().size() == 2 && !plan->generated_files().empty()) {
             context.check_equal(
                 plan->actions()[0].description,
@@ -130,6 +131,17 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
         plan->actions()[3].description,
         std::string("configure test_package_app"),
         "consumer configures after provider"
+    );
+    for (std::size_t index = 0; index < 4; ++index) {
+        context.check(
+            plan->actions()[index].stage == kaixa::ActionStage::synchronize,
+            "provider preparation and consumer configuration synchronize"
+        );
+    }
+
+    context.check(
+        plan->actions()[4].stage == kaixa::ActionStage::build,
+        "consumer compilation stays in the build stage"
     );
 
     const std::string artifact_root =
@@ -217,12 +229,68 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         context.check_contains(generated->content, "cxx_std_23", "C++ standard");
     }
 
+    const auto synchronization = kaixa::generate(*plan);
+    context.check(synchronization.has_value(), "generated project synchronizes");
+    if (!synchronization) {
+        context.fail(kaixa::format_diagnostic(synchronization.error()));
+        return;
+    }
+    context.check_equal(
+        synchronization->synchronized,
+        std::size_t{1},
+        "CMake configuration synchronizes"
+    );
+
+    const auto synchronized_plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(synchronized_plan.has_value(), "synchronized project plans again");
+    if (synchronized_plan) {
+        const auto state = kaixa::check(*synchronized_plan);
+        context.check(state.has_value(), "synchronized project can be checked");
+        if (state) {
+            context.check(
+                !state->requires_synchronization(),
+                "generate leaves no required synchronization"
+            );
+        }
+    }
+
     const auto report = kaixa::execute(*plan);
     context.check(report.has_value(), "generated project configures and builds");
     if (!report)
         context.fail(kaixa::format_diagnostic(report.error()));
-    else
+    else {
         context.check_equal(report->executed, std::size_t{2}, "configure and build execute");
+
+        const auto configured_plan = kaixa::plan_build(*graph, registry, environment);
+        context.check(configured_plan.has_value(), "configured project plans again");
+        if (configured_plan) {
+            const auto state = kaixa::check(*configured_plan);
+            context.check(state.has_value(), "configured project can be checked");
+            if (state) {
+                context.check(
+                    state->actions.front().state == kaixa::ActionState::current,
+                    "CMake File API reports configuration as current"
+                );
+            }
+        }
+
+        std::filesystem::last_write_time(
+            generated->path,
+            std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2)
+        );
+        const auto stale_plan = kaixa::plan_build(*graph, registry, environment);
+        context.check(stale_plan.has_value(), "changed CMake input plans again");
+        if (stale_plan) {
+            const auto state = kaixa::check(*stale_plan);
+            context.check(state.has_value(), "changed CMake input can be checked");
+            if (state) {
+                context.check(
+                    state->actions.front().state == kaixa::ActionState::required,
+                    "CMake File API detects configuration input changes"
+                );
+            }
+        }
+    }
 }
 
 KAIXA_TEST(generated_project_refuses_to_replace_a_manual_cmakelists) {

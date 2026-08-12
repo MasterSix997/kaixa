@@ -159,14 +159,18 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
     };
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "CMake resolver creates a plan");
-    if (plan)
-        context.check_equal(
-            plan->actions().size(),
-            std::size_t{2},
-            "one composed configure and build"
+    if (!plan)
+        return;
+
+    context.check_equal(plan->actions().size(), std::size_t{2}, "one composed configure and build");
+    context.check_equal(plan->generated_files().size(), std::size_t{2}, "integration and File API query");
+    if (plan->actions().size() == 2) {
+        context.check(
+            plan->actions()[0].stage == kaixa::ActionStage::synchronize,
+            "configure synchronizes"
         );
-    if (plan)
-        context.check_equal(plan->generated_files().size(), std::size_t{1}, "integration file");
+        context.check(plan->actions()[1].stage == kaixa::ActionStage::build, "build stays explicit");
+    }
 }
 
 KAIXA_TEST(graph_rejects_dependency_cycles) {

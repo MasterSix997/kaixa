@@ -33,6 +33,8 @@ namespace kaixa {
         }
 
         Result<ActionState> action_state(const Action& action) {
+            if (action.checked_state)
+                return *action.checked_state;
             if (action.outputs.empty())
                 return ActionState::unknown;
 
@@ -86,11 +88,12 @@ namespace kaixa {
         }
     }
 
-    bool CheckReport::requires_action() const noexcept {
+    bool CheckReport::requires_synchronization() const noexcept {
         return std::ranges::any_of(generated_files, [](const GeneratedFileCheck& file) {
             return file.state != GeneratedFileState::current;
         }) || std::ranges::any_of(actions, [](const ActionCheck& action) {
-            return action.state == ActionState::required;
+            return action.stage == ActionStage::synchronize
+                && action.state == ActionState::required;
         });
     }
 
@@ -111,7 +114,7 @@ namespace kaixa {
             if (!state)
                 return std::unexpected(state.error());
 
-            report.actions.push_back({action.description, *state});
+            report.actions.push_back({action.description, *state, action.stage});
         }
         return report;
     }
@@ -135,13 +138,21 @@ namespace kaixa {
 
             ++report.written;
         }
+        auto synchronized = execute_actions(plan, ActionStage::synchronize);
+        if (!synchronized)
+            return std::unexpected(synchronized.error());
+
+        report.synchronized = synchronized->executed;
         return report;
     }
 
-    Result<ExecutionReport> execute_actions(const BuildPlan& plan) {
+    Result<ExecutionReport> execute_actions(const BuildPlan& plan, const ActionStage stage) {
         ExecutionReport report;
 
         for (const Action& action: plan.actions()) {
+            if (action.stage != stage)
+                continue;
+
             const ProcessRequest request{action.argv, action.working_directory};
             auto result = run_process(request);
             if (!result) {
@@ -165,6 +176,11 @@ namespace kaixa {
         if (!generated)
             return std::unexpected(generated.error());
 
-        return execute_actions(plan);
+        auto built = execute_actions(plan, ActionStage::build);
+        if (!built)
+            return std::unexpected(built.error());
+
+        built->executed += generated->synchronized;
+        return built;
     }
 }

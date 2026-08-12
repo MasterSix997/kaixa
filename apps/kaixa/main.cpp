@@ -124,6 +124,14 @@ namespace {
         return "unknown";
     }
 
+    std::string_view stage_name(const kaixa::ActionStage stage) {
+        switch (stage) {
+            case kaixa::ActionStage::synchronize: return "synchronization";
+            case kaixa::ActionStage::build: return "build";
+        }
+        return "action";
+    }
+
     int process_workspace(
         const WorkspaceOperation operation,
         const std::filesystem::path& path,
@@ -186,29 +194,25 @@ namespace {
             for (const kaixa::GeneratedFileCheck& file: report->generated_files)
                 std::cout << state_name(file.state) << " generated file: " << file.path.string() << '\n';
 
-            for (const kaixa::ActionCheck& action: report->actions)
-                std::cout << state_name(action.state) << " action: " << action.description << '\n';
+            for (const kaixa::ActionCheck& action: report->actions) {
+                std::cout << state_name(action.state) << ' ' << stage_name(action.stage) << ": " << action.description << '\n';
+            }
 
-            if (report->requires_action()) {
-                std::cout << "actions required\n";
+            if (report->requires_synchronization()) {
+                std::cout << "synchronization required\n";
                 return 1;
             }
-            const auto unknown = static_cast<std::size_t>(std::ranges::count_if(
-                report->actions,
-                [](const kaixa::ActionCheck& action) {
-                    return action.state == kaixa::ActionState::unknown;
-                }
-            ));
-            std::cout << "no required actions detected";
-
-            if (unknown != 0)
-                std::cout << "; " << unknown << " action(s) unknown";
-
-            std::cout << '\n';
+            std::cout << "workspace synchronized\n";
             return 0;
         }
 
         if (operation == WorkspaceOperation::generate) {
+            for (const kaixa::Action& action: plan->actions()) {
+                if (action.stage == kaixa::ActionStage::synchronize)
+                    std::cout << action.description << ": " << kaixa::format_command(action.argv) << '\n';
+            }
+            std::cout.flush();
+
             auto report = kaixa::generate(*plan);
             if (!report)
                 return fail(report.error());
@@ -216,7 +220,8 @@ namespace {
             for (const kaixa::GeneratedFile& file: plan->generated_files())
                 std::cout << "output file: " << file.path.string() << '\n';
 
-            std::cout << "wrote " << report->written << " file(s); "<< report->unchanged << " unchanged\n";
+            std::cout << "wrote " << report->written << " file(s); " << report->unchanged
+                      << " unchanged; synchronized " << report->synchronized << " action(s)\n";
             return 0;
         }
 

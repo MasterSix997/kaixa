@@ -4,6 +4,7 @@
 
 #include <chrono>
 #include <filesystem>
+#include <utility>
 
 using kaixa::testing::TempDirectory;
 
@@ -16,7 +17,9 @@ KAIXA_TEST(check_is_read_only_and_reports_missing_outputs) {
 
     kaixa::BuildPlan plan;
     plan.generate({generated, "generated\n"});
-    plan.add({"configure", {"unused"}, root.path(), {input}, {output}});
+    kaixa::Action configure{"configure", {"unused"}, root.path(), {input}, {output}};
+    configure.stage = kaixa::ActionStage::synchronize;
+    plan.add(std::move(configure));
 
     const auto report = kaixa::check(plan);
     context.check(report.has_value(), "plan can be checked");
@@ -32,7 +35,11 @@ KAIXA_TEST(check_is_read_only_and_reports_missing_outputs) {
         report->actions.front().state == kaixa::ActionState::required,
         "missing action output is required"
     );
-    context.check(report->requires_action(), "report requires action");
+    context.check(
+        report->actions.front().stage == kaixa::ActionStage::synchronize,
+        "action keeps its synchronization stage"
+    );
+    context.check(report->requires_synchronization(), "report requires synchronization");
     context.check(!std::filesystem::exists(generated.parent_path()), "check creates no directory");
 }
 
@@ -49,6 +56,7 @@ KAIXA_TEST(generate_writes_only_changed_files) {
         return;
     context.check_equal(first->written, std::size_t{1}, "one file written");
     context.check_equal(first->unchanged, std::size_t{0}, "no unchanged file initially");
+    context.check_equal(first->synchronized, std::size_t{0}, "no synchronization action");
 
     const auto before = std::filesystem::last_write_time(generated);
     const auto second = kaixa::generate(plan);
@@ -103,7 +111,7 @@ KAIXA_TEST(check_distinguishes_current_and_unknown_actions) {
         report->actions[1].state == kaixa::ActionState::unknown,
         "directory output has backend-owned state"
     );
-    context.check(!report->requires_action(), "unknown is not reported as required");
+    context.check(!report->requires_synchronization(), "unknown is not reported as required");
 
     std::filesystem::last_write_time(input, now + std::chrono::seconds(2));
     report = kaixa::check(plan);
@@ -113,6 +121,48 @@ KAIXA_TEST(check_distinguishes_current_and_unknown_actions) {
             report->actions[0].state == kaixa::ActionState::unknown,
             "newer input leaves backend state unknown"
         );
-        context.check(!report->requires_action(), "unknown action is not reported as required");
+        context.check(
+            !report->requires_synchronization(),
+            "unknown action is not reported as required"
+        );
+    }
+}
+
+KAIXA_TEST(generate_executes_synchronization_without_building) {
+    const TempDirectory root("generate-actions");
+    const std::filesystem::path synchronized = root.path() / "synchronized.txt";
+    const std::filesystem::path built = root.path() / "built.txt";
+
+    kaixa::Action synchronize;
+    synchronize.description = "synchronize";
+    synchronize.argv = {"cmake", "-E", "touch", synchronized.string()};
+    synchronize.working_directory = root.path();
+    synchronize.outputs.push_back(synchronized);
+    synchronize.stage = kaixa::ActionStage::synchronize;
+
+    kaixa::Action build;
+    build.description = "build";
+    build.argv = {"cmake", "-E", "touch", built.string()};
+    build.working_directory = root.path();
+    build.outputs.push_back(built);
+
+    kaixa::BuildPlan plan;
+    plan.add(std::move(synchronize));
+    plan.add(std::move(build));
+
+    const auto generated = kaixa::generate(plan);
+    context.check(generated.has_value(), "plan synchronizes");
+    if (!generated)
+        return;
+
+    context.check_equal(generated->synchronized, std::size_t{1}, "one synchronized action");
+    context.check(std::filesystem::exists(synchronized), "synchronization action executes");
+    context.check(!std::filesystem::exists(built), "build action does not execute");
+
+    const auto executed = kaixa::execute(plan);
+    context.check(executed.has_value(), "complete plan executes");
+    if (executed) {
+        context.check_equal(executed->executed, std::size_t{2}, "synchronization and build execute");
+        context.check(std::filesystem::exists(built), "build action executes during build");
     }
 }

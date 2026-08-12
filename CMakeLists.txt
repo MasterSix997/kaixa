@@ -46,6 +46,7 @@ set_target_properties(kaixa_core PROPERTIES CXX_EXTENSIONS OFF)
 add_library(kaixa_plugins STATIC
     [[plugins/bundle/src/plugins.cpp]]
     [[plugins/cmake/src/configuration.cpp]]
+    [[plugins/cmake/src/file_api.cpp]]
     [[plugins/cmake/src/resolver.cpp]]
 )
 
