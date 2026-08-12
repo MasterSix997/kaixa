@@ -17,7 +17,7 @@ namespace kaixa {
             std::istreambuf_iterator<char>(file),
             std::istreambuf_iterator<char>()
         };
-        if (!file.eof())
+        if (file.bad())
             return std::unexpected(error_at(
                 {path.string(), 0, 0, {}},
                 "cannot read file"

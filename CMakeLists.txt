@@ -96,6 +96,7 @@ add_executable(kaixa_tests
     [[tests/smoke.cpp]]
     [[tests/manifest.cpp]]
     [[tests/configurations.cpp]]
+    [[tests/build_operations.cpp]]
     [[tests/workspace_fixtures.cpp]]
     [[tests/workspace_errors.cpp]]
 )

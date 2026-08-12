@@ -17,8 +17,8 @@ namespace {
             << "Kaixa " << kaixa::version() << "\n\n"
             << "Usage:\n"
             << "  kaixa inspect [path]\n"
-            << "  kaixa build [path] [--profile name] [--config name]...\n"
-            << "              [--for resolver <arguments...>]...\n"
+            << "  kaixa <check|generate|build> [path] [--profile name] [--config name]...\n"
+            << "        [--for resolver <arguments...>]...\n"
             << "  kaixa --version\n";
     }
 
@@ -100,7 +100,32 @@ namespace {
         });
     }
 
-    int build_workspace(
+    enum class WorkspaceOperation {
+        check,
+        generate,
+        build
+    };
+
+    std::string_view state_name(const kaixa::GeneratedFileState state) {
+        switch (state) {
+            case kaixa::GeneratedFileState::current: return "current";
+            case kaixa::GeneratedFileState::missing: return "missing";
+            case kaixa::GeneratedFileState::different: return "different";
+        }
+        return "unknown";
+    }
+
+    std::string_view state_name(const kaixa::ActionState state) {
+        switch (state) {
+            case kaixa::ActionState::current: return "current";
+            case kaixa::ActionState::required: return "required";
+            case kaixa::ActionState::unknown: return "unknown";
+        }
+        return "unknown";
+    }
+
+    int process_workspace(
+        const WorkspaceOperation operation,
         const std::filesystem::path& path,
         std::optional<std::string> profile,
         std::vector<std::string> configurations,
@@ -152,6 +177,48 @@ namespace {
         auto plan = kaixa::plan_build(*graph, registry, environment);
         if (!plan)
             return fail(plan.error());
+
+        if (operation == WorkspaceOperation::check) {
+            auto report = kaixa::check(*plan);
+            if (!report)
+                return fail(report.error());
+
+            for (const kaixa::GeneratedFileCheck& file: report->generated_files)
+                std::cout << state_name(file.state) << " generated file: " << file.path.string() << '\n';
+
+            for (const kaixa::ActionCheck& action: report->actions)
+                std::cout << state_name(action.state) << " action: " << action.description << '\n';
+
+            if (report->requires_action()) {
+                std::cout << "actions required\n";
+                return 1;
+            }
+            const auto unknown = static_cast<std::size_t>(std::ranges::count_if(
+                report->actions,
+                [](const kaixa::ActionCheck& action) {
+                    return action.state == kaixa::ActionState::unknown;
+                }
+            ));
+            std::cout << "no required actions detected";
+
+            if (unknown != 0)
+                std::cout << "; " << unknown << " action(s) unknown";
+
+            std::cout << '\n';
+            return 0;
+        }
+
+        if (operation == WorkspaceOperation::generate) {
+            auto report = kaixa::generate(*plan);
+            if (!report)
+                return fail(report.error());
+
+            for (const kaixa::GeneratedFile& file: plan->generated_files())
+                std::cout << "output file: " << file.path.string() << '\n';
+
+            std::cout << "wrote " << report->written << " file(s); "<< report->unchanged << " unchanged\n";
+            return 0;
+        }
 
         for (const kaixa::Action& action: plan->actions())
             std::cout << action.description << ": " << kaixa::format_command(action.argv) << '\n';
@@ -248,18 +315,29 @@ int main(const int argc, char** argv) {
 
     if (command == "inspect") {
         if (!resolver_arguments.empty() || !configurations.empty() || profile) {
-            std::cerr << "error: build options are only valid with `build`\n";
+            std::cerr << "error: build options are not valid with `inspect`\n";
             return 2;
         }
         return inspect_workspace(path);
     }
-    if (command == "build")
-        return build_workspace(
+
+    std::optional<WorkspaceOperation> operation;
+    if (command == "check")
+        operation = WorkspaceOperation::check;
+    else if (command == "generate")
+        operation = WorkspaceOperation::generate;
+    else if (command == "build")
+        operation = WorkspaceOperation::build;
+
+    if (operation) {
+        return process_workspace(
+            *operation,
             path,
             std::move(profile),
             std::move(configurations),
             std::move(resolver_arguments)
         );
+    }
 
     std::cerr << "error: unknown command `" << command << "`\n";
     print_usage();
