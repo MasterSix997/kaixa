@@ -192,6 +192,7 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
@@ -414,6 +415,86 @@ namespace kaixa::cli {
             }
             return command;
         }
+
+        std::expected<std::filesystem::path, ParseError> parse_path_option(Parser& parser) {
+            std::filesystem::path path = ".";
+            while (!parser.done()) {
+                const std::string_view option = parser.take();
+                if (option != "--path") {
+                    return std::unexpected(ParseError{
+                        "unexpected argument `" + std::string(option) + "`"
+                    });
+                }
+
+                auto value = parser.value(option);
+                if (!value)
+                    return std::unexpected(value.error());
+
+                path = *value;
+            }
+            return path;
+        }
+
+        std::expected<ConfigShowCommand, ParseError> parse_config_show(Parser& parser) {
+            ConfigShowCommand command;
+            bool has_name = false;
+            while (!parser.done()) {
+                if (parser.peek() == "--path") {
+                    parser.take();
+                    auto value = parser.value("--path");
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    command.workspace.path = *value;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                const std::string_view argument = parser.take();
+                if (has_name) {
+                    return std::unexpected(ParseError{
+                        "unexpected argument `" + std::string(argument) + "`"
+                    });
+                }
+
+                command.workspace.configurations.emplace_back(argument);
+                has_name = true;
+            }
+            return command;
+        }
+
+        std::expected<Command, ParseError> parse_config(Parser& parser) {
+            if (parser.done())
+                return std::unexpected(ParseError{"config requires list, show or path"});
+
+            const std::string_view action = parser.take();
+            if (action == "show") {
+                auto command = parse_config_show(parser);
+                if (!command)
+                    return std::unexpected(command.error());
+
+                return Command{std::move(*command)};
+            }
+            if (action != "list" && action != "path") {
+                return std::unexpected(ParseError{
+                    "unknown config command `" + std::string(action) + "`"
+                });
+            }
+
+            auto path = parse_path_option(parser);
+            if (!path)
+                return std::unexpected(path.error());
+
+            if (action == "list")
+                return Command{ConfigListCommand{std::move(*path)}};
+
+            return Command{ConfigPathCommand{std::move(*path)}};
+        }
     }
 
     void print_usage(std::ostream& out) {
@@ -433,6 +514,10 @@ namespace kaixa::cli {
             << "  kaixa clean [path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
             << "  kaixa clean [path] --all [--generated-files] [--dry-run]\n"
+            << "  kaixa config list [--path path]\n"
+            << "  kaixa config show [name] [--path path] [--profile name] [--config name]...\n"
+            << "        [--for resolver[.scope] <arguments...>]...\n"
+            << "  kaixa config path [--path path]\n"
             << "  kaixa --version\n";
     }
 
@@ -478,6 +563,9 @@ namespace kaixa::cli {
 
             return Command{std::move(*command)};
         }
+
+        if (name == "config")
+            return parse_config(parser);
 
         if (name == "build") {
             auto command = parse_build(parser);

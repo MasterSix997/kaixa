@@ -324,3 +324,76 @@ KAIXA_TEST(command_line_clean_all_rejects_configuration_selection) {
         );
     }
 }
+
+KAIXA_TEST(command_line_config_list_and_path_accept_workspace_paths) {
+    constexpr std::array list_arguments = {
+        std::string_view("config"),
+        std::string_view("list"),
+        std::string_view("--path"),
+        std::string_view("project")
+    };
+    const auto listed = kaixa::cli::parse_command_line(list_arguments);
+    context.check(listed.has_value(), "config list parses");
+    if (listed) {
+        const auto* command = std::get_if<kaixa::cli::ConfigListCommand>(&*listed);
+        context.check(command != nullptr, "config list has its own type");
+        if (command) {
+            context.check_equal(
+                command->path.generic_string(),
+                std::string("project"),
+                "config list workspace"
+            );
+        }
+    }
+
+    constexpr std::array path_arguments = {
+        std::string_view("config"),
+        std::string_view("path"),
+        std::string_view("--path"),
+        std::string_view("project")
+    };
+    const auto path = kaixa::cli::parse_command_line(path_arguments);
+    context.check(path.has_value(), "config path parses");
+    if (path) {
+        const auto* command = std::get_if<kaixa::cli::ConfigPathCommand>(&*path);
+        context.check(command != nullptr, "config path has its own type");
+    }
+}
+
+KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
+    constexpr std::array arguments = {
+        std::string_view("config"),
+        std::string_view("show"),
+        std::string_view("clang"),
+        std::string_view("--profile"),
+        std::string_view("release"),
+        std::string_view("--for"),
+        std::string_view("cmake.configure"),
+        std::string_view("-DDEV=ON")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "config show parses");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::ConfigShowCommand>(&*parsed);
+    context.check(command != nullptr, "config show has its own type");
+    if (!command)
+        return;
+
+    context.check_equal(
+        command->workspace.configurations.front(),
+        std::string("clang"),
+        "named config selection"
+    );
+    context.check_equal(
+        command->workspace.profile.value_or(""),
+        std::string("release"),
+        "shown profile override"
+    );
+    context.check_equal(
+        command->workspace.resolver_arguments.front().scope,
+        std::string("configure"),
+        "shown resolver scope"
+    );
+}

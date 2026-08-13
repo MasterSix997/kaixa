@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "configuration_output.hpp"
 
 #include <kaixa/foundation/process.hpp>
 #include <kaixa/kaixa.hpp>
@@ -21,6 +22,7 @@ namespace kaixa::cli {
             Graph graph;
             BuildEnvironment environment;
             ResolverRegistry registry;
+            std::vector<ConfigurationSource> configuration_sources;
         };
 
         int fail(const Diagnostic& diagnostic) {
@@ -47,6 +49,8 @@ namespace kaixa::cli {
 
         Result<void> append_configuration_file(
             std::vector<ConfigurationSet>& layers,
+            std::vector<ConfigurationSource>& sources,
+            std::string name,
             const std::filesystem::path& path
         ) {
             std::error_code failure;
@@ -71,6 +75,7 @@ namespace kaixa::cli {
             if (!configuration)
                 return std::unexpected(configuration.error());
 
+            sources.push_back({std::move(name), *configuration});
             layers.push_back(std::move(*configuration));
             return {};
         }
@@ -98,16 +103,24 @@ namespace kaixa::cli {
             const PackageNode& root = (*graph)[graph->root()];
             const std::filesystem::path directory = root.directory;
             std::vector<ConfigurationSet> layers;
-            if (root.manifest)
+            std::vector<ConfigurationSource> sources;
+            if (root.manifest) {
+                sources.push_back({"package", root.manifest->configurations});
                 layers.push_back(root.manifest->configurations);
+            }
 
             if (const auto user = user_configuration_path()) {
-                auto loaded = append_configuration_file(layers, *user);
+                auto loaded = append_configuration_file(layers, sources, "user", *user);
                 if (!loaded)
                     return std::unexpected(loaded.error());
             }
 
-            auto local = append_configuration_file(layers, directory / "Kaixa.user.toml");
+            auto local = append_configuration_file(
+                layers,
+                sources,
+                "local",
+                directory / "Kaixa.user.toml"
+            );
             if (!local)
                 return std::unexpected(local.error());
 
@@ -127,7 +140,8 @@ namespace kaixa::cli {
                     directory / ".kaixa",
                     std::move(*configuration)
                 },
-                plugin::default_registry()
+                plugin::default_registry(),
+                std::move(sources)
             };
         }
 
@@ -242,6 +256,20 @@ namespace kaixa::cli {
             }
 
             return path.string();
+        }
+
+        bool path_exists(const std::filesystem::path& path) {
+            std::error_code failure;
+            return std::filesystem::is_regular_file(path, failure) && !failure;
+        }
+
+        void print_configuration_path(
+            const std::string_view name,
+            const std::filesystem::path& path,
+            const std::filesystem::path& workspace
+        ) {
+            std::cout << name << ": " << display_path(path, workspace)
+                << (path_exists(path) ? " [present]" : " [missing]") << '\n';
         }
 
         Result<void> print_actions(const BuildPlan& plan, const bool synchronization_only = false) {
@@ -692,6 +720,51 @@ namespace kaixa::cli {
                 std::cout << "removed " << report->removed_entries
                     << " filesystem entry(s)\n";
             }
+            return 0;
+        }
+
+        int run(const ConfigListCommand& command) {
+            WorkspaceOptions options;
+            options.path = command.path;
+            auto workspace = open_workspace(options);
+            if (!workspace)
+                return fail(workspace.error());
+
+            print_configuration_list(
+                workspace->configuration_sources,
+                workspace->environment.configuration,
+                workspace->environment.workspace
+            );
+            return 0;
+        }
+
+        int run(const ConfigShowCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            const PackageNode& root = workspace->graph[workspace->graph.root()];
+            print_effective_configuration(
+                workspace->environment.configuration,
+                workspace->configuration_sources,
+                root.resolver,
+                workspace->environment.workspace
+            );
+            return 0;
+        }
+
+        int run(const ConfigPathCommand& command) {
+            auto directory = find_workspace_directory(command.path);
+            if (!directory)
+                return fail(directory.error());
+
+            print_configuration_path("package", *directory / "Kaixa.toml", *directory);
+            if (const auto user = user_configuration_path())
+                print_configuration_path("user", *user, *directory);
+            else
+                std::cout << "user: unavailable\n";
+
+            print_configuration_path("local", *directory / "Kaixa.user.toml", *directory);
             return 0;
         }
     }

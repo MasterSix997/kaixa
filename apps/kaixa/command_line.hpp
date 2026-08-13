@@ -64,6 +64,18 @@ namespace kaixa::cli {
         bool dry_run = false;
     };
 
+    struct ConfigListCommand {
+        std::filesystem::path path = ".";
+    };
+
+    struct ConfigShowCommand {
+        WorkspaceOptions workspace;
+    };
+
+    struct ConfigPathCommand {
+        std::filesystem::path path = ".";
+    };
+
     using Command = std::variant<
         HelpCommand,
         VersionCommand,
@@ -73,7 +85,10 @@ namespace kaixa::cli {
         BuildCommand,
         TestCommand,
         RunCommand,
-        CleanCommand
+        CleanCommand,
+        ConfigListCommand,
+        ConfigShowCommand,
+        ConfigPathCommand
     >;
 
     struct ParseError {

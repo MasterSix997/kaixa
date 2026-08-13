@@ -58,6 +58,8 @@ namespace kaixa {
             if (!profile)
                 return std::unexpected(profile.error());
             result.profile = std::move(*profile);
+            if (result.profile)
+                result.profile_location = definition.location_of("profile");
 
             auto append_resolver = [&](const TableEntry& entry, const std::string& path) -> Result<void> {
                 if (!entry.value.is_table()) {
@@ -295,8 +297,10 @@ namespace kaixa {
                     if (definition.name != selected)
                         continue;
                     found = true;
-                    if (definition.profile)
+                    if (definition.profile) {
                         result.profile = *definition.profile;
+                        result.profile_origin = definition.profile_location;
+                    }
 
                     for (const ResolverConfigurationDefinition& resolver: definition.resolvers) {
                         ResolverBuildConfiguration& target = resolver_configuration(
@@ -313,8 +317,10 @@ namespace kaixa {
                 return std::unexpected(error("unknown build configuration `" + selected + "`"));
         }
 
-        if (profile_override)
+        if (profile_override) {
             result.profile = *profile_override;
+            result.profile_origin.source = "command line";
+        }
         for (const ResolverArgumentOverride& override: argument_overrides) {
             ResolverBuildConfiguration& target = resolver_configuration(result, override.resolver);
             if (override.scope.empty()) {

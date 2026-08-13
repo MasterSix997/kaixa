@@ -22,6 +22,7 @@ namespace kaixa {
         std::optional<std::string> profile;
         std::vector<ResolverConfigurationDefinition> resolvers;
         SourceLocation location;
+        SourceLocation profile_location;
     };
 
     struct ConfigurationSet {
@@ -49,6 +50,7 @@ namespace kaixa {
 
     struct EffectiveBuildConfiguration {
         std::string profile = "debug";
+        SourceLocation profile_origin;
         std::vector<std::string> selected;
         std::vector<ResolverBuildConfiguration> resolvers;
 

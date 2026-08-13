@@ -52,6 +52,11 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
         return;
 
     context.check_equal(effective->profile, std::string("debug"), "published profile");
+    context.check_equal(
+        std::filesystem::path(effective->profile_origin.source).filename().string(),
+        std::string("published.toml"),
+        "profile origin"
+    );
     context.check_equal(effective->selected.size(), std::size_t{2}, "both defaults selected");
     const kaixa::ResolverBuildConfiguration* cmake = effective->find("cmake");
     context.check(cmake != nullptr && cmake->settings.has_value(), "CMake settings exist");
@@ -69,6 +74,15 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     const kaixa::Value* arguments = settings.take("arguments");
     context.check(generator && *generator == "Ninja", "local generator merged");
     context.check(compiler && *compiler == "clang++", "local compiler merged");
+    const kaixa::Value* generator_value = cmake->settings->find("generator");
+    context.check(generator_value != nullptr, "merged generator value exists");
+    if (generator_value) {
+        context.check_equal(
+            std::filesystem::path(generator_value->location().source).filename().string(),
+            std::string("user.toml"),
+            "merged generator origin"
+        );
+    }
     context.check(arguments && arguments->as_array(), "published resolver arguments preserved");
     context.check_equal(cmake->arguments.size(), std::size_t{1}, "CLI argument is separate");
     context.check_equal(cmake->scoped_arguments.size(), std::size_t{1}, "scoped CLI argument is separate");

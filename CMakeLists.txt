@@ -75,6 +75,7 @@ add_executable(kaixa
     [[apps/kaixa/main.cpp]]
     [[apps/kaixa/command_line.cpp]]
     [[apps/kaixa/application.cpp]]
+    [[apps/kaixa/configuration_output.cpp]]
 )
 
 target_link_libraries(kaixa PRIVATE
