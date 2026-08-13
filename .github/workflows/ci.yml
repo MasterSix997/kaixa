@@ -22,12 +22,14 @@ jobs:
         include:
           - name: Linux GCC
             os: ubuntu-latest
-            configure: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+            configure: >-
+              cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+              -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror"
             build: cmake --build build --parallel
             test: ctest --test-dir build --output-on-failure
 
           - name: Windows MSVC
-            os: windows-latest
+            os: windows-2022
             configure: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
             build: cmake --build build --config Debug --parallel
             test: ctest --test-dir build -C Debug --output-on-failure

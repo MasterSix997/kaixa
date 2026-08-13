@@ -427,7 +427,7 @@ namespace kaixa::plugin::cmake {
                         "in `" + entry.path().string() + "`"
                     ));
 
-                BuildProduct product{std::move(name), *kind, package.id};
+                BuildProduct product{std::move(name), *kind, package.id, std::nullopt};
                 if (!artifact.empty())
                     product.artifact = std::move(artifact);
 

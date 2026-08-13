@@ -8,7 +8,9 @@
 #include <system_error>
 
 #ifdef _WIN32
-    #define NOMINMAX
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
     #include <windows.h>
 #else
     #include <sys/wait.h>

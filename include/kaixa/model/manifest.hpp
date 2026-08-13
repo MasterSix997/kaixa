@@ -19,10 +19,12 @@ namespace kaixa {
 
         DependencySpec() = default;
         DependencySpec(
-            std::string name,
-            std::filesystem::path path,
-            SourceLocation location = {}
-        ) : name(std::move(name)), path(std::move(path)), location(std::move(location)) {
+            std::string dependency_name,
+            std::filesystem::path dependency_path,
+            SourceLocation source_location = {}
+        ) : name(std::move(dependency_name)),
+            path(std::move(dependency_path)),
+            location(std::move(source_location)) {
         }
     };
 
@@ -37,8 +39,8 @@ namespace kaixa {
         SourceLocation location;
 
         Manifest() = default;
-        Manifest(std::string name, std::string resolver)
-            : name(std::move(name)), resolver(std::move(resolver)) {
+        Manifest(std::string package_name, std::string resolver_name)
+            : name(std::move(package_name)), resolver(std::move(resolver_name)) {
         }
     };
 

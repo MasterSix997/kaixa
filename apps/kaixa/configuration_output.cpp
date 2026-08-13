@@ -154,8 +154,10 @@ namespace kaixa::cli {
         }
 
         void append_arguments(const std::span<const std::string> arguments, std::vector<LocatedArgument>& destination) {
+            SourceLocation command_line;
+            command_line.source = "command line";
             for (const std::string& argument: arguments)
-                destination.push_back({argument, SourceLocation{.source = "command line"}});
+                destination.push_back({argument, command_line});
         }
 
         void apply_definition(
