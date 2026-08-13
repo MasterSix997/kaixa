@@ -14,9 +14,15 @@ namespace kaixa {
         std::string description;
     };
 
+    enum class TestMode {
+        run,
+        list
+    };
+
     struct TestRequest {
         std::optional<std::string> filter;
         std::optional<std::string> target;
+        TestMode mode = TestMode::run;
     };
 
     class Resolver {

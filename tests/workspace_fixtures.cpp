@@ -214,6 +214,37 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         );
     }
 
+    kaixa::TestRequest list_request = request;
+    list_request.mode = kaixa::TestMode::list;
+    const auto list_plan = kaixa::plan_tests(
+        *graph,
+        registry,
+        environment,
+        list_request
+    );
+    context.check(list_plan.has_value(), "generated project test list plans");
+    if (list_plan) {
+        const auto list_action = std::ranges::find_if(
+            list_plan->actions(),
+            [](const kaixa::Action& action) {
+                return action.stage == kaixa::ActionStage::test;
+            }
+        );
+        context.check(list_action != list_plan->actions().end(), "CTest list action exists");
+        if (list_action != list_plan->actions().end()) {
+            context.check(
+                std::ranges::find(list_action->argv, "--show-only")
+                    != list_action->argv.end(),
+                "CTest receives list mode"
+            );
+            context.check(
+                std::ranges::find(list_action->argv, "--output-on-failure")
+                    == list_action->argv.end(),
+                "list mode does not receive execution-only output options"
+            );
+        }
+    }
+
     const auto generated = std::ranges::find_if(
         plan->generated_files(),
         [](const kaixa::GeneratedFile& candidate) {

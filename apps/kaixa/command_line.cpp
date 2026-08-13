@@ -166,6 +166,12 @@ namespace kaixa::cli {
                     continue;
                 }
 
+                if (argument == "--list") {
+                    parser.take();
+                    command.request.mode = TestMode::list;
+                    continue;
+                }
+
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
@@ -205,7 +211,8 @@ namespace kaixa::cli {
             << "  kaixa inspect [path]\n"
             << "  kaixa <check|generate|build> [path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa test [filter] [--target name] [--path path] [--profile name] [--config name]...\n"
+            << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
+            << "        [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
             << "  kaixa --version\n";
     }

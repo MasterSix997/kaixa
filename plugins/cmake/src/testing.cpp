@@ -165,14 +165,15 @@ endforeach()
             (*build)->argv.push_back(*request.target);
         }
 
+        const bool list = request.mode == TestMode::list;
         Action action;
-        action.description = "test " + package.name;
+        action.description = list ? "list tests " + package.name : "test " + package.name;
         action.argv = {
             "ctest",
             "--test-dir", build_directory.string(),
-            "--build-config", std::string(configuration),
-            "--output-on-failure"
+            "--build-config", std::string(configuration)
         };
+        action.argv.push_back(list ? "--show-only" : "--output-on-failure");
         if (request.filter) {
             action.argv.push_back("--tests-regex");
             action.argv.push_back(regex_escape(*request.filter));
