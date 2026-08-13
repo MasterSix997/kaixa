@@ -171,11 +171,33 @@ namespace kaixa::cli {
             return "action";
         }
 
-        void print_actions(const BuildPlan& plan) {
-            for (const Action& action: plan.actions())
+        Result<void> print_actions(
+            const BuildPlan& plan,
+            const bool synchronization_only = false
+        ) {
+            auto state = check(plan);
+            if (!state)
+                return std::unexpected(state.error());
+
+            for (std::size_t index = 0; index < plan.actions().size(); ++index) {
+                const Action& action = plan.actions()[index];
+                if (synchronization_only && action.stage != ActionStage::synchronize)
+                    continue;
+                if (action.stage == ActionStage::synchronize
+                    && state->actions[index].state == ActionState::current) {
+                    continue;
+                }
+
                 std::cout << action.description << ": " << format_command(action.argv) << '\n';
+            }
 
             std::cout.flush();
+            return {};
+        }
+
+        void print_outputs(const BuildPlan& plan) {
+            for (const BuildOutput& output: plan.outputs())
+                std::cout << "output: " << output.path.string() << '\n';
         }
 
         int run(const HelpCommand&) {
@@ -245,13 +267,9 @@ namespace kaixa::cli {
             if (!plan)
                 return fail(plan.error());
 
-            for (const Action& action: plan->actions()) {
-                if (action.stage == ActionStage::synchronize) {
-                    std::cout << action.description << ": "
-                        << format_command(action.argv) << '\n';
-                }
-            }
-            std::cout.flush();
+            auto printed = print_actions(*plan, true);
+            if (!printed)
+                return fail(printed.error());
 
             auto report = generate(*plan);
             if (!report)
@@ -279,12 +297,16 @@ namespace kaixa::cli {
             if (!plan)
                 return fail(plan.error());
 
-            print_actions(*plan);
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
             auto report = kaixa::execute(*plan);
             if (!report)
                 return fail(report.error());
 
             std::cout << "completed " << report->executed << " action(s)\n";
+            print_outputs(*plan);
             return 0;
         }
 
@@ -302,12 +324,16 @@ namespace kaixa::cli {
             if (!plan)
                 return fail(plan.error());
 
-            print_actions(*plan);
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
             auto report = test(*plan);
             if (!report)
                 return fail(report.error());
 
             std::cout << "completed " << report->executed << " action(s)\n";
+            print_outputs(*plan);
             return 0;
         }
     }

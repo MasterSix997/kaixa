@@ -80,18 +80,35 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     context.check(plan.has_value(), "workspace example plans");
     if (plan) {
         context.check_equal(plan->actions().size(), std::size_t{2}, "one composed CMake build");
-        context.check_equal(plan->generated_files().size(), std::size_t{2}, "integration and File API query");
+        context.check_equal(
+            plan->generated_files().size(),
+            std::size_t{3},
+            "variant metadata, integration and File API query"
+        );
         if (plan->actions().size() == 2 && !plan->generated_files().empty()) {
             context.check_equal(
                 plan->actions()[0].description,
                 std::string("configure test_source_app"),
                 "root is configured once"
             );
-            context.check_contains(
-                plan->generated_files().front().content,
-                "add_subdirectory",
-                "source dependency is composed"
+            const auto integration = std::ranges::find_if(
+                plan->generated_files(),
+                [](const kaixa::GeneratedFile& generated) {
+                    return generated.path.filename() == "dependencies.cmake";
+                }
             );
+            context.check(
+                integration != plan->generated_files().end(),
+                "dependency integration is generated"
+            );
+            if (integration != plan->generated_files().end()) {
+                context.check_contains(
+                    integration->content,
+                    "add_subdirectory",
+                    "source dependency is composed"
+                );
+            }
+
             const std::vector<std::string> configure = plan->actions()[0].argv;
             context.check(
                 std::ranges::find_if(configure, [](const std::string& argument) {
@@ -145,7 +162,7 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
     );
 
     const std::string artifact_root =
-        (environment.state_root / "artifacts" / "cmake").string();
+        (environment.state_root / "cache" / "cmake").string();
     const std::vector<std::string> configure = plan->actions()[3].argv;
     context.check(
         std::ranges::find_if(configure, [&](const std::string& argument) {
@@ -265,6 +282,40 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         !std::filesystem::exists(workspace.path() / "packages/math/CMakeLists.txt"),
         "dependency source remains clean"
     );
+
+    const auto metadata = std::ranges::find_if(
+        plan->generated_files(),
+        [](const kaixa::GeneratedFile& candidate) {
+            return candidate.path.filename() == "variant.toml";
+        }
+    );
+    context.check(metadata != plan->generated_files().end(), "build variant has metadata");
+    if (metadata != plan->generated_files().end()) {
+        context.check(
+            metadata->path.parent_path().filename() == "debug",
+            "variant directory uses the readable label"
+        );
+        context.check_contains(metadata->content, "label = \"debug\"", "variant label");
+        context.check_contains(metadata->content, "fingerprint = ", "variant fingerprint");
+        context.check_contains(metadata->content, "profile = \"debug\"", "variant profile");
+        context.check(
+            std::ranges::any_of(plan->actions(), [&](const kaixa::Action& action) {
+                return action.description == "configure test_generated"
+                    && std::ranges::find(action.inputs, metadata->path) != action.inputs.end();
+            }),
+            "variant metadata changes require CMake configuration"
+        );
+    }
+
+    context.check_equal(plan->outputs().size(), std::size_t{1}, "one public output root");
+    if (!plan->outputs().empty()) {
+        context.check_equal(
+            plan->outputs().front().path,
+            environment.state_root / "build/debug",
+            "public output has a short stable path"
+        );
+    }
+
     if (generated != plan->generated_files().end()) {
         context.check_contains(
             generated->content,
@@ -323,6 +374,37 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
                 "generate leaves no required synchronization"
             );
         }
+    }
+
+    kaixa::EffectiveBuildConfiguration changed_configuration;
+    changed_configuration.profile = "debug";
+    changed_configuration.resolvers.push_back({
+        "cmake",
+        kaixa::Value::table({{"generator", "Ninja"}}),
+        {}
+    });
+    const kaixa::BuildEnvironment changed_environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        std::move(changed_configuration)
+    };
+    const auto changed_variant = kaixa::plan_build(*graph, registry, changed_environment);
+    context.check(changed_variant.has_value(), "changed CMake variant plans");
+    if (changed_variant) {
+        context.check_equal(
+            changed_variant->outputs().front().path,
+            plan->outputs().front().path,
+            "same named config keeps the public output path"
+        );
+        context.check(
+            std::ranges::any_of(
+                changed_variant->actions(),
+                [](const kaixa::Action& action) {
+                    return action.description == "reset test_generated";
+                }
+            ),
+            "incompatible CMake state plans a private build reset"
+        );
     }
 
     const auto report = kaixa::test(*plan);

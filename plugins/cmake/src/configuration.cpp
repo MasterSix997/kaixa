@@ -240,7 +240,7 @@ namespace kaixa::plugin::cmake::detail {
             const std::string value = path.generic_string();
             return path.is_absolute()
                 ? quoted_string(value)
-                : quoted_string("${CMAKE_BINARY_DIR}/" + value);
+                : quoted_string("${_kaixa_output_root}/" + value + "/$<0:>");
         }
 
         std::string project_version(const PackageNode& package) {
@@ -717,6 +717,11 @@ namespace kaixa::plugin::cmake::detail {
 
         if (options.runtime_output || options.library_output || options.archive_output) {
             output += "if(PROJECT_IS_TOP_LEVEL)\n";
+            output += "    if(KAIXA_OUTPUT_ROOT)\n";
+            output += "        set(_kaixa_output_root \"${KAIXA_OUTPUT_ROOT}\")\n";
+            output += "    else()\n";
+            output += "        set(_kaixa_output_root \"${CMAKE_BINARY_DIR}\")\n";
+            output += "    endif()\n";
             if (options.runtime_output) {
                 output += "    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "
                     + output_directory(*options.runtime_output) + ")\n";

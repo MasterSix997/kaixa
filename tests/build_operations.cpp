@@ -162,7 +162,43 @@ KAIXA_TEST(generate_executes_synchronization_without_building) {
     const auto executed = kaixa::execute(plan);
     context.check(executed.has_value(), "complete plan executes");
     if (executed) {
-        context.check_equal(executed->executed, std::size_t{2}, "synchronization and build execute");
+        context.check_equal(executed->executed, std::size_t{1}, "current synchronization is skipped");
         context.check(std::filesystem::exists(built), "build action executes during build");
     }
+}
+
+KAIXA_TEST(changed_generated_input_requires_synchronization) {
+    const TempDirectory root("generated-input-sync");
+    const std::filesystem::path generated = root.path() / "CMakeLists.txt";
+    const std::filesystem::path configured = root.path() / "configured.txt";
+
+    kaixa::BuildPlan plan;
+    plan.generate({generated, "generated\n"});
+
+    kaixa::Action configure;
+    configure.description = "configure";
+    configure.argv = {"cmake", "-E", "touch", configured.string()};
+    configure.working_directory = root.path();
+    configure.inputs.push_back(generated);
+    configure.outputs.push_back(configured);
+    configure.checked_state = kaixa::ActionState::current;
+    configure.stage = kaixa::ActionStage::synchronize;
+    plan.add(std::move(configure));
+
+    const auto state = kaixa::check(plan);
+    context.check(state.has_value(), "generated input plan can be checked");
+    if (state) {
+        context.check(
+            state->actions.front().state == kaixa::ActionState::required,
+            "changed generated input promotes synchronization"
+        );
+    }
+
+    const auto report = kaixa::generate(plan);
+    context.check(report.has_value(), "generated input synchronizes");
+    if (!report)
+        return;
+
+    context.check_equal(report->synchronized, std::size_t{1}, "one action synchronizes");
+    context.check(std::filesystem::exists(configured), "synchronization action executes");
 }

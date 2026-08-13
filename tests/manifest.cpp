@@ -163,7 +163,11 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
         return;
 
     context.check_equal(plan->actions().size(), std::size_t{2}, "one composed configure and build");
-    context.check_equal(plan->generated_files().size(), std::size_t{2}, "integration and File API query");
+    context.check_equal(
+        plan->generated_files().size(),
+        std::size_t{3},
+        "variant metadata, integration and File API query"
+    );
     if (plan->actions().size() == 2) {
         context.check(
             plan->actions()[0].stage == kaixa::ActionStage::synchronize,
