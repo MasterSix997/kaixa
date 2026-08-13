@@ -12,15 +12,21 @@ namespace kaixa {
         const ResolverRegistry& registry,
         const BuildEnvironment& environment
     ) {
-        const PackageNode& root = graph[graph.root()];
-        Resolver* resolver = registry.find(root.resolver);
-        if (!resolver) {
-            return std::unexpected(error(
-                "resolver `" + root.resolver + "` is not installed"
-            ));
-        }
+        auto products = discover_products(graph, registry, environment);
+        if (!products)
+            return std::unexpected(products.error());
 
-        return resolver->run_targets(graph, root, environment);
+        std::vector<RunTarget> targets;
+        for (const BuildProduct& product: *products) {
+            if (product.kind != ProductKind::executable || !product.artifact)
+                continue;
+
+            targets.push_back({
+                product.name,
+                ProcessRequest{{product.artifact->string()}, graph[product.package].directory}
+            });
+        }
+        return targets;
     }
 
     Result<RunTarget> select_run_target(
@@ -87,7 +93,7 @@ namespace kaixa {
         std::string target
     ) {
         BuildRequest request;
-        request.target = std::move(target);
+        request.targets.push_back(std::move(target));
         return plan_build(graph, registry, environment, request);
     }
 }

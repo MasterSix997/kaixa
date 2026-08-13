@@ -1,6 +1,22 @@
 #include <kaixa/services/build_service.hpp>
 
 namespace kaixa {
+    Result<std::vector<BuildProduct>> discover_products(
+        const Graph& graph,
+        const ResolverRegistry& registry,
+        const BuildEnvironment& environment
+    ) {
+        const PackageNode& root = graph[graph.root()];
+        Resolver* resolver = registry.find(root.resolver);
+        if (!resolver) {
+            return std::unexpected(error(
+                "resolver `" + root.resolver + "` is not installed"
+            ));
+        }
+
+        return resolver->products(graph, root, environment);
+    }
+
     Result<BuildPlan> plan_build(
         const Graph& graph,
         const ResolverRegistry& registry,

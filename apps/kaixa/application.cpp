@@ -8,6 +8,7 @@
 #include <filesystem>
 #include <iostream>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -269,6 +270,62 @@ namespace kaixa::cli {
                 std::cout << "artifact: " << display_path(output.path, workspace) << '\n';
         }
 
+        std::string_view product_kind_name(const ProductKind kind) {
+            switch (kind) {
+                case ProductKind::executable: return "executable";
+                case ProductKind::static_library: return "static-library";
+                case ProductKind::shared_library: return "shared-library";
+                case ProductKind::module_library: return "module-library";
+                case ProductKind::object_library: return "object-library";
+                case ProductKind::interface_library: return "interface-library";
+                case ProductKind::utility: return "utility";
+            }
+            return "product";
+        }
+
+        void print_products(
+            const std::span<const BuildProduct> products,
+            const std::filesystem::path& workspace,
+            const std::span<const std::string> selected = {}
+        ) {
+            for (const BuildProduct& product: products) {
+                if (!selected.empty() && std::ranges::find(selected, product.name) == selected.end())
+                    continue;
+
+                std::cout << product_kind_name(product.kind) << ' ' << product.name;
+                if (product.artifact)
+                    std::cout << " -> " << display_path(*product.artifact, workspace);
+
+                std::cout << '\n';
+            }
+        }
+
+        Result<void> validate_build_targets(
+            const std::span<const BuildProduct> products,
+            const std::span<const std::string> requested
+        ) {
+            for (const std::string& name: requested) {
+                if (std::ranges::none_of(products, [&](const BuildProduct& product) {
+                        return product.name == name;
+                    })) {
+                    std::string available;
+                    for (const BuildProduct& product: products) {
+                        if (!available.empty())
+                            available += ", ";
+
+                        available += product.name;
+                    }
+
+                    Diagnostic diagnostic = error("build target `" + name + "` does not exist");
+                    if (!available.empty())
+                        return std::unexpected(std::move(diagnostic).add_note("available targets: " + available));
+
+                    return std::unexpected(std::move(diagnostic));
+                }
+            }
+            return {};
+        }
+
         int run(const HelpCommand&) {
             print_usage(std::cout);
             return 0;
@@ -280,7 +337,36 @@ namespace kaixa::cli {
         }
 
         int run(const InspectCommand& command) {
-            auto graph = load_workspace(command.path);
+            if (command.targets) {
+                auto workspace = open_workspace(command.workspace);
+                if (!workspace)
+                    return fail(workspace.error());
+
+                auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
+                if (!plan)
+                    return fail(plan.error());
+
+                auto state = check(*plan);
+                if (!state)
+                    return fail(state.error());
+                if (state->requires_synchronization()) {
+                    return fail(error("CMake target information is not synchronized")
+                        .add_note("run `kaixa generate` before inspecting targets"));
+                }
+
+                auto products = discover_products(
+                    workspace->graph,
+                    workspace->registry,
+                    workspace->environment
+                );
+                if (!products)
+                    return fail(products.error());
+
+                print_products(*products, workspace->environment.workspace);
+                return 0;
+            }
+
+            auto graph = load_workspace(command.workspace.path);
             if (!graph)
                 return fail(graph.error());
 
@@ -358,10 +444,48 @@ namespace kaixa::cli {
             if (!workspace)
                 return fail(workspace.error());
 
+            if (command.list || !command.targets.empty()) {
+                auto synchronization = plan_build(
+                    workspace->graph,
+                    workspace->registry,
+                    workspace->environment
+                );
+                if (!synchronization)
+                    return fail(synchronization.error());
+
+                auto printed = print_actions(*synchronization, true);
+                if (!printed)
+                    return fail(printed.error());
+
+                auto generated = generate(*synchronization);
+                if (!generated)
+                    return fail(generated.error());
+
+                auto products = discover_products(
+                    workspace->graph,
+                    workspace->registry,
+                    workspace->environment
+                );
+                if (!products)
+                    return fail(products.error());
+
+                if (command.list) {
+                    print_products(*products, workspace->environment.workspace);
+                    return 0;
+                }
+
+                auto valid = validate_build_targets(*products, command.targets);
+                if (!valid)
+                    return fail(valid.error());
+            }
+
+            BuildRequest request;
+            request.targets = command.targets;
             auto plan = plan_build(
                 workspace->graph,
                 workspace->registry,
-                workspace->environment
+                workspace->environment,
+                request
             );
             if (!plan)
                 return fail(plan.error());
@@ -375,7 +499,15 @@ namespace kaixa::cli {
                 return fail(report.error());
 
             std::cout << "build completed: " << report->executed << " action(s) run\n";
-            print_outputs(*plan, workspace->environment.workspace);
+            auto products = discover_products(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!products)
+                return fail(products.error());
+
+            print_products(*products, workspace->environment.workspace, command.targets);
             return 0;
         }
 

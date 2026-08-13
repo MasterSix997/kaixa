@@ -185,6 +185,51 @@ namespace kaixa::cli {
             return command;
         }
 
+        std::expected<BuildCommand, ParseError> parse_build(Parser& parser) {
+            BuildCommand command;
+            bool has_path = false;
+            while (!parser.done()) {
+                const std::string_view argument = parser.peek();
+                if (argument == "--target") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    command.targets.emplace_back(*value);
+                    continue;
+                }
+                if (argument == "--list") {
+                    parser.take();
+                    command.list = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                parser.take();
+                if (has_path) {
+                    return std::unexpected(ParseError{
+                        "unexpected argument `" + std::string(argument) + "`"
+                    });
+                }
+
+                command.workspace.path = argument;
+                has_path = true;
+            }
+
+            if (command.list && !command.targets.empty()) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with --target"
+                });
+            }
+            return command;
+        }
+
         std::expected<RunCommand, ParseError> parse_run(Parser& parser) {
             RunCommand command;
             while (!parser.done()) {
@@ -297,13 +342,29 @@ namespace kaixa::cli {
 
         std::expected<InspectCommand, ParseError> parse_inspect(Parser& parser) {
             InspectCommand command;
-            if (!parser.done())
-                command.path = parser.take();
+            bool has_path = false;
+            while (!parser.done()) {
+                if (parser.peek() == "--targets") {
+                    parser.take();
+                    command.targets = true;
+                    continue;
+                }
 
-            if (!parser.done()) {
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                const std::string_view argument = parser.take();
+                if (has_path) {
+                    return std::unexpected(ParseError{
+                        "unexpected argument `" + std::string(argument) + "`"
+                    });
+                }
+
+                command.workspace.path = argument;
+                has_path = true;
             }
             return command;
         }
@@ -313,9 +374,11 @@ namespace kaixa::cli {
         out
             << "Kaixa " << version() << "\n\n"
             << "Usage:\n"
-            << "  kaixa inspect [path]\n"
-            << "  kaixa <check|generate|build> [path] [--profile name] [--config name]...\n"
+            << "  kaixa inspect [path] [--targets] [--profile name] [--config name]...\n"
+            << "  kaixa <check|generate> [path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
+            << "  kaixa build [path] [--list] [--target name]... [--profile name]\n"
+            << "        [--config name]... [--for resolver <arguments...>]...\n"
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
@@ -370,7 +433,15 @@ namespace kaixa::cli {
             return Command{std::move(*command)};
         }
 
-        if (name != "check" && name != "generate" && name != "build") {
+        if (name == "build") {
+            auto command = parse_build(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name != "check" && name != "generate") {
             return std::unexpected(ParseError{
                 "unknown command `" + std::string(name) + "`",
                 true
@@ -383,9 +454,6 @@ namespace kaixa::cli {
 
         if (name == "check")
             return Command{CheckCommand{std::move(*workspace)}};
-        if (name == "generate")
-            return Command{GenerateCommand{std::move(*workspace)}};
-
-        return Command{BuildCommand{std::move(*workspace)}};
+        return Command{GenerateCommand{std::move(*workspace)}};
     }
 }

@@ -2,6 +2,7 @@
 
 #include <kaixa/build/layout.hpp>
 #include <kaixa/build/plan.hpp>
+#include <kaixa/build/product.hpp>
 #include <kaixa/clean/plan.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/foundation/process.hpp>
@@ -29,7 +30,7 @@ namespace kaixa {
     };
 
     struct BuildRequest {
-        std::optional<std::string> target;
+        std::vector<std::string> targets;
     };
 
     struct RunTarget {
@@ -62,7 +63,7 @@ namespace kaixa {
             BuildPlan& plan
         ) const = 0;
 
-        [[nodiscard]] virtual Result<std::vector<RunTarget>> run_targets(
+        [[nodiscard]] virtual Result<std::vector<BuildProduct>> products(
             const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment

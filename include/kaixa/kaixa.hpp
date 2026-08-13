@@ -1,6 +1,7 @@
 #pragma once
 
 #include <kaixa/build/executor.hpp>
+#include <kaixa/build/product.hpp>
 #include <kaixa/clean/plan.hpp>
 #include <kaixa/config/parser.hpp>
 #include <kaixa/extension/registry.hpp>

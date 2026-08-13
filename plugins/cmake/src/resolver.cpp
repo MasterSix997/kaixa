@@ -292,28 +292,37 @@ namespace kaixa::plugin::cmake {
             std::filesystem::path metadata;
         };
 
-        std::filesystem::path run_metadata_directory(const BuildContext& context) {
-            return context.directory / ".kaixa" / "run-targets";
+        std::filesystem::path product_metadata_directory(const BuildContext& context) {
+            return context.directory / ".kaixa" / "products";
         }
 
-        std::string run_target_integration(const BuildContext& context) {
-            const std::filesystem::path metadata = run_metadata_directory(context);
+        std::string product_integration(const BuildContext& context) {
+            const std::filesystem::path metadata = product_metadata_directory(context);
             const std::filesystem::path dependencies = context.directory / "_dependencies";
             return
-                "  set(_kaixa_run_directory " + cmake_quote(metadata) + ")\n"
+                "  set(_kaixa_product_directory " + cmake_quote(metadata) + ")\n"
                 "  set(_kaixa_dependency_binary " + cmake_quote(dependencies) + ")\n"
-                "  function(_kaixa_collect_run_targets _kaixa_directory)\n"
+                "  function(_kaixa_write_product _kaixa_target _kaixa_type)\n"
+                "    string(SHA256 _kaixa_id \"${_kaixa_target}\")\n"
+                "    if(_kaixa_type STREQUAL \"EXECUTABLE\" OR "
+                    "_kaixa_type STREQUAL \"STATIC_LIBRARY\" OR "
+                    "_kaixa_type STREQUAL \"SHARED_LIBRARY\" OR "
+                    "_kaixa_type STREQUAL \"MODULE_LIBRARY\")\n"
+                "      set(_kaixa_artifact \"$<TARGET_FILE:${_kaixa_target}>\")\n"
+                "    else()\n"
+                "      set(_kaixa_artifact \"\")\n"
+                "    endif()\n"
+                "    file(GENERATE\n"
+                "      OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/${_kaixa_id}.product\"\n"
+                "      CONTENT \"${_kaixa_target}\\n${_kaixa_type}\\n${_kaixa_artifact}\\n\"\n"
+                "    )\n"
+                "  endfunction()\n"
+                "  function(_kaixa_collect_products _kaixa_directory)\n"
                 "    get_property(_kaixa_targets DIRECTORY \"${_kaixa_directory}\" "
                     "PROPERTY BUILDSYSTEM_TARGETS)\n"
                 "    foreach(_kaixa_target IN LISTS _kaixa_targets)\n"
                 "      get_target_property(_kaixa_type \"${_kaixa_target}\" TYPE)\n"
-                "      if(_kaixa_type STREQUAL \"EXECUTABLE\")\n"
-                "        string(SHA256 _kaixa_id \"${_kaixa_target}\")\n"
-                "        file(GENERATE\n"
-                "          OUTPUT \"${_kaixa_run_directory}/$<CONFIG>/${_kaixa_id}.target\"\n"
-                "          CONTENT \"${_kaixa_target}\\n$<TARGET_FILE:${_kaixa_target}>\\n\"\n"
-                "        )\n"
-                "      endif()\n"
+                "      _kaixa_write_product(\"${_kaixa_target}\" \"${_kaixa_type}\")\n"
                 "    endforeach()\n"
                 "    get_property(_kaixa_subdirectories DIRECTORY \"${_kaixa_directory}\" "
                     "PROPERTY SUBDIRECTORIES)\n"
@@ -323,80 +332,111 @@ namespace kaixa::plugin::cmake {
                 "      cmake_path(IS_PREFIX _kaixa_dependency_binary \"${_kaixa_binary}\" "
                     "NORMALIZE _kaixa_is_dependency)\n"
                 "      if(NOT _kaixa_is_dependency)\n"
-                "        _kaixa_collect_run_targets(\"${_kaixa_subdirectory}\")\n"
+                "        _kaixa_collect_products(\"${_kaixa_subdirectory}\")\n"
                 "      endif()\n"
                 "    endforeach()\n"
                 "  endfunction()\n"
-                "  function(_kaixa_write_run_targets)\n"
-                "    file(REMOVE_RECURSE \"${_kaixa_run_directory}\")\n"
-                "    _kaixa_collect_run_targets(\"${CMAKE_SOURCE_DIR}\")\n"
+                "  function(_kaixa_write_products)\n"
+                "    file(REMOVE_RECURSE \"${_kaixa_product_directory}\")\n"
+                "    file(GENERATE "
+                    "OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/.catalog\" CONTENT \"\")\n"
+                "    _kaixa_collect_products(\"${CMAKE_SOURCE_DIR}\")\n"
                 "  endfunction()\n"
                 "  cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" "
-                    "CALL _kaixa_write_run_targets)\n";
+                    "CALL _kaixa_write_products)\n";
         }
 
-        Result<std::vector<RunTarget>> read_run_targets(const PackageNode& package, const BuildContext& context) {
+        Result<ProductKind> product_kind(const std::string_view type) {
+            if (type == "EXECUTABLE")
+                return ProductKind::executable;
+            if (type == "STATIC_LIBRARY")
+                return ProductKind::static_library;
+            if (type == "SHARED_LIBRARY")
+                return ProductKind::shared_library;
+            if (type == "MODULE_LIBRARY")
+                return ProductKind::module_library;
+            if (type == "OBJECT_LIBRARY")
+                return ProductKind::object_library;
+            if (type == "INTERFACE_LIBRARY")
+                return ProductKind::interface_library;
+            if (type == "UTILITY")
+                return ProductKind::utility;
+
+            return std::unexpected(error("unsupported CMake target type `" + std::string(type) + "`"));
+        }
+
+        Result<std::vector<BuildProduct>> read_products(const PackageNode& package, const BuildContext& context) {
             const std::filesystem::path directory =
-                run_metadata_directory(context) / context.configuration;
+                product_metadata_directory(context) / context.configuration;
             std::error_code failure;
             const bool exists = std::filesystem::exists(directory, failure);
             if (failure) {
                 return std::unexpected(error(
-                    "cannot inspect CMake run targets in `" + directory.string()
+                    "cannot inspect CMake products in `" + directory.string()
                         + "`: " + failure.message()
                 ));
             }
-            if (!exists)
-                return std::vector<RunTarget>{};
+            if (!exists) {
+                return std::unexpected(error(
+                    "CMake target information is unavailable"
+                ).add_note("run `kaixa generate` to configure the workspace"));
+            }
             if (!std::filesystem::is_directory(directory, failure) || failure) {
                 return std::unexpected(error(
-                    "CMake run target metadata is not a directory: " + directory.string()
+                    "CMake product metadata is not a directory: " + directory.string()
                 ));
             }
 
-            std::vector<RunTarget> targets;
+            std::vector<BuildProduct> products;
             std::filesystem::directory_iterator entries(directory, failure);
             if (failure) {
                 return std::unexpected(error(
-                    "cannot list CMake run targets in `" + directory.string()
+                    "cannot list CMake products in `" + directory.string()
                         + "`: " + failure.message()
                 ));
             }
 
             for (const std::filesystem::directory_entry& entry: entries) {
-                if (entry.path().extension() != ".target")
+                if (entry.path().extension() != ".product")
                     continue;
 
                 std::ifstream input(entry.path(), std::ios::binary);
                 std::string name;
-                std::string executable;
-                if (!input || !std::getline(input, name) || !std::getline(input, executable)) {
+                std::string type;
+                std::string artifact;
+                if (!input || !std::getline(input, name) || !std::getline(input, type)
+                    || !std::getline(input, artifact)) {
                     return std::unexpected(error(
-                        "cannot read CMake run target metadata `"
-                            + entry.path().string() + "`"
+                        "cannot read CMake product metadata `" + entry.path().string() + "`"
                     ));
                 }
                 if (!name.empty() && name.back() == '\r')
                     name.pop_back();
-
-                if (!executable.empty() && executable.back() == '\r')
-                    executable.pop_back();
-
-                if (name.empty() || executable.empty()) {
+                if (!type.empty() && type.back() == '\r')
+                    type.pop_back();
+                if (!artifact.empty() && artifact.back() == '\r')
+                    artifact.pop_back();
+                if (name.empty() || type.empty()) {
                     return std::unexpected(error(
-                        "invalid CMake run target metadata `"
-                            + entry.path().string() + "`"
+                        "invalid CMake product metadata `" + entry.path().string() + "`"
                     ));
                 }
 
-                targets.push_back({
-                    std::move(name),
-                    ProcessRequest{{std::move(executable)}, package.directory}
-                });
+                auto kind = product_kind(type);
+                if (!kind)
+                    return std::unexpected(std::move(kind).error().add_note(
+                        "in `" + entry.path().string() + "`"
+                    ));
+
+                BuildProduct product{std::move(name), *kind, package.id};
+                if (!artifact.empty())
+                    product.artifact = std::move(artifact);
+
+                products.push_back(std::move(product));
             }
 
-            std::ranges::sort(targets, {}, &RunTarget::name);
-            return targets;
+            std::ranges::sort(products, {}, &BuildProduct::name);
+            return products;
         }
 
         std::string toml_string(const std::string_view value) {
@@ -704,7 +744,7 @@ namespace kaixa::plugin::cmake {
                     "endif()\n"
                     "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
                     "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
-                integration += run_target_integration(*context);
+                integration += product_integration(*context);
                 for (const PackageId id: source_packages) {
                     if (id == package.id)
                         continue;
@@ -836,9 +876,9 @@ namespace kaixa::plugin::cmake {
                 build.inputs.push_back(context->directory / "CMakeCache.txt");
                 build.outputs.push_back(context->directory);
                 build.package = package.id;
-                if (request.target) {
+                if (!request.targets.empty()) {
                     build.argv.push_back("--target");
-                    build.argv.push_back(*request.target);
+                    build.argv.insert(build.argv.end(), request.targets.begin(), request.targets.end());
                 }
                 if (*install)
                     build.stage = ActionStage::synchronize;
@@ -890,7 +930,7 @@ namespace kaixa::plugin::cmake {
                 );
             }
 
-            [[nodiscard]] Result<std::vector<RunTarget>> run_targets(
+            [[nodiscard]] Result<std::vector<BuildProduct>> products(
                 const Graph& graph,
                 const PackageNode& package,
                 const BuildEnvironment& environment
@@ -899,7 +939,7 @@ namespace kaixa::plugin::cmake {
                 if (!context)
                     return std::unexpected(context.error());
 
-                return read_run_targets(package, *context);
+                return read_products(package, *context);
             }
 
             [[nodiscard]] Result<void> plan_clean(

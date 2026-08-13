@@ -45,7 +45,7 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
     }
 }
 
-KAIXA_TEST(adopted_cmake_project_exposes_run_targets) {
+KAIXA_TEST(adopted_cmake_project_exposes_products_and_run_targets) {
     const kaixa::testing::TempDirectory workspace("adopted-cmake-run");
     workspace.copy_from(workspaces_directory / "single_package");
 
@@ -80,6 +80,23 @@ KAIXA_TEST(adopted_cmake_project_exposes_run_targets) {
                 std::string("test_single"),
                 "adopted executable target"
             );
+        }
+    }
+
+    const auto products = kaixa::discover_products(*graph, registry, environment);
+    context.check(products.has_value(), "adopted CMake products are discovered");
+    if (products) {
+        context.check_equal(products->size(), std::size_t{2}, "executable and library products");
+        const auto library = std::ranges::find_if(*products, [](const kaixa::BuildProduct& product) {
+            return product.name == "test_single_support";
+        });
+        context.check(library != products->end(), "adopted library target is discovered");
+        if (library != products->end()) {
+            context.check(
+                library->kind == kaixa::ProductKind::static_library,
+                "adopted library kind"
+            );
+            context.check(library->artifact.has_value(), "adopted library artifact is known");
         }
     }
 }

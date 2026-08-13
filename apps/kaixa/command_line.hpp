@@ -25,7 +25,8 @@ namespace kaixa::cli {
     struct VersionCommand {};
 
     struct InspectCommand {
-        std::filesystem::path path = ".";
+        WorkspaceOptions workspace;
+        bool targets = false;
     };
 
     struct CheckCommand {
@@ -38,6 +39,8 @@ namespace kaixa::cli {
 
     struct BuildCommand {
         WorkspaceOptions workspace;
+        std::vector<std::string> targets;
+        bool list = false;
     };
 
     struct TestCommand {

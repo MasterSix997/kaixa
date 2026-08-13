@@ -6,7 +6,7 @@
 #include <string_view>
 #include <variant>
 
-KAIXA_TEST(command_line_build_has_only_workspace_options) {
+KAIXA_TEST(command_line_build_keeps_workspace_options) {
     constexpr std::array arguments = {
         std::string_view("build"),
         std::string_view("project"),
@@ -40,6 +40,61 @@ KAIXA_TEST(command_line_build_has_only_workspace_options) {
         std::size_t{1},
         "configuration count"
     );
+}
+
+KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
+    constexpr std::array selected_arguments = {
+        std::string_view("build"),
+        std::string_view("--target"),
+        std::string_view("core"),
+        std::string_view("--target"),
+        std::string_view("app")
+    };
+    const auto selected = kaixa::cli::parse_command_line(selected_arguments);
+    context.check(selected.has_value(), "multiple build targets parse");
+    if (selected) {
+        const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*selected);
+        context.check(command != nullptr, "selected build keeps build command type");
+        if (command) {
+            context.check_equal(command->targets.size(), std::size_t{2}, "build target count");
+            context.check_equal(command->targets.front(), std::string("core"), "first build target");
+        }
+    }
+
+    constexpr std::array list_arguments = {
+        std::string_view("build"),
+        std::string_view("--list")
+    };
+    const auto listed = kaixa::cli::parse_command_line(list_arguments);
+    context.check(listed.has_value(), "build list parses");
+    if (listed) {
+        const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*listed);
+        context.check(command != nullptr && command->list, "build list mode is retained");
+    }
+}
+
+KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
+    constexpr std::array arguments = {
+        std::string_view("inspect"),
+        std::string_view("project"),
+        std::string_view("--targets"),
+        std::string_view("--config"),
+        std::string_view("clang")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "inspect targets parses");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::InspectCommand>(&*parsed);
+    context.check(command != nullptr && command->targets, "inspect target mode is retained");
+    if (command) {
+        context.check_equal(
+            command->workspace.configurations.front(),
+            std::string("clang"),
+            "inspect configuration"
+        );
+    }
 }
 
 KAIXA_TEST(command_line_test_keeps_test_options_together) {
