@@ -3,6 +3,7 @@
 #include <kaixa/config/build_configuration.hpp>
 #include <kaixa/extension/resolver.hpp>
 
+#include <cstddef>
 #include <expected>
 #include <filesystem>
 #include <iosfwd>
@@ -40,6 +41,7 @@ namespace kaixa::cli {
     struct BuildCommand {
         WorkspaceOptions workspace;
         std::vector<std::string> targets;
+        std::optional<std::size_t> jobs;
         bool list = false;
     };
 

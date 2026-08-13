@@ -83,7 +83,9 @@ namespace kaixa::plugin::cmake::detail {
         std::optional<std::string> c_compiler;
         std::optional<std::string> cxx_compiler;
         std::optional<std::filesystem::path> toolchain;
-        std::vector<std::string> arguments;
+        std::vector<std::string> configure_arguments;
+        std::vector<std::string> build_arguments;
+        std::vector<std::string> install_arguments;
     };
 
     inline constexpr std::string_view generated_marker =

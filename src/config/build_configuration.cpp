@@ -150,7 +150,12 @@ namespace kaixa {
             );
             if (existing != configuration.resolvers.end())
                 return *existing;
-            return configuration.resolvers.emplace_back(std::string(resolver));
+            return configuration.resolvers.emplace_back(
+                std::string(resolver),
+                std::nullopt,
+                std::vector<std::string>{},
+                std::vector<ResolverArgumentGroup>{}
+            );
         }
 
         void select(std::vector<std::string>& selected, const std::string& name) {
@@ -312,8 +317,28 @@ namespace kaixa {
             result.profile = *profile_override;
         for (const ResolverArgumentOverride& override: argument_overrides) {
             ResolverBuildConfiguration& target = resolver_configuration(result, override.resolver);
-            target.arguments.insert(
-                target.arguments.end(),
+            if (override.scope.empty()) {
+                target.arguments.insert(
+                    target.arguments.end(),
+                    override.arguments.begin(),
+                    override.arguments.end()
+                );
+                continue;
+            }
+
+            const auto scoped = std::ranges::find_if(
+                target.scoped_arguments,
+                [&](const ResolverArgumentGroup& arguments) {
+                    return arguments.scope == override.scope;
+                }
+            );
+            if (scoped == target.scoped_arguments.end()) {
+                target.scoped_arguments.push_back({override.scope, override.arguments});
+                continue;
+            }
+
+            scoped->arguments.insert(
+                scoped->arguments.end(),
                 override.arguments.begin(),
                 override.arguments.end()
             );

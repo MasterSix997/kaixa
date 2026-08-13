@@ -99,6 +99,34 @@ KAIXA_TEST(adopted_cmake_project_exposes_products_and_run_targets) {
             context.check(library->artifact.has_value(), "adopted library artifact is known");
         }
     }
+
+    kaixa::EffectiveBuildConfiguration changed_configuration;
+    changed_configuration.profile = "debug";
+    changed_configuration.resolvers.push_back({
+        "cmake",
+        kaixa::Value::table({
+            {"build-arguments", kaixa::Value::array({"--verbose"})}
+        }),
+        {},
+        {}
+    });
+    const kaixa::BuildEnvironment changed_environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        std::move(changed_configuration)
+    };
+    const auto changed_plan = kaixa::plan_build(*graph, registry, changed_environment);
+    context.check(changed_plan.has_value(), "changed build arguments plan");
+    if (changed_plan) {
+        const auto state = kaixa::check(*changed_plan);
+        context.check(state.has_value(), "changed build arguments can be checked");
+        if (state) {
+            context.check(
+                !state->requires_synchronization(),
+                "build arguments do not require CMake reconfiguration"
+            );
+        }
+    }
 }
 
 KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
@@ -527,6 +555,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     changed_configuration.resolvers.push_back({
         "cmake",
         kaixa::Value::table({{"generator", "Ninja"}}),
+        {},
         {}
     });
     const kaixa::BuildEnvironment changed_environment{

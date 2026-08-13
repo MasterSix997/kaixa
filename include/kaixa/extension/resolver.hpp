@@ -8,6 +8,7 @@
 #include <kaixa/foundation/process.hpp>
 #include <kaixa/model/graph.hpp>
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <vector>
@@ -31,6 +32,7 @@ namespace kaixa {
 
     struct BuildRequest {
         std::vector<std::string> targets;
+        std::optional<std::size_t> jobs;
     };
 
     struct RunTarget {

@@ -283,7 +283,6 @@ namespace kaixa::plugin::cmake {
         struct BuildContext {
             Options project;
             detail::BuildOptions build;
-            std::vector<std::string> arguments;
             std::optional<std::string> generator;
             BuildVariant variant;
             std::string configuration;
@@ -499,7 +498,7 @@ namespace kaixa::plugin::cmake {
                 output += "toolchain = "
                     + toml_string(context.build.toolchain->generic_string()) + "\n";
             }
-            append_toml_array(output, "arguments", context.arguments);
+            append_toml_array(output, "configure-arguments", context.build.configure_arguments);
             return output;
         }
 
@@ -521,23 +520,42 @@ namespace kaixa::plugin::cmake {
             if (!build)
                 return std::unexpected(build.error());
 
-            std::vector<std::string> arguments = build->arguments;
             if (configuration) {
-                arguments.insert(
-                    arguments.end(),
+                build->configure_arguments.insert(
+                    build->configure_arguments.end(),
                     configuration->arguments.begin(),
                     configuration->arguments.end()
                 );
+                for (const ResolverArgumentGroup& scoped: configuration->scoped_arguments) {
+                    std::vector<std::string>* destination = nullptr;
+                    if (scoped.scope == "configure")
+                        destination = &build->configure_arguments;
+                    else if (scoped.scope == "build")
+                        destination = &build->build_arguments;
+                    else if (scoped.scope == "install")
+                        destination = &build->install_arguments;
+                    else {
+                        return std::unexpected(error(
+                            "unknown CMake argument scope `" + scoped.scope + "`"
+                        ).add_note("expected configure, build or install"));
+                    }
+
+                    destination->insert(
+                        destination->end(),
+                        scoped.arguments.begin(),
+                        scoped.arguments.end()
+                    );
+                }
             }
 
-            std::optional<std::string> generator = requested_generator(arguments);
+            std::optional<std::string> generator = requested_generator(build->configure_arguments);
             if (!generator)
                 generator = build->generator;
 
             BuildVariant variant = build_variant(
                 environment,
                 *build,
-                arguments,
+                build->configure_arguments,
                 *project
             );
             const std::filesystem::path directory =
@@ -550,7 +568,6 @@ namespace kaixa::plugin::cmake {
             return BuildContext{
                 std::move(*project),
                 std::move(*build),
-                std::move(arguments),
                 std::move(generator),
                 std::move(variant),
                 configuration_name(environment.configuration.profile),
@@ -825,7 +842,8 @@ namespace kaixa::plugin::cmake {
                 }
                 if (!uses_multiple_configurations(context->generator))
                     configure.argv.push_back("-DCMAKE_BUILD_TYPE=" + context->configuration);
-                if (context->build.generator && !requested_generator(context->arguments)) {
+                if (context->build.generator
+                    && !requested_generator(context->build.configure_arguments)) {
                     configure.argv.push_back("-G");
                     configure.argv.push_back(*context->build.generator);
                 }
@@ -846,8 +864,8 @@ namespace kaixa::plugin::cmake {
                 }
                 configure.argv.insert(
                     configure.argv.end(),
-                    context->arguments.begin(),
-                    context->arguments.end()
+                    context->build.configure_arguments.begin(),
+                    context->build.configure_arguments.end()
                 );
                 configure.working_directory = package.directory;
                 configure.package = package.id;
@@ -880,6 +898,15 @@ namespace kaixa::plugin::cmake {
                     build.argv.push_back("--target");
                     build.argv.insert(build.argv.end(), request.targets.begin(), request.targets.end());
                 }
+                if (request.jobs) {
+                    build.argv.push_back("--parallel");
+                    build.argv.push_back(std::to_string(*request.jobs));
+                }
+                build.argv.insert(
+                    build.argv.end(),
+                    context->build.build_arguments.begin(),
+                    context->build.build_arguments.end()
+                );
                 if (*install)
                     build.stage = ActionStage::synchronize;
 
@@ -899,6 +926,11 @@ namespace kaixa::plugin::cmake {
                         "--config", context->configuration,
                         "--prefix", destination.string()
                     };
+                    install_action.argv.insert(
+                        install_action.argv.end(),
+                        context->build.install_arguments.begin(),
+                        context->build.install_arguments.end()
+                    );
                     install_action.working_directory = package.directory;
                     install_action.inputs.push_back(context->directory);
                     install_action.outputs.push_back(destination);

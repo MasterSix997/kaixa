@@ -3,6 +3,7 @@
 #include <kaixa/kaixa.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <ostream>
 #include <utility>
 
@@ -44,18 +45,20 @@ namespace kaixa::cli {
         void append_resolver_arguments(
             WorkspaceOptions& options,
             std::string resolver,
-            std::vector<std::string> arguments
+            std::vector<std::string> arguments,
+            std::string scope
         ) {
             const auto existing = std::ranges::find_if(
                 options.resolver_arguments,
                 [&](const ResolverArgumentOverride& item) {
-                    return item.resolver == resolver;
+                    return item.resolver == resolver && item.scope == scope;
                 }
             );
             if (existing == options.resolver_arguments.end()) {
                 options.resolver_arguments.push_back({
                     std::move(resolver),
-                    std::move(arguments)
+                    std::move(arguments),
+                    std::move(scope)
                 });
                 return;
             }
@@ -110,7 +113,26 @@ namespace kaixa::cli {
                 });
             }
 
-            append_resolver_arguments(options, std::string(*resolver), std::move(arguments));
+            std::string selector(*resolver);
+            std::string scope;
+            const std::size_t separator = selector.rfind('.');
+            if (separator != std::string::npos) {
+                if (separator == 0 || separator + 1 == selector.size()) {
+                    return std::unexpected(ParseError{
+                        "invalid resolver scope `" + selector + "`"
+                    });
+                }
+
+                scope = selector.substr(separator + 1);
+                selector.resize(separator);
+            }
+
+            append_resolver_arguments(
+                options,
+                std::move(selector),
+                std::move(arguments),
+                std::move(scope)
+            );
             return true;
         }
 
@@ -204,6 +226,25 @@ namespace kaixa::cli {
                     command.list = true;
                     continue;
                 }
+                if (argument == "--jobs") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    std::size_t jobs = 0;
+                    const char* begin = value->data();
+                    const char* end = begin + value->size();
+                    const auto parsed_jobs = std::from_chars(begin, end, jobs);
+                    if (parsed_jobs.ec != std::errc{} || parsed_jobs.ptr != end || jobs == 0) {
+                        return std::unexpected(ParseError{
+                            "--jobs requires a positive integer"
+                        });
+                    }
+
+                    command.jobs = jobs;
+                    continue;
+                }
 
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
@@ -225,6 +266,11 @@ namespace kaixa::cli {
             if (command.list && !command.targets.empty()) {
                 return std::unexpected(ParseError{
                     "--list cannot be combined with --target"
+                });
+            }
+            if (command.list && command.jobs) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with --jobs"
                 });
             }
             return command;
@@ -377,7 +423,7 @@ namespace kaixa::cli {
             << "  kaixa inspect [path] [--targets] [--profile name] [--config name]...\n"
             << "  kaixa <check|generate> [path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa build [path] [--list] [--target name]... [--profile name]\n"
+            << "  kaixa build [path] [--list] [--target name]... [--jobs count] [--profile name]\n"
             << "        [--config name]... [--for resolver <arguments...>]...\n"
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"

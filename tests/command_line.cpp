@@ -48,7 +48,15 @@ KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
         std::string_view("--target"),
         std::string_view("core"),
         std::string_view("--target"),
-        std::string_view("app")
+        std::string_view("app"),
+        std::string_view("--jobs"),
+        std::string_view("6"),
+        std::string_view("--for"),
+        std::string_view("cmake.configure"),
+        std::string_view("-DDEV=ON"),
+        std::string_view("--for"),
+        std::string_view("cmake.build"),
+        std::string_view("--verbose")
     };
     const auto selected = kaixa::cli::parse_command_line(selected_arguments);
     context.check(selected.has_value(), "multiple build targets parse");
@@ -58,6 +66,22 @@ KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
         if (command) {
             context.check_equal(command->targets.size(), std::size_t{2}, "build target count");
             context.check_equal(command->targets.front(), std::string("core"), "first build target");
+            context.check_equal(command->jobs.value_or(0), std::size_t{6}, "build job count");
+            context.check_equal(
+                command->workspace.resolver_arguments.size(),
+                std::size_t{2},
+                "resolver argument scope count"
+            );
+            context.check_equal(
+                command->workspace.resolver_arguments.front().scope,
+                std::string("configure"),
+                "configure argument scope"
+            );
+            context.check_equal(
+                command->workspace.resolver_arguments.back().scope,
+                std::string("build"),
+                "build argument scope"
+            );
         }
     }
 
@@ -70,6 +94,23 @@ KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
     if (listed) {
         const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*listed);
         context.check(command != nullptr && command->list, "build list mode is retained");
+    }
+}
+
+KAIXA_TEST(command_line_build_rejects_invalid_job_counts) {
+    constexpr std::array arguments = {
+        std::string_view("build"),
+        std::string_view("--jobs"),
+        std::string_view("0")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(!parsed.has_value(), "zero jobs are rejected");
+    if (!parsed) {
+        context.check_contains(
+            parsed.error().message,
+            "positive integer",
+            "job count error explains requirement"
+        );
     }
 }
 

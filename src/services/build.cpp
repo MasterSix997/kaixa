@@ -44,9 +44,9 @@ namespace kaixa {
                 ));
             }
 
-            const BuildRequest package_request = id == graph.root()
-                ? request
-                : BuildRequest{};
+            BuildRequest package_request = request;
+            if (id != graph.root())
+                package_request.targets.clear();
             auto planned = resolver->plan(
                 graph,
                 package,

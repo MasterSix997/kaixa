@@ -678,7 +678,26 @@ namespace kaixa::plugin::cmake::detail {
         auto arguments = string_array(options, "arguments");
         if (!arguments)
             return std::unexpected(arguments.error());
-        result.arguments = std::move(*arguments);
+        result.configure_arguments = std::move(*arguments);
+
+        auto configure_arguments = string_array(options, "configure-arguments");
+        if (!configure_arguments)
+            return std::unexpected(configure_arguments.error());
+        result.configure_arguments.insert(
+            result.configure_arguments.end(),
+            configure_arguments->begin(),
+            configure_arguments->end()
+        );
+
+        auto build_arguments = string_array(options, "build-arguments");
+        if (!build_arguments)
+            return std::unexpected(build_arguments.error());
+        result.build_arguments = std::move(*build_arguments);
+
+        auto install_arguments = string_array(options, "install-arguments");
+        if (!install_arguments)
+            return std::unexpected(install_arguments.error());
+        result.install_arguments = std::move(*install_arguments);
 
         auto finished = options.finish();
         if (!finished)

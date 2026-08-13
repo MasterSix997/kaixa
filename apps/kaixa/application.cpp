@@ -481,6 +481,7 @@ namespace kaixa::cli {
 
             BuildRequest request;
             request.targets = command.targets;
+            request.jobs = command.jobs;
             auto plan = plan_build(
                 workspace->graph,
                 workspace->registry,

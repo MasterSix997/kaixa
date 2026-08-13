@@ -37,8 +37,9 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     const std::vector<kaixa::ConfigurationSet> layers{*published, *user};
     const std::vector<std::string> requested;
     const std::vector<kaixa::ResolverArgumentOverride> overrides{
-        {"cmake", {"-DBUILD_TESTING=ON"}},
-        {"lua", {"--trace"}}
+        {"cmake", {"-DBUILD_TESTING=ON"}, {}},
+        {"cmake", {"--verbose"}, "build"},
+        {"lua", {"--trace"}, {}}
     };
     const auto effective = kaixa::resolve_configurations(
         layers,
@@ -70,6 +71,14 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     context.check(compiler && *compiler == "clang++", "local compiler merged");
     context.check(arguments && arguments->as_array(), "published resolver arguments preserved");
     context.check_equal(cmake->arguments.size(), std::size_t{1}, "CLI argument is separate");
+    context.check_equal(cmake->scoped_arguments.size(), std::size_t{1}, "scoped CLI argument is separate");
+    if (!cmake->scoped_arguments.empty()) {
+        context.check_equal(
+            cmake->scoped_arguments.front().scope,
+            std::string("build"),
+            "build argument scope"
+        );
+    }
     const kaixa::ResolverBuildConfiguration* lua = effective->find("lua");
     context.check(lua != nullptr, "second resolver override exists");
     if (lua) {

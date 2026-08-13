@@ -29,10 +29,22 @@ namespace kaixa {
         std::vector<ConfigurationDefinition> definitions;
     };
 
+    struct ResolverArgumentOverride {
+        std::string resolver;
+        std::vector<std::string> arguments;
+        std::string scope;
+    };
+
+    struct ResolverArgumentGroup {
+        std::string scope;
+        std::vector<std::string> arguments;
+    };
+
     struct ResolverBuildConfiguration {
         std::string resolver;
         std::optional<Value> settings;
         std::vector<std::string> arguments;
+        std::vector<ResolverArgumentGroup> scoped_arguments;
     };
 
     struct EffectiveBuildConfiguration {
@@ -41,11 +53,6 @@ namespace kaixa {
         std::vector<ResolverBuildConfiguration> resolvers;
 
         [[nodiscard]] const ResolverBuildConfiguration* find(std::string_view resolver) const noexcept;
-    };
-
-    struct ResolverArgumentOverride {
-        std::string resolver;
-        std::vector<std::string> arguments;
     };
 
     [[nodiscard]] Result<ConfigurationSet> read_configuration_set(TableReader& root);
