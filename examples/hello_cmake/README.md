@@ -4,7 +4,7 @@ This example adopts a handwritten `CMakeLists.txt`. Kaixa leaves the source proj
 keeps its CMake build tree under `.kaixa/build/cmake/<configuration>/hello_cmake`.
 
 ```sh
-kaixa inspect
+kaixa inspect packages
 kaixa generate
 kaixa build
 kaixa test

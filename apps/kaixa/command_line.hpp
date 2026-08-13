@@ -25,9 +25,18 @@ namespace kaixa::cli {
     struct HelpCommand {};
     struct VersionCommand {};
 
+    enum class InspectMode {
+        packages,
+        targets,
+        outputs,
+        actions,
+        config
+    };
+
     struct InspectCommand {
         WorkspaceOptions workspace;
-        bool targets = false;
+        InspectMode mode = InspectMode::packages;
+        bool verbose = false;
     };
 
     struct CheckCommand {
@@ -70,6 +79,7 @@ namespace kaixa::cli {
 
     struct ConfigShowCommand {
         WorkspaceOptions workspace;
+        bool verbose = false;
     };
 
     struct ConfigPathCommand {

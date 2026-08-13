@@ -11,7 +11,7 @@ while configuring `demo_app`, so its `CMakeLists.txt` can link directly to `demo
 rules or package configuration files are needed.
 
 ```sh
-kaixa inspect
+kaixa inspect packages
 kaixa generate
 kaixa build
 kaixa test

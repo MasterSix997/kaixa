@@ -216,7 +216,12 @@ namespace kaixa::cli {
             return paths;
         }
 
-        void print_package(const Graph& graph, const PackageId id, const int depth) {
+        void print_package(
+            const Graph& graph,
+            const PackageId id,
+            const int depth,
+            const bool verbose = false
+        ) {
             const PackageNode& package = graph[id];
             std::cout << std::string(static_cast<std::size_t>(depth) * 2, ' ')
                 << package.name;
@@ -224,10 +229,12 @@ namespace kaixa::cli {
                 std::cout << " (opaque)";
             else
                 std::cout << " (" << package.resolver << ')';
+            if (verbose)
+                std::cout << " -> " << package.directory.string();
 
             std::cout << '\n';
             for (const PackageId dependency: package.dependencies)
-                print_package(graph, dependency, depth + 1);
+                print_package(graph, dependency, depth + 1, verbose);
         }
 
         std::string_view state_name(const GeneratedFileState state) {
@@ -246,6 +253,15 @@ namespace kaixa::cli {
                 case ActionState::unknown: return "unknown";
             }
             return "unknown";
+        }
+
+        std::string_view stage_name(const ActionStage stage) {
+            switch (stage) {
+                case ActionStage::synchronize: return "synchronize";
+                case ActionStage::build: return "build";
+                case ActionStage::test: return "test";
+            }
+            return "action";
         }
 
         std::string display_path(const std::filesystem::path& path, const std::filesystem::path& workspace) {
@@ -296,6 +312,59 @@ namespace kaixa::cli {
         void print_outputs(const BuildPlan& plan, const std::filesystem::path& workspace) {
             for (const BuildOutput& output: plan.outputs())
                 std::cout << "artifact: " << display_path(output.path, workspace) << '\n';
+        }
+
+        void inspect_outputs(
+            const Graph& graph,
+            const BuildPlan& plan,
+            const std::filesystem::path& workspace
+        ) {
+            if (plan.outputs().empty()) {
+                std::cout << "no build outputs\n";
+                return;
+            }
+
+            for (const BuildOutput& output: plan.outputs()) {
+                std::cout << output.resolver << ' ' << graph[output.package].name << " -> "
+                    << display_path(output.path, workspace) << '\n';
+            }
+        }
+
+        Result<void> inspect_actions(
+            const Graph& graph,
+            const BuildPlan& plan,
+            const std::filesystem::path& workspace,
+            const bool verbose
+        ) {
+            auto report = check(plan);
+            if (!report)
+                return std::unexpected(report.error());
+
+            if (plan.actions().empty()) {
+                std::cout << "no build actions\n";
+                return {};
+            }
+
+            for (std::size_t index = 0; index < plan.actions().size(); ++index) {
+                const Action& action = plan.actions()[index];
+                const ActionCheck& checked = report->actions[index];
+                std::cout << state_name(checked.state) << ' ' << stage_name(action.stage) << ' ';
+                if (action.package)
+                    std::cout << graph[*action.package].name << ": ";
+
+                std::cout << action.description << '\n';
+                if (!verbose)
+                    continue;
+
+                std::cout << "  command: " << format_command(action.argv) << '\n';
+                std::cout << "  working directory: "
+                    << display_path(action.working_directory, workspace) << '\n';
+                for (const std::filesystem::path& input: action.inputs)
+                    std::cout << "  input: " << display_path(input, workspace) << '\n';
+                for (const std::filesystem::path& output: action.outputs)
+                    std::cout << "  output: " << display_path(output, workspace) << '\n';
+            }
+            return {};
         }
 
         std::string_view product_kind_name(const ProductKind kind) {
@@ -365,40 +434,66 @@ namespace kaixa::cli {
         }
 
         int run(const InspectCommand& command) {
-            if (command.targets) {
-                auto workspace = open_workspace(command.workspace);
-                if (!workspace)
-                    return fail(workspace.error());
+            if (command.mode == InspectMode::packages) {
+                auto graph = load_workspace(command.workspace.path);
+                if (!graph)
+                    return fail(graph.error());
 
-                auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
-                if (!plan)
-                    return fail(plan.error());
-
-                auto state = check(*plan);
-                if (!state)
-                    return fail(state.error());
-                if (state->requires_synchronization()) {
-                    return fail(error("CMake target information is not synchronized")
-                        .add_note("run `kaixa generate` before inspecting targets"));
-                }
-
-                auto products = discover_products(
-                    workspace->graph,
-                    workspace->registry,
-                    workspace->environment
-                );
-                if (!products)
-                    return fail(products.error());
-
-                print_products(*products, workspace->environment.workspace);
+                print_package(*graph, graph->root(), 0, command.verbose);
                 return 0;
             }
 
-            auto graph = load_workspace(command.workspace.path);
-            if (!graph)
-                return fail(graph.error());
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
 
-            print_package(*graph, graph->root(), 0);
+            if (command.mode == InspectMode::config) {
+                const PackageNode& root = workspace->graph[workspace->graph.root()];
+                print_effective_configuration(
+                    workspace->environment.configuration,
+                    workspace->configuration_sources,
+                    root.resolver,
+                    workspace->environment.workspace,
+                    command.verbose
+                );
+                return 0;
+            }
+
+            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
+            if (!plan)
+                return fail(plan.error());
+
+            if (command.mode == InspectMode::outputs) {
+                inspect_outputs(workspace->graph, *plan, workspace->environment.workspace);
+                return 0;
+            }
+            if (command.mode == InspectMode::actions) {
+                auto printed = inspect_actions(
+                    workspace->graph,
+                    *plan,
+                    workspace->environment.workspace,
+                    command.verbose
+                );
+                return printed ? 0 : fail(printed.error());
+            }
+
+            auto state = check(*plan);
+            if (!state)
+                return fail(state.error());
+            if (state->requires_synchronization()) {
+                return fail(error("target information is not synchronized")
+                    .add_note("run `kaixa generate` before inspecting targets"));
+            }
+
+            auto products = discover_products(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!products)
+                return fail(products.error());
+
+            print_products(*products, workspace->environment.workspace);
             return 0;
         }
 
@@ -748,7 +843,8 @@ namespace kaixa::cli {
                 workspace->environment.configuration,
                 workspace->configuration_sources,
                 root.resolver,
-                workspace->environment.workspace
+                workspace->environment.workspace,
+                command.verbose
             );
             return 0;
         }

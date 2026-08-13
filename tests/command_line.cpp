@@ -4,11 +4,13 @@
 
 #include <array>
 #include <string_view>
+#include <utility>
 #include <variant>
 
 KAIXA_TEST(command_line_build_keeps_workspace_options) {
     constexpr std::array arguments = {
         std::string_view("build"),
+        std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--profile"),
         std::string_view("release"),
@@ -117,8 +119,9 @@ KAIXA_TEST(command_line_build_rejects_invalid_job_counts) {
 KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
     constexpr std::array arguments = {
         std::string_view("inspect"),
+        std::string_view("targets"),
+        std::string_view("--path"),
         std::string_view("project"),
-        std::string_view("--targets"),
         std::string_view("--config"),
         std::string_view("clang")
     };
@@ -128,8 +131,17 @@ KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
         return;
 
     const auto* command = std::get_if<kaixa::cli::InspectCommand>(&*parsed);
-    context.check(command != nullptr && command->targets, "inspect target mode is retained");
+    context.check(command != nullptr, "inspect command has its own type");
     if (command) {
+        context.check(
+            command->mode == kaixa::cli::InspectMode::targets,
+            "inspect target mode is retained"
+        );
+        context.check_equal(
+            command->workspace.path.generic_string(),
+            std::string("project"),
+            "inspect workspace path"
+        );
         context.check_equal(
             command->workspace.configurations.front(),
             std::string("clang"),
@@ -177,15 +189,14 @@ KAIXA_TEST(command_line_test_keeps_test_options_together) {
 KAIXA_TEST(command_line_rejects_extra_positional_arguments) {
     constexpr std::array arguments = {
         std::string_view("build"),
-        std::string_view("first"),
-        std::string_view("second")
+        std::string_view("project")
     };
     const auto parsed = kaixa::cli::parse_command_line(arguments);
-    context.check(!parsed.has_value(), "extra path is rejected");
+    context.check(!parsed.has_value(), "positional path is rejected");
     if (!parsed) {
         context.check_contains(
             parsed.error().message,
-            "unexpected argument `second`",
+            "unexpected argument `project`",
             "specific parsing error"
         );
     }
@@ -282,6 +293,7 @@ KAIXA_TEST(command_line_run_list_is_explicit) {
 KAIXA_TEST(command_line_clean_supports_dry_run_and_all) {
     constexpr std::array arguments = {
         std::string_view("clean"),
+        std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--all"),
         std::string_view("--generated-files"),
@@ -365,6 +377,7 @@ KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
         std::string_view("config"),
         std::string_view("show"),
         std::string_view("clang"),
+        std::string_view("--verbose"),
         std::string_view("--profile"),
         std::string_view("release"),
         std::string_view("--for"),
@@ -381,6 +394,7 @@ KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
     if (!command)
         return;
 
+    context.check(command->verbose, "config origin details are requested");
     context.check_equal(
         command->workspace.configurations.front(),
         std::string("clang"),
@@ -396,4 +410,59 @@ KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
         std::string("configure"),
         "shown resolver scope"
     );
+}
+
+KAIXA_TEST(command_line_inspect_supports_every_mode) {
+    for (const auto& [name, mode]: {
+             std::pair{std::string_view("packages"), kaixa::cli::InspectMode::packages},
+             std::pair{std::string_view("targets"), kaixa::cli::InspectMode::targets},
+             std::pair{std::string_view("outputs"), kaixa::cli::InspectMode::outputs},
+             std::pair{std::string_view("actions"), kaixa::cli::InspectMode::actions},
+             std::pair{std::string_view("config"), kaixa::cli::InspectMode::config}
+         }) {
+        const std::array arguments = {
+            std::string_view("inspect"),
+            name,
+            std::string_view("--verbose")
+        };
+        const auto parsed = kaixa::cli::parse_command_line(arguments);
+        context.check(parsed.has_value(), std::string("inspect mode parses: ") + std::string(name));
+        if (!parsed)
+            continue;
+
+        const auto* command = std::get_if<kaixa::cli::InspectCommand>(&*parsed);
+        context.check(command != nullptr, "inspect mode keeps command type");
+        if (command) {
+            context.check(command->mode == mode, "inspect mode is retained");
+            context.check(command->verbose, "inspect verbose mode is retained");
+        }
+    }
+}
+
+KAIXA_TEST(command_line_workspace_commands_require_the_path_option) {
+    constexpr std::array check_arguments = {
+        std::string_view("check"),
+        std::string_view("--path"),
+        std::string_view("project")
+    };
+    const auto checked = kaixa::cli::parse_command_line(check_arguments);
+    context.check(checked.has_value(), "check accepts --path");
+    if (checked) {
+        const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*checked);
+        context.check(command != nullptr, "check keeps command type");
+        if (command) {
+            context.check_equal(
+                command->workspace.path.generic_string(),
+                std::string("project"),
+                "check workspace path"
+            );
+        }
+    }
+
+    constexpr std::array positional_arguments = {
+        std::string_view("generate"),
+        std::string_view("project")
+    };
+    const auto positional = kaixa::cli::parse_command_line(positional_arguments);
+    context.check(!positional.has_value(), "generate rejects a positional workspace path");
 }

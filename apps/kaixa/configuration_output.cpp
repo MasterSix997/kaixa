@@ -91,20 +91,29 @@ namespace kaixa::cli {
             return output;
         }
 
+        std::string origin_suffix(
+            const SourceLocation& location,
+            const std::filesystem::path& workspace,
+            const bool verbose
+        ) {
+            return verbose ? " [origin: " + origin_text(location, workspace) + ']' : "";
+        }
+
         void print_entries(
             const Value& value,
             const std::string_view prefix,
-            const std::filesystem::path& workspace
+            const std::filesystem::path& workspace,
+            const bool verbose
         ) {
             const std::vector<TableEntry>* table = value.as_table();
             if (!table) {
                 std::cout << "    " << prefix << " = " << format_value(value)
-                    << " [origin: " << origin_text(value.location(), workspace) << "]\n";
+                    << origin_suffix(value.location(), workspace, verbose) << '\n';
                 return;
             }
 
             for (const TableEntry& entry: *table)
-                print_entries(entry.value, join_config_path(prefix, entry.key), workspace);
+                print_entries(entry.value, join_config_path(prefix, entry.key), workspace, verbose);
         }
 
         struct DisplayOption {
@@ -217,7 +226,8 @@ namespace kaixa::cli {
             const std::string_view name,
             const std::optional<DisplayOption>& option,
             const std::filesystem::path& workspace,
-            const std::string_view fallback
+            const std::string_view fallback,
+            const bool verbose
         ) {
             std::cout << "  " << name << " = ";
             if (!option) {
@@ -225,13 +235,14 @@ namespace kaixa::cli {
                 return;
             }
 
-            std::cout << quote(option->value) << " [origin: "
-                << origin_text(option->origin, workspace) << "]\n";
+            std::cout << quote(option->value)
+                << origin_suffix(option->origin, workspace, verbose) << '\n';
         }
 
         void print_effective_cmake(
             const EffectiveBuildConfiguration& configuration,
-            const std::filesystem::path& workspace
+            const std::filesystem::path& workspace,
+            const bool verbose
         ) {
             ResolverBuildConfiguration defaults;
             defaults.resolver = "cmake";
@@ -241,16 +252,17 @@ namespace kaixa::cli {
             );
 
             std::cout << "effective CMake:\n";
-            print_option("generator", options.generator, workspace, "<CMake default>");
-            print_option("c-compiler", options.c_compiler, workspace, "<CMake default>");
-            print_option("cxx-compiler", options.cxx_compiler, workspace, "<CMake default>");
-            print_option("toolchain", options.toolchain, workspace, "none");
+            print_option("generator", options.generator, workspace, "<CMake default>", verbose);
+            print_option("c-compiler", options.c_compiler, workspace, "<CMake default>", verbose);
+            print_option("cxx-compiler", options.cxx_compiler, workspace, "<CMake default>", verbose);
+            print_option("toolchain", options.toolchain, workspace, "none", verbose);
         }
 
         void print_selected_configurations(
             const EffectiveBuildConfiguration& configuration,
             const std::vector<ConfigurationSource>& sources,
-            const std::filesystem::path& workspace
+            const std::filesystem::path& workspace,
+            const bool verbose
         ) {
             if (configuration.selected.empty()) {
                 std::cout << "selected configurations: none\n";
@@ -260,6 +272,11 @@ namespace kaixa::cli {
             std::cout << "selected configurations:\n";
             for (const std::string& selected: configuration.selected) {
                 std::cout << "  " << selected;
+                if (!verbose) {
+                    std::cout << '\n';
+                    continue;
+                }
+
                 bool wrote_origin = false;
                 for (const ConfigurationSource& source: sources) {
                     for (const ConfigurationDefinition& definition: source.configurations.definitions) {
@@ -280,7 +297,8 @@ namespace kaixa::cli {
 
         void print_resolver_settings(
             const EffectiveBuildConfiguration& configuration,
-            const std::filesystem::path& workspace
+            const std::filesystem::path& workspace,
+            const bool verbose
         ) {
             if (configuration.resolvers.empty()) {
                 std::cout << "resolver settings: none\n";
@@ -291,15 +309,17 @@ namespace kaixa::cli {
             for (const ResolverBuildConfiguration& resolver: configuration.resolvers) {
                 std::cout << "  " << resolver.resolver << ":\n";
                 if (resolver.settings)
-                    print_entries(*resolver.settings, {}, workspace);
+                    print_entries(*resolver.settings, {}, workspace, verbose);
 
                 if (!resolver.arguments.empty()) {
                     std::cout << "    configure-arguments += "
-                        << format_arguments(resolver.arguments) << " [origin: command line]\n";
+                        << format_arguments(resolver.arguments)
+                        << (verbose ? " [origin: command line]" : "") << '\n';
                 }
                 for (const ResolverArgumentGroup& arguments: resolver.scoped_arguments) {
                     std::cout << "    " << arguments.scope << "-arguments += "
-                        << format_arguments(arguments.arguments) << " [origin: command line]\n";
+                        << format_arguments(arguments.arguments)
+                        << (verbose ? " [origin: command line]" : "") << '\n';
                 }
             }
         }
@@ -342,13 +362,14 @@ namespace kaixa::cli {
         const EffectiveBuildConfiguration& configuration,
         const std::vector<ConfigurationSource>& sources,
         const std::string_view root_resolver,
-        const std::filesystem::path& workspace
+        const std::filesystem::path& workspace,
+        const bool verbose
     ) {
-        std::cout << "profile: " << configuration.profile << " [origin: "
-            << origin_text(configuration.profile_origin, workspace) << "]\n";
-        print_selected_configurations(configuration, sources, workspace);
-        print_resolver_settings(configuration, workspace);
+        std::cout << "profile: " << configuration.profile
+            << origin_suffix(configuration.profile_origin, workspace, verbose) << '\n';
+        print_selected_configurations(configuration, sources, workspace, verbose);
+        print_resolver_settings(configuration, workspace, verbose);
         if (root_resolver == "cmake")
-            print_effective_cmake(configuration, workspace);
+            print_effective_cmake(configuration, workspace, verbose);
     }
 }

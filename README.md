@@ -138,13 +138,13 @@ The user config is `%APPDATA%/Kaixa/config.toml` on Windows
 and `$XDG_CONFIG_HOME/kaixa/config.toml` (falling back to `~/.config/kaixa/config.toml`) elsewhere.
 
 ```sh
-kaixa build . --config editor --config clang
+kaixa build --path . --config editor --config clang
 ```
 
 Raw resolver arguments are an explicit, temporary override. A block ends at the next `--for`:
 
 ```sh
-kaixa build . --for cmake -G Ninja -DBUILD_TESTING=OFF --for lua --trace
+kaixa build --path . --for cmake -G Ninja -DBUILD_TESTING=OFF --for lua --trace
 ```
 
 Arguments are delivered only to the named resolver. Build options such as `--profile` and
@@ -153,9 +153,9 @@ The effective profile and resolver settings form part of the CMake build-directo
 so configurations using different generators or compilers do not share a `CMakeCache.txt`.
 
 ```sh
-kaixa inspect .
-kaixa build .
-kaixa build . --profile release
+kaixa inspect packages --path .
+kaixa build --path .
+kaixa build --path . --profile release
 ```
 
 ## Build Kaixa

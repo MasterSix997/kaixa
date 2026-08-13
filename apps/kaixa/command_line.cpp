@@ -72,6 +72,16 @@ namespace kaixa::cli {
 
         std::expected<bool, ParseError> parse_workspace_option(Parser& parser, WorkspaceOptions& options) {
             const std::string_view option = parser.peek();
+            if (option == "--path") {
+                parser.take();
+                auto value = parser.value(option);
+                if (!value)
+                    return std::unexpected(value.error());
+
+                options.path = *value;
+                return true;
+            }
+
             if (option == "--profile") {
                 parser.take();
                 auto value = parser.value(option);
@@ -138,7 +148,6 @@ namespace kaixa::cli {
 
         std::expected<WorkspaceOptions, ParseError> parse_workspace(Parser& parser) {
             WorkspaceOptions options;
-            bool has_path = false;
             while (!parser.done()) {
                 auto parsed = parse_workspace_option(parser, options);
                 if (!parsed)
@@ -146,15 +155,9 @@ namespace kaixa::cli {
                 if (*parsed)
                     continue;
 
-                const std::string_view argument = parser.take();
-                if (has_path) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
-                }
-
-                options.path = argument;
-                has_path = true;
+                return std::unexpected(ParseError{
+                    "unexpected argument `" + std::string(parser.take()) + "`"
+                });
             }
             return options;
         }
@@ -163,16 +166,6 @@ namespace kaixa::cli {
             TestCommand command;
             while (!parser.done()) {
                 const std::string_view argument = parser.peek();
-                if (argument == "--path") {
-                    parser.take();
-                    auto value = parser.value(argument);
-                    if (!value)
-                        return std::unexpected(value.error());
-
-                    command.workspace.path = *value;
-                    continue;
-                }
-
                 if (argument == "--target") {
                     parser.take();
                     auto value = parser.value(argument);
@@ -210,7 +203,6 @@ namespace kaixa::cli {
 
         std::expected<BuildCommand, ParseError> parse_build(Parser& parser) {
             BuildCommand command;
-            bool has_path = false;
             while (!parser.done()) {
                 const std::string_view argument = parser.peek();
                 if (argument == "--target") {
@@ -253,15 +245,9 @@ namespace kaixa::cli {
                 if (*parsed)
                     continue;
 
-                parser.take();
-                if (has_path) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
-                }
-
-                command.workspace.path = argument;
-                has_path = true;
+                return std::unexpected(ParseError{
+                    "unexpected argument `" + std::string(parser.take()) + "`"
+                });
             }
 
             if (command.list && !command.targets.empty()) {
@@ -287,16 +273,6 @@ namespace kaixa::cli {
                         command.arguments.emplace_back(parser.take());
 
                     break;
-                }
-
-                if (argument == "--path") {
-                    parser.take();
-                    auto value = parser.value(argument);
-                    if (!value)
-                        return std::unexpected(value.error());
-
-                    command.workspace.path = *value;
-                    continue;
                 }
 
                 if (argument == "--target") {
@@ -341,7 +317,6 @@ namespace kaixa::cli {
 
         std::expected<CleanCommand, ParseError> parse_clean(Parser& parser) {
             CleanCommand command;
-            bool has_path = false;
             while (!parser.done()) {
                 const std::string_view argument = parser.peek();
                 if (argument == "--all") {
@@ -366,15 +341,9 @@ namespace kaixa::cli {
                 if (*parsed)
                     continue;
 
-                parser.take();
-                if (has_path) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
-                }
-
-                command.workspace.path = argument;
-                has_path = true;
+                return std::unexpected(ParseError{
+                    "unexpected argument `" + std::string(parser.take()) + "`"
+                });
             }
 
             if (command.all && (command.workspace.profile
@@ -389,11 +358,11 @@ namespace kaixa::cli {
 
         std::expected<InspectCommand, ParseError> parse_inspect(Parser& parser) {
             InspectCommand command;
-            bool has_path = false;
+            bool has_mode = false;
             while (!parser.done()) {
-                if (parser.peek() == "--targets") {
+                if (parser.peek() == "--verbose") {
                     parser.take();
-                    command.targets = true;
+                    command.verbose = true;
                     continue;
                 }
 
@@ -404,14 +373,28 @@ namespace kaixa::cli {
                     continue;
 
                 const std::string_view argument = parser.take();
-                if (has_path) {
+                if (has_mode) {
                     return std::unexpected(ParseError{
                         "unexpected argument `" + std::string(argument) + "`"
                     });
                 }
 
-                command.workspace.path = argument;
-                has_path = true;
+                if (argument == "packages")
+                    command.mode = InspectMode::packages;
+                else if (argument == "targets")
+                    command.mode = InspectMode::targets;
+                else if (argument == "outputs")
+                    command.mode = InspectMode::outputs;
+                else if (argument == "actions")
+                    command.mode = InspectMode::actions;
+                else if (argument == "config")
+                    command.mode = InspectMode::config;
+                else {
+                    return std::unexpected(ParseError{
+                        "unknown inspect mode `" + std::string(argument) + "`"
+                    });
+                }
+                has_mode = true;
             }
             return command;
         }
@@ -439,13 +422,9 @@ namespace kaixa::cli {
             ConfigShowCommand command;
             bool has_name = false;
             while (!parser.done()) {
-                if (parser.peek() == "--path") {
+                if (parser.peek() == "--verbose") {
                     parser.take();
-                    auto value = parser.value("--path");
-                    if (!value)
-                        return std::unexpected(value.error());
-
-                    command.workspace.path = *value;
+                    command.verbose = true;
                     continue;
                 }
 
@@ -501,22 +480,23 @@ namespace kaixa::cli {
         out
             << "Kaixa " << version() << "\n\n"
             << "Usage:\n"
-            << "  kaixa inspect [path] [--targets] [--profile name] [--config name]...\n"
-            << "  kaixa <check|generate> [path] [--profile name] [--config name]...\n"
+            << "  kaixa inspect [packages|targets|outputs|actions|config] [--path path]\n"
+            << "        [--verbose] [--profile name] [--config name]...\n"
+            << "  kaixa <check|generate> [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa build [path] [--list] [--target name]... [--jobs count] [--profile name]\n"
-            << "        [--config name]... [--for resolver <arguments...>]...\n"
+            << "  kaixa build [--path path] [--list] [--target name]... [--jobs count]\n"
+            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n"
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
             << "  kaixa run [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
-            << "  kaixa clean [path] [--profile name] [--config name]...\n"
+            << "  kaixa clean [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
-            << "  kaixa clean [path] --all [--generated-files] [--dry-run]\n"
+            << "  kaixa clean [--path path] --all [--generated-files] [--dry-run]\n"
             << "  kaixa config list [--path path]\n"
-            << "  kaixa config show [name] [--path path] [--profile name] [--config name]...\n"
-            << "        [--for resolver[.scope] <arguments...>]...\n"
+            << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
+            << "        [--config name]... [--for resolver[.scope] <arguments...>]...\n"
             << "  kaixa config path [--path path]\n"
             << "  kaixa --version\n";
     }

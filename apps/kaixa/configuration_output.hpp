@@ -23,6 +23,7 @@ namespace kaixa::cli {
         const EffectiveBuildConfiguration& configuration,
         const std::vector<ConfigurationSource>& sources,
         std::string_view root_resolver,
-        const std::filesystem::path& workspace
+        const std::filesystem::path& workspace,
+        bool verbose = false
     );
 }
