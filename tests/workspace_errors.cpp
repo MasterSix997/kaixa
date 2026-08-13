@@ -135,6 +135,7 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
 
     const std::span<const kaixa::Action> actions = plan->actions();
     const std::vector<std::string>& command = actions.front().argv;
+    const std::filesystem::path source = (*graph)[graph->root()].directory / "project";
     context.check(
         std::ranges::find(command, "Ninja") != command.end(),
         "requested generator is forwarded"
@@ -144,7 +145,7 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
         "single-config generator receives the profile"
     );
     context.check(
-        std::ranges::find(command, (root.path() / "project").string()) != command.end(),
+        std::ranges::find(command, source.string()) != command.end(),
         "configured source directory is forwarded"
     );
 }

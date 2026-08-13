@@ -689,11 +689,12 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
     );
     context.check(plan.has_value(), "source generation clean plans");
     if (plan) {
+        const std::filesystem::path cmakelists = (*graph)[graph->root()].directory / "CMakeLists.txt";
         context.check(
             std::ranges::any_of(
                 plan->generated_files(),
                 [&](const kaixa::GeneratedCleanFile& generated) {
-                    return generated.path == workspace.path() / "CMakeLists.txt";
+                    return generated.path == cmakelists;
                 }
             ),
             "source CMakeLists is explicitly generated"
