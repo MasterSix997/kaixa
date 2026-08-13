@@ -37,6 +37,21 @@ KAIXA_TEST(run_target_selection_requires_a_choice_when_ambiguous) {
     }
 }
 
+KAIXA_TEST(run_target_selection_lists_available_targets_for_an_unknown_name) {
+    const std::array targets = {
+        kaixa::RunTarget{"editor", {{"editor"}, {}}},
+        kaixa::RunTarget{"game", {{"game"}, {}}}
+    };
+
+    const auto selected = kaixa::select_run_target(targets, std::string("server"), "workspace");
+    context.check(!selected.has_value(), "unknown target is rejected");
+    if (!selected) {
+        const std::string diagnostic = kaixa::format_diagnostic(selected.error());
+        context.check_contains(diagnostic, "server", "diagnostic names requested target");
+        context.check_contains(diagnostic, "editor, game", "diagnostic lists available targets");
+    }
+}
+
 KAIXA_TEST(clean_removes_only_planned_state) {
     const TempDirectory root("clean-plan");
     const std::filesystem::path state = root.path() / ".kaixa";

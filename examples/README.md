@@ -1,6 +1,17 @@
 # Examples
 
-- [`hello_cmake`](hello_cmake/) is one managed package backed by an existing CMake project.
-- [`local_workspace`](local_workspace/) composes a managed CMake dependency from source and has an opaque asset folder.
-- [`package_dependency`](package_dependency/) consumes an installed CMake package through `find_package`.
-- [`generated_cmake`](generated_cmake/) generates its `CMakeLists.txt` from `Kaixa.toml`.
+- [`generated_cmake`](generated_cmake/) generates a CMake project from `Kaixa.toml`.
+- [`hello_cmake`](hello_cmake/) adopts an existing CMake project.
+- [`local_workspace`](local_workspace/) composes a local dependency with `add_subdirectory`.
+- [`package_dependency`](package_dependency/) installs a local dependency and consumes it with `find_package`.
+
+Each example is independent. From an example directory, the complete cycle is:
+
+```sh
+kaixa check
+kaixa generate
+kaixa build
+kaixa test
+kaixa run
+kaixa clean --dry-run
+```

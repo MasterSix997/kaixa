@@ -11,5 +11,9 @@ package_math = "find-package"
 ```
 
 ```sh
-kaixa build .
+kaixa inspect
+kaixa generate
+kaixa build
+kaixa test
+kaixa run
 ```

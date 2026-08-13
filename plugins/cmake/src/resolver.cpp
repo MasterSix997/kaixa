@@ -774,7 +774,11 @@ namespace kaixa::plugin::cmake {
                 configure.argv.push_back("-DKAIXA_CMAKE_PREFIX_PATH=" + join_prefixes(prefixes));
                 if (package.id == graph.root()) {
                     const std::string output = context->output.generic_string();
-                    configure.argv.push_back("-DKAIXA_OUTPUT_ROOT=" + output);
+                    if (context->project.runtime_output || context->project.library_output
+                        || context->project.archive_output) {
+                        configure.argv.push_back("-DKAIXA_OUTPUT_ROOT=" + output);
+                    }
+
                     configure.argv.push_back("-DCMAKE_RUNTIME_OUTPUT_DIRECTORY=" + output + "/bin/$<0:>");
                     configure.argv.push_back("-DCMAKE_LIBRARY_OUTPUT_DIRECTORY=" + output + "/lib/$<0:>");
                     configure.argv.push_back("-DCMAKE_ARCHIVE_OUTPUT_DIRECTORY=" + output + "/lib/$<0:>");

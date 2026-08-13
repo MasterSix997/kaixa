@@ -6,3 +6,6 @@ find_package(package_math CONFIG REQUIRED)
 add_executable(package_app src/main.cpp)
 target_compile_features(package_app PRIVATE cxx_std_23)
 target_link_libraries(package_app PRIVATE package::math)
+
+enable_testing()
+add_test(NAME package_app COMMAND package_app)

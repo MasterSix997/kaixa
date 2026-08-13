@@ -34,9 +34,22 @@ namespace kaixa {
                 [&](const RunTarget& target) { return target.name == *requested; }
             );
             if (selected == targets.end()) {
+                if (targets.empty()) {
+                    return std::unexpected(error(
+                        "runnable target `" + *requested + "` does not exist"
+                    ));
+                }
+
+                std::string available;
+                for (const RunTarget& target: targets) {
+                    if (!available.empty())
+                        available += ", ";
+
+                    available += target.name;
+                }
                 return std::unexpected(error(
                     "runnable target `" + *requested + "` does not exist"
-                ));
+                ).add_note("available targets: " + available));
             }
 
             return *selected;

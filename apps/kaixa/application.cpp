@@ -233,13 +233,14 @@ namespace kaixa::cli {
             return "unknown";
         }
 
-        std::string_view stage_name(const ActionStage stage) {
-            switch (stage) {
-                case ActionStage::synchronize: return "synchronization";
-                case ActionStage::build: return "build";
-                case ActionStage::test: return "test";
+        std::string display_path(const std::filesystem::path& path, const std::filesystem::path& workspace) {
+            const std::filesystem::path relative = path.lexically_relative(workspace);
+            if (!relative.empty() && !relative.is_absolute()
+                && *relative.begin() != "..") {
+                return relative.generic_string();
             }
-            return "action";
+
+            return path.string();
         }
 
         Result<void> print_actions(const BuildPlan& plan, const bool synchronization_only = false) {
@@ -263,9 +264,9 @@ namespace kaixa::cli {
             return {};
         }
 
-        void print_outputs(const BuildPlan& plan) {
+        void print_outputs(const BuildPlan& plan, const std::filesystem::path& workspace) {
             for (const BuildOutput& output: plan.outputs())
-                std::cout << "output: " << output.path.string() << '\n';
+                std::cout << "artifact: " << display_path(output.path, workspace) << '\n';
         }
 
         int run(const HelpCommand&) {
@@ -305,20 +306,23 @@ namespace kaixa::cli {
                 return fail(report.error());
 
             for (const GeneratedFileCheck& file: report->generated_files) {
-                std::cout << state_name(file.state)
-                    << " generated file: " << file.path.string() << '\n';
+                if (file.state == GeneratedFileState::current)
+                    continue;
+
+                std::cout << "generated file: " << state_name(file.state) << ' '
+                    << display_path(file.path, workspace->environment.workspace) << '\n';
             }
             for (const ActionCheck& action: report->actions) {
-                std::cout << state_name(action.state) << ' ' << stage_name(action.stage)
-                    << ": " << action.description << '\n';
+                if (action.stage == ActionStage::synchronize && action.state == ActionState::required)
+                    std::cout << "required synchronization: " << action.description << '\n';
             }
 
             if (report->requires_synchronization()) {
-                std::cout << "synchronization required\n";
+                std::cout << "workspace requires synchronization; run `kaixa generate`\n";
                 return 1;
             }
 
-            std::cout << "workspace synchronized\n";
+            std::cout << "workspace is synchronized\n";
             return 0;
         }
 
@@ -343,12 +347,9 @@ namespace kaixa::cli {
             if (!report)
                 return fail(report.error());
 
-            for (const GeneratedFile& file: plan->generated_files())
-                std::cout << "output file: " << file.path.string() << '\n';
-
-            std::cout << "wrote " << report->written << " file(s); "
-                << report->unchanged << " unchanged; synchronized "
-                << report->synchronized << " action(s)\n";
+            std::cout << "workspace synchronized: " << report->written
+                << " file(s) written, " << report->unchanged << " unchanged, "
+                << report->synchronized << " action(s) run\n";
             return 0;
         }
 
@@ -373,8 +374,8 @@ namespace kaixa::cli {
             if (!report)
                 return fail(report.error());
 
-            std::cout << "completed " << report->executed << " action(s)\n";
-            print_outputs(*plan);
+            std::cout << "build completed: " << report->executed << " action(s) run\n";
+            print_outputs(*plan, workspace->environment.workspace);
             return 0;
         }
 
@@ -400,8 +401,8 @@ namespace kaixa::cli {
             if (!report)
                 return fail(report.error());
 
-            std::cout << "completed " << report->executed << " action(s)\n";
-            print_outputs(*plan);
+            std::cout << "tests completed: " << report->executed << " action(s) run\n";
+            print_outputs(*plan, workspace->environment.workspace);
             return 0;
         }
 
@@ -552,7 +553,7 @@ namespace kaixa::cli {
 
             for (const std::filesystem::path& path: *existing) {
                 std::cout << (command.dry_run ? "would remove: " : "removed: ")
-                    << path.string() << '\n';
+                    << display_path(path, workspace_directory) << '\n';
             }
             if (!command.dry_run) {
                 std::cout << "removed " << report->removed_entries

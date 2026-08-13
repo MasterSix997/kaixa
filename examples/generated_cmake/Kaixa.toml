@@ -15,3 +15,7 @@ languages = ["CXX"]
 type = "executable"
 sources = ["src/main.cpp"]
 cxx-standard = 23
+
+[[cmake.test]]
+name = "generated_hello"
+target = "generated_hello"

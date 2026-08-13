@@ -10,3 +10,4 @@ Kaixa.user.toml
 *.ilk
 .cache/
 compile_commands.json
+/examples/generated_cmake/CMakeLists.txt

@@ -1,9 +1,12 @@
-# Hello CMake
+# Existing CMake project
 
-A minimal managed package. Kaixa reads `Kaixa.toml`, delegates planning to the CMake resolver and
-places the external build under `.kaixa/build/cmake/hello_cmake`.
+This example adopts a handwritten `CMakeLists.txt`. Kaixa leaves the source project untouched and
+keeps its CMake build tree under `.kaixa/build/cmake/<configuration>/hello_cmake`.
 
 ```sh
-kaixa inspect .
-kaixa build .
+kaixa inspect
+kaixa generate
+kaixa build
+kaixa test
+kaixa run
 ```

@@ -1,11 +1,16 @@
 # Generated CMake
 
-This package has no handwritten `CMakeLists.txt`. Running the build creates one from the
-target fields in the `[cmake]` section of `Kaixa.toml`, then configures and builds it normally:
+This package has no handwritten `CMakeLists.txt`. Kaixa creates one from the target fields in
+`[cmake]`, then configures it as an ordinary CMake project:
+
+The generated file is marked as Kaixa-owned.
+`kaixa clean` preserves it.
+`kaixa clean --generated-files` removes it.
+Kaixa refuses to overwrite or remove a manual `CMakeLists.txt`.
 
 ```sh
-kaixa build .
+kaixa generate
+kaixa build
+kaixa test
+kaixa run
 ```
-
-The generated file is marked as Kaixa-owned. Kaixa refuses to replace an existing manual
-`CMakeLists.txt`.

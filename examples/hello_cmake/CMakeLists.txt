@@ -3,3 +3,6 @@ project(hello_cmake LANGUAGES CXX)
 
 add_executable(hello_cmake src/main.cpp)
 target_compile_features(hello_cmake PRIVATE cxx_std_23)
+
+enable_testing()
+add_test(NAME hello_cmake COMMAND hello_cmake)
