@@ -168,19 +168,13 @@ namespace kaixa::testing {
             throw std::runtime_error("cannot inspect test fixture: " + failure.message());
     }
 
-    void TempDirectory::write_manifest(
-        const std::string_view relative,
-        const Manifest& manifest
-    ) const {
+    void TempDirectory::write_manifest(const std::string_view relative, const Manifest& manifest) const {
         const auto written = write_manifest_file(m_path / relative, manifest);
         if (!written)
             throw std::runtime_error(format_diagnostic(written.error()));
     }
 
-    void TempDirectory::write(
-        const std::string_view relative,
-        const std::string_view content
-    ) const {
+    void TempDirectory::write(const std::string_view relative, const std::string_view content) const {
         const std::filesystem::path target = m_path / relative;
         std::error_code failure;
         std::filesystem::create_directories(target.parent_path(), failure);

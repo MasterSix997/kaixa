@@ -45,6 +45,20 @@ namespace kaixa::cli {
         TestRequest request;
     };
 
+    struct RunCommand {
+        WorkspaceOptions workspace;
+        std::optional<std::string> target;
+        std::vector<std::string> arguments;
+        bool list = false;
+    };
+
+    struct CleanCommand {
+        WorkspaceOptions workspace;
+        bool all = false;
+        bool generated_files = false;
+        bool dry_run = false;
+    };
+
     using Command = std::variant<
         HelpCommand,
         VersionCommand,
@@ -52,7 +66,9 @@ namespace kaixa::cli {
         CheckCommand,
         GenerateCommand,
         BuildCommand,
-        TestCommand
+        TestCommand,
+        RunCommand,
+        CleanCommand
     >;
 
     struct ParseError {
@@ -61,7 +77,5 @@ namespace kaixa::cli {
     };
 
     void print_usage(std::ostream& out);
-    [[nodiscard]] std::expected<Command, ParseError> parse_command_line(
-        std::span<const std::string_view> arguments
-    );
+    [[nodiscard]] std::expected<Command, ParseError> parse_command_line(std::span<const std::string_view> arguments);
 }

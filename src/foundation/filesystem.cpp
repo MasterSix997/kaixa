@@ -25,10 +25,7 @@ namespace kaixa {
         return contents;
     }
 
-    Result<void> write_file(
-        const std::filesystem::path& path,
-        const std::string_view contents
-    ) {
+    Result<void> write_file(const std::filesystem::path& path, const std::string_view contents) {
         std::error_code failure;
         const std::filesystem::path parent = path.parent_path();
         if (!parent.empty()) {

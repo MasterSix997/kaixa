@@ -45,6 +45,45 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
     }
 }
 
+KAIXA_TEST(adopted_cmake_project_exposes_run_targets) {
+    const kaixa::testing::TempDirectory workspace("adopted-cmake-run");
+    workspace.copy_from(workspaces_directory / "single_package");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "adopted workspace loads");
+    if (!graph)
+        return;
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        "debug"
+    };
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "adopted workspace plans");
+    if (!plan)
+        return;
+
+    const auto generated = kaixa::generate(*plan);
+    context.check(generated.has_value(), "adopted workspace configures");
+    if (!generated)
+        return;
+
+    const auto targets = kaixa::discover_run_targets(*graph, registry, environment);
+    context.check(targets.has_value(), "adopted CMake targets are discovered");
+    if (targets) {
+        context.check_equal(targets->size(), std::size_t{1}, "one adopted executable");
+        if (!targets->empty()) {
+            context.check_equal(
+                targets->front().name,
+                std::string("test_single"),
+                "adopted executable target"
+            );
+        }
+    }
+}
+
 KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     const std::filesystem::path workspace = workspaces_directory / "source_dependency";
     const auto graph = kaixa::load_workspace(workspace);
@@ -363,6 +402,96 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         "CMake configuration synchronizes"
     );
 
+    const auto run_targets = kaixa::discover_run_targets(*graph, registry, environment);
+    context.check(run_targets.has_value(), "configured project exposes run targets");
+    if (run_targets) {
+        context.check_equal(run_targets->size(), std::size_t{1}, "one executable target");
+        if (!run_targets->empty()) {
+            context.check_equal(
+                run_targets->front().name,
+                std::string("test_generated"),
+                "CMake executable target name"
+            );
+            context.check(
+                !run_targets->front().process.argv.empty()
+                    && std::filesystem::path(run_targets->front().process.argv.front())
+                        .filename().stem() == "test_generated",
+                "CMake reports the executable artifact"
+            );
+        }
+    }
+
+    const auto run_plan = kaixa::plan_run(
+        *graph,
+        registry,
+        environment,
+        "test_generated"
+    );
+    context.check(run_plan.has_value(), "run target plans");
+    if (run_plan) {
+        const auto build = std::ranges::find_if(
+            run_plan->actions(),
+            [](const kaixa::Action& action) {
+                return action.description == "build test_generated";
+            }
+        );
+        context.check(build != run_plan->actions().end(), "run plan has a build action");
+        if (build != run_plan->actions().end()) {
+            context.check(
+                std::ranges::find(build->argv, "--target") != build->argv.end()
+                    && std::ranges::find(build->argv, "test_generated") != build->argv.end(),
+                "run plan builds only the selected target"
+            );
+        }
+    }
+
+    const auto clean_plan = kaixa::plan_clean(*graph, registry, environment);
+    context.check(clean_plan.has_value(), "CMake clean paths plan");
+    if (clean_plan) {
+        context.check(
+            std::ranges::find(
+                clean_plan->paths(),
+                environment.state_root / "build/debug"
+            ) != clean_plan->paths().end(),
+            "clean plan owns public artifacts"
+        );
+        context.check(
+            std::ranges::find(
+                clean_plan->paths(),
+                environment.state_root / "build/cmake/debug"
+            ) != clean_plan->paths().end(),
+            "clean plan owns private CMake state"
+        );
+        context.check(
+            std::ranges::find(
+                clean_plan->paths(),
+                environment.state_root / "generated/cmake"
+            ) == clean_plan->paths().end(),
+            "regular clean preserves generated state"
+        );
+    }
+
+    const auto generated_clean_plan = kaixa::plan_clean(
+        *graph,
+        registry,
+        environment,
+        kaixa::CleanRequest{true}
+    );
+    context.check(generated_clean_plan.has_value(), "CMake generated clean paths plan");
+    if (generated_clean_plan) {
+        context.check(
+            std::ranges::find(
+                generated_clean_plan->paths(),
+                environment.state_root / "generated/cmake"
+            ) == generated_clean_plan->paths().end(),
+            "generated files option does not select state generation"
+        );
+        context.check(
+            generated_clean_plan->generated_files().empty(),
+            "state generation has no source files to clean"
+        );
+    }
+
     const auto synchronized_plan = kaixa::plan_build(*graph, registry, environment);
     context.check(synchronized_plan.has_value(), "synchronized project plans again");
     if (synchronized_plan) {
@@ -478,6 +607,50 @@ KAIXA_TEST(generated_project_refuses_to_replace_a_manual_cmakelists) {
             kaixa::format_diagnostic(plan.error()),
             "was not generated by Kaixa",
             "diagnostic explains the ownership rule"
+        );
+    }
+}
+
+KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
+    const kaixa::testing::TempDirectory workspace("source-generated-clean");
+    kaixa::Manifest manifest{"source_generated", "cmake"};
+    manifest.resolver_options = kaixa::Value::table({
+        {"generation", "source"},
+        {"target", kaixa::Value::table({
+            {"type", "executable"},
+            {"sources", kaixa::Value::array({"main.cpp"})}
+        })}
+    });
+    workspace.write_manifest("Kaixa.toml", manifest);
+    workspace.write("main.cpp", "int main() { return 0; }\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "source generated workspace loads");
+    if (!graph)
+        return;
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        "debug"
+    };
+    const auto plan = kaixa::plan_clean(
+        *graph,
+        registry,
+        environment,
+        kaixa::CleanRequest{true}
+    );
+    context.check(plan.has_value(), "source generation clean plans");
+    if (plan) {
+        context.check(
+            std::ranges::any_of(
+                plan->generated_files(),
+                [&](const kaixa::GeneratedCleanFile& generated) {
+                    return generated.path == workspace.path() / "CMakeLists.txt";
+                }
+            ),
+            "source CMakeLists is explicitly generated"
         );
     }
 }

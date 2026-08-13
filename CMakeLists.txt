@@ -30,6 +30,8 @@ add_library(kaixa_core STATIC
     [[src/workspace/loader.cpp]]
     [[src/build/executor.cpp]]
     [[src/services/build.cpp]]
+    [[src/services/run.cpp]]
+    [[src/services/clean.cpp]]
 )
 
 target_include_directories(kaixa_core PUBLIC
@@ -108,6 +110,7 @@ add_executable(kaixa_tests
     [[tests/manifest.cpp]]
     [[tests/configurations.cpp]]
     [[tests/build_operations.cpp]]
+    [[tests/run_and_clean.cpp]]
     [[tests/workspace_fixtures.cpp]]
     [[tests/workspace_errors.cpp]]
 )

@@ -45,10 +45,7 @@ namespace kaixa {
 
     [[nodiscard]] Result<CheckReport> check(const BuildPlan& plan);
     [[nodiscard]] Result<GenerationReport> generate(const BuildPlan& plan);
-    [[nodiscard]] Result<ExecutionReport> execute_actions(
-        const BuildPlan& plan,
-        ActionStage stage
-    );
+    [[nodiscard]] Result<ExecutionReport> execute_actions(const BuildPlan& plan, ActionStage stage);
     [[nodiscard]] Result<ExecutionReport> execute(const BuildPlan& plan);
     [[nodiscard]] Result<ExecutionReport> test(const BuildPlan& plan);
 }

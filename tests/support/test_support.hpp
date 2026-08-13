@@ -27,11 +27,7 @@ namespace kaixa::testing {
             fail(detail.str());
         }
 
-        void check_contains(
-            std::string_view haystack,
-            std::string_view needle,
-            std::string_view what
-        );
+        void check_contains(std::string_view haystack, std::string_view needle, std::string_view what);
         void fail(std::string_view what);
 
         [[nodiscard]] std::size_t failures() const noexcept { return m_failures; }

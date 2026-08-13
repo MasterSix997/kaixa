@@ -21,9 +21,7 @@ namespace kaixa {
         return m_nodes[id.index];
     }
 
-    std::optional<PackageId> Graph::find_by_directory(
-        const std::filesystem::path& directory
-    ) const {
+    std::optional<PackageId> Graph::find_by_directory(const std::filesystem::path& directory) const {
         const auto found = std::ranges::find_if(m_nodes, [&directory](const PackageNode& node) {
             return node.directory == directory;
         });

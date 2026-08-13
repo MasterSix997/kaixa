@@ -30,11 +30,7 @@ namespace kaixa {
 
         Value convert(const toml::node& node, std::string_view source_name, std::string path);
 
-        Value convert_table(
-            const toml::table& table,
-            const std::string_view source_name,
-            std::string path
-        ) {
+        Value convert_table(const toml::table& table, const std::string_view source_name, std::string path) {
             std::vector<TableEntry> entries;
             entries.reserve(table.size());
             for (const auto& [key, child]: table) {
@@ -56,11 +52,7 @@ namespace kaixa {
             );
         }
 
-        Value convert_array(
-            const toml::array& array,
-            const std::string_view source_name,
-            std::string path
-        ) {
+        Value convert_array(const toml::array& array, const std::string_view source_name, std::string path) {
             std::vector<Value> values;
             values.reserve(array.size());
             for (const toml::node& child: array)
@@ -110,10 +102,7 @@ namespace kaixa {
         }
     }
 
-    Result<Value> parse_string(
-        const std::string_view text,
-        const std::string_view source_name
-    ) {
+    Result<Value> parse_string(const std::string_view text, const std::string_view source_name) {
         return convert_result(toml::parse(text, source_name), source_name);
     }
 

@@ -130,6 +130,77 @@ namespace kaixa::cli {
             };
         }
 
+        Result<std::filesystem::path> find_workspace_directory(const std::filesystem::path& path) {
+            std::error_code failure;
+            std::filesystem::path directory = std::filesystem::absolute(path, failure);
+            if (failure) {
+                return std::unexpected(error(
+                    "cannot resolve workspace path `" + path.string() + "`: "
+                        + failure.message()
+                ));
+            }
+
+            if (std::filesystem::is_regular_file(directory, failure))
+                directory = directory.parent_path();
+            else if (failure) {
+                return std::unexpected(error(
+                    "cannot inspect workspace path `" + directory.string() + "`: "
+                        + failure.message()
+                ));
+            }
+
+            while (!directory.empty()) {
+                const std::filesystem::path manifest = directory / "Kaixa.toml";
+                const bool found = std::filesystem::is_regular_file(manifest, failure);
+                if (failure) {
+                    return std::unexpected(error(
+                        "cannot inspect workspace manifest `" + manifest.string() + "`: "
+                            + failure.message()
+                    ));
+                }
+                if (found)
+                    return directory;
+
+                const std::filesystem::path parent = directory.parent_path();
+                if (parent == directory)
+                    break;
+
+                directory = parent;
+            }
+            return std::unexpected(error(
+                "cannot find `Kaixa.toml` from `" + path.string() + "`"
+            ));
+        }
+
+        Result<std::vector<std::filesystem::path>> existing_clean_paths(const CleanPlan& plan) {
+            std::vector<std::filesystem::path> paths;
+            for (const std::filesystem::path& path: plan.paths()) {
+                std::error_code failure;
+                const bool exists = std::filesystem::exists(path, failure);
+                if (failure) {
+                    return std::unexpected(error(
+                        "cannot inspect clean path `" + path.string() + "`: "
+                            + failure.message()
+                    ));
+                }
+                if (exists)
+                    paths.push_back(path);
+            }
+            for (const GeneratedCleanFile& generated: plan.generated_files()) {
+                std::error_code failure;
+                const bool exists = std::filesystem::exists(generated.path, failure);
+                if (failure) {
+                    return std::unexpected(error(
+                        "cannot inspect generated file `" + generated.path.string() + "`: "
+                            + failure.message()
+                    ));
+                }
+                if (exists)
+                    paths.push_back(generated.path);
+            }
+            return paths;
+        }
+
         void print_package(const Graph& graph, const PackageId id, const int depth) {
             const PackageNode& package = graph[id];
             std::cout << std::string(static_cast<std::size_t>(depth) * 2, ' ')
@@ -171,10 +242,7 @@ namespace kaixa::cli {
             return "action";
         }
 
-        Result<void> print_actions(
-            const BuildPlan& plan,
-            const bool synchronization_only = false
-        ) {
+        Result<void> print_actions(const BuildPlan& plan, const bool synchronization_only = false) {
             auto state = check(plan);
             if (!state)
                 return std::unexpected(state.error());
@@ -334,6 +402,162 @@ namespace kaixa::cli {
 
             std::cout << "completed " << report->executed << " action(s)\n";
             print_outputs(*plan);
+            return 0;
+        }
+
+        int run(const RunCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            auto synchronization = plan_build(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!synchronization)
+                return fail(synchronization.error());
+
+            auto printed = print_actions(*synchronization, true);
+            if (!printed)
+                return fail(printed.error());
+
+            auto generated = generate(*synchronization);
+            if (!generated)
+                return fail(generated.error());
+
+            auto targets = discover_run_targets(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!targets)
+                return fail(targets.error());
+
+            if (command.list) {
+                if (targets->empty()) {
+                    std::cout << "no runnable targets\n";
+                    return 0;
+                }
+
+                for (const RunTarget& target: *targets)
+                    std::cout << target.name << '\n';
+
+                return 0;
+            }
+
+            const PackageNode& root = workspace->graph[workspace->graph.root()];
+            auto selected = select_run_target(*targets, command.target, root.name);
+            if (!selected)
+                return fail(selected.error());
+
+            auto plan = plan_run(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment,
+                selected->name
+            );
+            if (!plan)
+                return fail(plan.error());
+
+            printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
+            auto built = kaixa::execute(*plan);
+            if (!built)
+                return fail(built.error());
+
+            selected->process.argv.insert(
+                selected->process.argv.end(),
+                command.arguments.begin(),
+                command.arguments.end()
+            );
+            std::cout << "running: " << format_command(selected->process.argv) << '\n';
+            std::cout.flush();
+
+            auto result = run_process(selected->process);
+            if (!result)
+                return fail(result.error());
+
+            return result->exit_code;
+        }
+
+        int run(const CleanCommand& command) {
+            CleanPlan plan;
+            std::filesystem::path state_root;
+            std::filesystem::path workspace_directory;
+            if (command.all) {
+                auto directory = find_workspace_directory(command.workspace.path);
+                if (!directory)
+                    return fail(directory.error());
+
+                workspace_directory = *directory;
+                state_root = workspace_directory / ".kaixa";
+                plan.add(state_root);
+                if (command.generated_files) {
+                    auto workspace = open_workspace(command.workspace);
+                    if (!workspace)
+                        return fail(workspace.error());
+
+                    auto generated = plan_clean(
+                        workspace->graph,
+                        workspace->registry,
+                        workspace->environment,
+                        CleanRequest{true}
+                    );
+                    if (!generated)
+                        return fail(generated.error());
+
+                    for (const GeneratedCleanFile& file: generated->generated_files())
+                        plan.generated_file(file);
+                }
+            } else {
+                auto workspace = open_workspace(command.workspace);
+                if (!workspace)
+                    return fail(workspace.error());
+
+                workspace_directory = workspace->environment.workspace;
+                state_root = workspace->environment.state_root;
+                auto planned = plan_clean(
+                    workspace->graph,
+                    workspace->registry,
+                    workspace->environment,
+                    CleanRequest{command.generated_files}
+                );
+                if (!planned)
+                    return fail(planned.error());
+
+                plan = std::move(*planned);
+            }
+
+            auto existing = existing_clean_paths(plan);
+            if (!existing)
+                return fail(existing.error());
+
+            auto report = clean(
+                plan,
+                state_root,
+                workspace_directory,
+                command.dry_run,
+                command.all
+            );
+            if (!report)
+                return fail(report.error());
+
+            if (existing->empty()) {
+                std::cout << "nothing to clean\n";
+                return 0;
+            }
+
+            for (const std::filesystem::path& path: *existing) {
+                std::cout << (command.dry_run ? "would remove: " : "removed: ")
+                    << path.string() << '\n';
+            }
+            if (!command.dry_run) {
+                std::cout << "removed " << report->removed_entries
+                    << " filesystem entry(s)\n";
+            }
             return 0;
         }
     }

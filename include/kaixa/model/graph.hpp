@@ -21,9 +21,7 @@ namespace kaixa {
         [[nodiscard]] bool empty() const noexcept { return m_nodes.empty(); }
         [[nodiscard]] PackageId root() const noexcept { return m_root; }
 
-        [[nodiscard]] std::optional<PackageId> find_by_directory(
-            const std::filesystem::path& directory
-        ) const;
+        [[nodiscard]] std::optional<PackageId> find_by_directory(const std::filesystem::path& directory) const;
         [[nodiscard]] std::optional<PackageId> find_by_name(std::string_view name) const;
         [[nodiscard]] Result<std::vector<PackageId>> build_order() const;
 

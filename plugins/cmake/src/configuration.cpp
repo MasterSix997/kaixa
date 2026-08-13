@@ -9,11 +9,7 @@
 
 namespace kaixa::plugin::cmake::detail {
     namespace {
-        Diagnostic wrong_kind(
-            SourceLocation location,
-            const std::string_view expected,
-            const ValueKind found
-        ) {
+        Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
             return error_at(
                 std::move(location),
                 "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found))
@@ -276,10 +272,7 @@ namespace kaixa::plugin::cmake::detail {
             output += ")\n\n";
         }
 
-        std::vector<std::string> project_paths(
-            const Options& options,
-            const std::vector<std::string>& values
-        ) {
+        std::vector<std::string> project_paths(const Options& options, const std::vector<std::string>& values) {
             if (options.generation == GenerationMode::source)
                 return values;
 

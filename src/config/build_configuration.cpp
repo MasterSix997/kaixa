@@ -7,11 +7,7 @@
 
 namespace kaixa {
     namespace {
-        Diagnostic wrong_kind(
-            SourceLocation location,
-            const std::string_view expected,
-            const ValueKind found
-        ) {
+        Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
             return error_at(
                 std::move(location),
                 "expected " + std::string(expected) + ", found "
@@ -19,10 +15,7 @@ namespace kaixa {
             );
         }
 
-        Result<std::vector<std::string>> optional_string_array(
-            TableReader& table,
-            const std::string_view key
-        ) {
+        Result<std::vector<std::string>> optional_string_array(TableReader& table, const std::string_view key) {
             const Value* value = table.take(key);
             if (!value)
                 return std::vector<std::string>{};

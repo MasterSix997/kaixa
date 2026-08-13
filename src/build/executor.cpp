@@ -9,17 +9,11 @@
 
 namespace kaixa {
     namespace {
-        bool same_path(
-            const std::filesystem::path& left,
-            const std::filesystem::path& right
-        ) {
+        bool same_path(const std::filesystem::path& left, const std::filesystem::path& right) {
             return left.lexically_normal() == right.lexically_normal();
         }
 
-        bool consumes_changed_path(
-            const Action& action,
-            const std::vector<std::filesystem::path>& changed
-        ) {
+        bool consumes_changed_path(const Action& action, const std::vector<std::filesystem::path>& changed) {
             return std::ranges::any_of(action.inputs, [&](const std::filesystem::path& input) {
                 return std::ranges::any_of(changed, [&](const std::filesystem::path& path) {
                     return same_path(input, path);
@@ -27,10 +21,7 @@ namespace kaixa {
             });
         }
 
-        void append_changed_outputs(
-            std::vector<std::filesystem::path>& changed,
-            const Action& action
-        ) {
+        void append_changed_outputs(std::vector<std::filesystem::path>& changed, const Action& action) {
             for (const std::filesystem::path& output: action.outputs) {
                 if (std::ranges::none_of(changed, [&](const std::filesystem::path& path) {
                         return same_path(output, path);

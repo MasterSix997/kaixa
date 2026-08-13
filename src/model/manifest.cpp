@@ -20,10 +20,7 @@ namespace kaixa {
             return *value;
         }
 
-        Result<DependencySpec> parse_dependency(
-            const TableEntry& entry,
-            const std::string& path
-        ) {
+        Result<DependencySpec> parse_dependency(const TableEntry& entry, const std::string& path) {
             SourceLocation location = entry.value.location();
             location.config_path = path;
 
@@ -155,10 +152,7 @@ namespace kaixa {
         return manifest;
     }
 
-    Result<Manifest> parse_manifest_string(
-        const std::string_view text,
-        const std::string_view source_name
-    ) {
+    Result<Manifest> parse_manifest_string(const std::string_view text, const std::string_view source_name) {
         auto document = parse_string(text, source_name);
         if (!document)
             return std::unexpected(document.error());

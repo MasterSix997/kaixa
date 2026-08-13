@@ -61,11 +61,7 @@ endforeach()
             return output;
         }
 
-        void generate_discovered_test(
-            std::string& output,
-            const TestOptions& test,
-            const std::size_t index
-        ) {
+        void generate_discovered_test(std::string& output, const TestOptions& test, const std::size_t index) {
             const std::string variable = "_kaixa_discovery_" + std::to_string(index);
             const std::string filename = "kaixa-discovery-" + std::to_string(index);
             const std::string script = discovery_script(test);
@@ -86,10 +82,7 @@ endforeach()
             output += " \"${" + variable + "}.cmake\")\n";
         }
 
-        Result<Action*> find_build_action(
-            BuildPlan& plan,
-            const PackageNode& package
-        ) {
+        Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package) {
             const auto action = std::ranges::find_if(plan.actions(), [&](const Action& candidate) {
                 return candidate.package == package.id
                     && candidate.stage == ActionStage::build;
@@ -104,10 +97,7 @@ endforeach()
         }
     }
 
-    void generate_tests(
-        std::string& output,
-        const std::span<const TestOptions> tests
-    ) {
+    void generate_tests(std::string& output, const std::span<const TestOptions> tests) {
         if (tests.empty())
             return;
 

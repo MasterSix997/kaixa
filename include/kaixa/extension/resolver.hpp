@@ -2,11 +2,14 @@
 
 #include <kaixa/build/layout.hpp>
 #include <kaixa/build/plan.hpp>
+#include <kaixa/clean/plan.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
+#include <kaixa/foundation/process.hpp>
 #include <kaixa/model/graph.hpp>
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace kaixa {
     struct ResolverInfo {
@@ -25,6 +28,19 @@ namespace kaixa {
         TestMode mode = TestMode::run;
     };
 
+    struct BuildRequest {
+        std::optional<std::string> target;
+    };
+
+    struct RunTarget {
+        std::string name;
+        ProcessRequest process;
+    };
+
+    struct CleanRequest {
+        bool generated_files = false;
+    };
+
     class Resolver {
     public:
         virtual ~Resolver() = default;
@@ -34,6 +50,7 @@ namespace kaixa {
             const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment,
+            const BuildRequest& request,
             BuildPlan& plan
         ) const = 0;
 
@@ -43,6 +60,20 @@ namespace kaixa {
             const BuildEnvironment& environment,
             const TestRequest& request,
             BuildPlan& plan
+        ) const = 0;
+
+        [[nodiscard]] virtual Result<std::vector<RunTarget>> run_targets(
+            const Graph& graph,
+            const PackageNode& package,
+            const BuildEnvironment& environment
+        ) const = 0;
+
+        [[nodiscard]] virtual Result<void> plan_clean(
+            const Graph& graph,
+            const PackageNode& package,
+            const BuildEnvironment& environment,
+            const CleanRequest& request,
+            CleanPlan& plan
         ) const = 0;
     };
 }

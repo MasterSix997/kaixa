@@ -45,13 +45,7 @@ namespace kaixa {
     [[nodiscard]] bool is_valid_identifier(std::string_view name) noexcept;
     [[nodiscard]] Result<Manifest> parse_manifest(const Value& document);
     [[nodiscard]] Result<Manifest> parse_manifest_file(const std::filesystem::path& path);
-    [[nodiscard]] Result<Manifest> parse_manifest_string(
-        std::string_view text,
-        std::string_view source_name
-    );
+    [[nodiscard]] Result<Manifest> parse_manifest_string(std::string_view text, std::string_view source_name);
     [[nodiscard]] Result<std::string> format_manifest(const Manifest& manifest);
-    [[nodiscard]] Result<void> write_manifest_file(
-        const std::filesystem::path& path,
-        const Manifest& manifest
-    );
+    [[nodiscard]] Result<void> write_manifest_file(const std::filesystem::path& path, const Manifest& manifest);
 }

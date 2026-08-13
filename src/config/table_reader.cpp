@@ -4,11 +4,7 @@
 
 namespace kaixa {
     namespace {
-        Diagnostic wrong_kind(
-            SourceLocation location,
-            const std::string_view expected,
-            const ValueKind found
-        ) {
+        Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
             return error_at(
                 std::move(location),
                 "expected " + std::string(expected) + ", found "

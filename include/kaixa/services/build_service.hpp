@@ -10,7 +10,8 @@ namespace kaixa {
     [[nodiscard]] Result<BuildPlan> plan_build(
         const Graph& graph,
         const ResolverRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        const BuildRequest& request = {}
     );
 
     [[nodiscard]] Result<BuildPlan> plan_tests(

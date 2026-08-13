@@ -26,9 +26,7 @@ namespace kaixa::cli {
                 return m_arguments[m_index++];
             }
 
-            [[nodiscard]] std::expected<std::string_view, ParseError> value(
-                const std::string_view option
-            ) {
+            [[nodiscard]] std::expected<std::string_view, ParseError> value(const std::string_view option) {
                 if (done()) {
                     return std::unexpected(ParseError{
                         std::string(option) + " requires a value"
@@ -69,10 +67,7 @@ namespace kaixa::cli {
             );
         }
 
-        std::expected<bool, ParseError> parse_workspace_option(
-            Parser& parser,
-            WorkspaceOptions& options
-        ) {
+        std::expected<bool, ParseError> parse_workspace_option(Parser& parser, WorkspaceOptions& options) {
             const std::string_view option = parser.peek();
             if (option == "--profile") {
                 parser.take();
@@ -106,7 +101,7 @@ namespace kaixa::cli {
             }
 
             std::vector<std::string> arguments;
-            while (!parser.done() && parser.peek() != "--for")
+            while (!parser.done() && parser.peek() != "--for" && parser.peek() != "--")
                 arguments.emplace_back(parser.take());
 
             if (arguments.empty()) {
@@ -190,6 +185,116 @@ namespace kaixa::cli {
             return command;
         }
 
+        std::expected<RunCommand, ParseError> parse_run(Parser& parser) {
+            RunCommand command;
+            while (!parser.done()) {
+                const std::string_view argument = parser.peek();
+                if (argument == "--") {
+                    parser.take();
+                    while (!parser.done())
+                        command.arguments.emplace_back(parser.take());
+
+                    break;
+                }
+
+                if (argument == "--path") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    command.workspace.path = *value;
+                    continue;
+                }
+
+                if (argument == "--target") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    command.target = *value;
+                    continue;
+                }
+
+                if (argument == "--list") {
+                    parser.take();
+                    command.list = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{
+                    "unexpected argument `" + std::string(parser.take()) + "`"
+                });
+            }
+
+            if (command.list && command.target) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with --target"
+                });
+            }
+            if (command.list && !command.arguments.empty()) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with program arguments"
+                });
+            }
+            return command;
+        }
+
+        std::expected<CleanCommand, ParseError> parse_clean(Parser& parser) {
+            CleanCommand command;
+            bool has_path = false;
+            while (!parser.done()) {
+                const std::string_view argument = parser.peek();
+                if (argument == "--all") {
+                    parser.take();
+                    command.all = true;
+                    continue;
+                }
+                if (argument == "--generated-files") {
+                    parser.take();
+                    command.generated_files = true;
+                    continue;
+                }
+                if (argument == "--dry-run") {
+                    parser.take();
+                    command.dry_run = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                parser.take();
+                if (has_path) {
+                    return std::unexpected(ParseError{
+                        "unexpected argument `" + std::string(argument) + "`"
+                    });
+                }
+
+                command.workspace.path = argument;
+                has_path = true;
+            }
+
+            if (command.all && (command.workspace.profile
+                || !command.workspace.configurations.empty()
+                || !command.workspace.resolver_arguments.empty())) {
+                return std::unexpected(ParseError{
+                    "--all cannot be combined with build configuration options"
+                });
+            }
+            return command;
+        }
+
         std::expected<InspectCommand, ParseError> parse_inspect(Parser& parser) {
             InspectCommand command;
             if (!parser.done())
@@ -214,12 +319,15 @@ namespace kaixa::cli {
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
+            << "  kaixa run [--list] [--target name] [--path path] [--profile name]\n"
+            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
+            << "  kaixa clean [path] [--profile name] [--config name]...\n"
+            << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
+            << "  kaixa clean [path] --all [--generated-files] [--dry-run]\n"
             << "  kaixa --version\n";
     }
 
-    std::expected<Command, ParseError> parse_command_line(
-        const std::span<const std::string_view> arguments
-    ) {
+    std::expected<Command, ParseError> parse_command_line(const std::span<const std::string_view> arguments) {
         if (arguments.empty())
             return HelpCommand{};
 
@@ -240,6 +348,22 @@ namespace kaixa::cli {
 
         if (name == "test") {
             auto command = parse_test(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "run") {
+            auto command = parse_run(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "clean") {
+            auto command = parse_clean(parser);
             if (!command)
                 return std::unexpected(command.error());
 

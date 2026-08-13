@@ -371,10 +371,7 @@ namespace kaixa {
         return output;
     }
 
-    Result<void> write_manifest_file(
-        const std::filesystem::path& path,
-        const Manifest& manifest
-    ) {
+    Result<void> write_manifest_file(const std::filesystem::path& path, const Manifest& manifest) {
         auto contents = format_manifest(manifest);
         if (!contents)
             return std::unexpected(contents.error());

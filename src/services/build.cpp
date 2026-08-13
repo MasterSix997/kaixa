@@ -4,7 +4,8 @@ namespace kaixa {
     Result<BuildPlan> plan_build(
         const Graph& graph,
         const ResolverRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        const BuildRequest& request
     ) {
         auto order = graph.build_order();
         if (!order)
@@ -27,7 +28,16 @@ namespace kaixa {
                 ));
             }
 
-            auto planned = resolver->plan(graph, package, environment, plan);
+            const BuildRequest package_request = id == graph.root()
+                ? request
+                : BuildRequest{};
+            auto planned = resolver->plan(
+                graph,
+                package,
+                environment,
+                package_request,
+                plan
+            );
             if (!planned)
                 return std::unexpected(planned.error());
         }
