@@ -131,6 +131,29 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     );
 }
 
+KAIXA_TEST(package_target_names_may_preserve_resolver_namespaces) {
+    const auto manifest = kaixa::parse_manifest_string(
+        "[package]\n"
+        "name = \"target_names\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[test]\n"
+        "name = \"threading.tests.noexcept\"\n"
+        "sources = [\"test.cpp\"]\n",
+        "target-name-test"
+    );
+    context.check(manifest.has_value(), "dotted target name parses");
+    if (!manifest) {
+        context.fail(kaixa::format_diagnostic(manifest.error()));
+        return;
+    }
+
+    const auto formatted = kaixa::format_manifest(*manifest);
+    context.check(formatted.has_value(), "dotted target name formats");
+    if (!formatted)
+        context.fail(kaixa::format_diagnostic(formatted.error()));
+}
+
 KAIXA_TEST(package_targets_do_not_silently_ignore_unavailable_features) {
     const TempDirectory root("target-features");
     root.write(

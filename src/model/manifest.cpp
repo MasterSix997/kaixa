@@ -132,7 +132,7 @@ namespace kaixa {
                 return std::unexpected(name.error());
 
             if (*name) {
-                if (!is_valid_identifier(**name)) {
+                if (!is_valid_target_name(**name)) {
                     return std::unexpected(error_at(
                         table.location_of("name"),
                         "`" + **name + "` is not a valid target name"
@@ -368,6 +368,20 @@ namespace kaixa {
                 || (character >= '0' && character <= '9')
                 || character == '_'
                 || character == '-';
+        });
+    }
+
+    bool is_valid_target_name(const std::string_view name) noexcept {
+        if (name.empty() || name.front() == '-' || name.front() == '.')
+            return false;
+
+        return std::ranges::all_of(name, [](const char character) {
+            return (character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || character == '_'
+                || character == '-'
+                || character == '.';
         });
     }
 

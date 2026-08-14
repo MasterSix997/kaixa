@@ -362,7 +362,7 @@ namespace kaixa {
                     return std::unexpected(error("package target manifest path cannot be empty"));
             }
             for (const PackageTarget& target: manifest.targets) {
-                if (target.name && !is_valid_identifier(*target.name))
+                if (target.name && !is_valid_target_name(*target.name))
                     return std::unexpected(error("invalid package target name `" + *target.name + "`"));
 
                 if (target.sources.include.empty())
