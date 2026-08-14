@@ -215,6 +215,14 @@ namespace kaixa {
             if (target.hidden)
                 output += "hidden = true\n";
 
+            if (!target.dependencies.empty()) {
+                append_header(output, {section, "dependencies"});
+                for (const DependencySpec& dependency: target.dependencies) {
+                    output += key(dependency.name) + " = { path = "
+                        + toml_string(dependency.path.generic_string()) + " }\n";
+                }
+            }
+
             if (target.resolver_options) {
                 append_header(output, {section, resolver});
                 auto appended = append_table(output, *target.resolver_options);
@@ -359,6 +367,19 @@ namespace kaixa {
 
                 if (target.sources.include.empty())
                     return std::unexpected(error("package target requires source patterns"));
+
+                for (const DependencySpec& dependency: target.dependencies) {
+                    if (!is_valid_identifier(dependency.name)) {
+                        return std::unexpected(error(
+                            "invalid package target dependency name `" + dependency.name + "`"
+                        ));
+                    }
+                    if (dependency.path.empty()) {
+                        return std::unexpected(error(
+                            "package target dependency `" + dependency.name + "` has an empty path"
+                        ));
+                    }
+                }
 
                 if (target.resolver_options && !target.resolver_options->is_table()) {
                     return std::unexpected(error(

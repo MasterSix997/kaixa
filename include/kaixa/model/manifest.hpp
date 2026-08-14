@@ -49,6 +49,7 @@ namespace kaixa {
         std::optional<std::string> description;
         std::optional<std::string> category;
         std::vector<std::string> required_features;
+        std::vector<DependencySpec> dependencies;
         FileSet sources;
         std::vector<std::string> arguments;
         bool discover = false;

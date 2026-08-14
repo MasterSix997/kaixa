@@ -280,12 +280,15 @@ namespace kaixa {
         const std::span<const ConfigurationSet> layers,
         const std::span<const std::string> requested,
         const std::optional<std::string>& profile_override,
-        const std::span<const ResolverArgumentOverride> argument_overrides
+        const std::span<const ResolverArgumentOverride> argument_overrides,
+        const bool use_defaults
     ) {
         EffectiveBuildConfiguration result;
-        for (const ConfigurationSet& layer: layers) {
-            for (const std::string& name: layer.defaults)
-                select(result.selected, name);
+        if (use_defaults) {
+            for (const ConfigurationSet& layer: layers) {
+                for (const std::string& name: layer.defaults)
+                    select(result.selected, name);
+            }
         }
         for (const std::string& name: requested)
             select(result.selected, name);

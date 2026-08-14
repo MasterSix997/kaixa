@@ -20,6 +20,12 @@ namespace kaixa {
         opaque
     };
 
+    struct PackageTargetDependencies {
+        std::string target;
+        PackageTargetKind kind = PackageTargetKind::test;
+        std::vector<PackageId> packages;
+    };
+
     struct PackageNode {
         PackageId id;
         std::string name;
@@ -28,5 +34,6 @@ namespace kaixa {
         std::string resolver;
         std::optional<Manifest> manifest;
         std::vector<PackageId> dependencies;
+        std::vector<PackageTargetDependencies> target_dependencies;
     };
 }

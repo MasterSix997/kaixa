@@ -1,0 +1,6 @@
+[benchmark]
+name = "manifest_format"
+sources = ["manifest_format.cpp"]
+
+[benchmark.cmake]
+link-libraries = ["kaixa_core"]

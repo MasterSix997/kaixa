@@ -33,6 +33,12 @@ namespace kaixa::cli {
                         std::string(option) + " requires a value"
                     });
                 }
+                if (peek().starts_with("--")) {
+                    return std::unexpected(ParseError{
+                        std::string(option) + " requires a value before option `"
+                            + std::string(peek()) + "`"
+                    });
+                }
 
                 return take();
             }
@@ -99,6 +105,18 @@ namespace kaixa::cli {
                     return std::unexpected(value.error());
 
                 options.configurations.emplace_back(*value);
+                return true;
+            }
+
+            if (option == "--no-default-configs") {
+                parser.take();
+                if (!options.use_default_configurations) {
+                    return std::unexpected(ParseError{
+                        "--no-default-configs was specified more than once"
+                    });
+                }
+
+                options.use_default_configurations = false;
                 return true;
             }
 
@@ -201,6 +219,106 @@ namespace kaixa::cli {
             return command;
         }
 
+        std::expected<BenchCommand, ParseError> parse_bench(Parser& parser) {
+            BenchCommand command;
+            while (!parser.done()) {
+                const std::string_view argument = parser.peek();
+                if (argument == "--") {
+                    parser.take();
+                    while (!parser.done())
+                        command.arguments.emplace_back(parser.take());
+
+                    break;
+                }
+
+                if (argument == "--target") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    if (command.target) {
+                        return std::unexpected(ParseError{
+                            "--target can be specified only once for bench"
+                        });
+                    }
+
+                    command.target = *value;
+                    continue;
+                }
+
+                if (argument == "--list") {
+                    parser.take();
+                    if (command.list) {
+                        return std::unexpected(ParseError{
+                            "--list was specified more than once"
+                        });
+                    }
+
+                    command.list = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{
+                    "unexpected argument `" + std::string(parser.take()) + "`"
+                });
+            }
+
+            if (command.list && command.target) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with --target; omit --target to list benchmarks"
+                });
+            }
+            if (command.list && !command.arguments.empty()) {
+                return std::unexpected(ParseError{
+                    "--list cannot be combined with benchmark arguments"
+                });
+            }
+            return command;
+        }
+
+        std::expected<void, ParseError> parse_named_product(
+            Parser& parser,
+            const std::string_view option,
+            std::vector<std::string>& products
+        ) {
+            parser.take();
+            auto value = parser.value(option);
+            if (!value)
+                return std::unexpected(value.error());
+
+            if (std::ranges::find(products, *value) != products.end()) {
+                return std::unexpected(ParseError{
+                    std::string(option) + " `" + std::string(*value) + "` was specified more than once"
+                });
+            }
+
+            products.emplace_back(*value);
+            return {};
+        }
+
+        std::expected<void, ParseError> select_all_products(
+            Parser& parser,
+            const std::string_view option,
+            bool& selected
+        ) {
+            parser.take();
+            if (selected) {
+                return std::unexpected(ParseError{
+                    std::string(option) + " was specified more than once"
+                });
+            }
+
+            selected = true;
+            return {};
+        }
+
         std::expected<BuildCommand, ParseError> parse_build(Parser& parser) {
             BuildCommand command;
             while (!parser.done()) {
@@ -211,7 +329,62 @@ namespace kaixa::cli {
                     if (!value)
                         return std::unexpected(value.error());
 
+                    if (std::ranges::find(command.targets, *value) != command.targets.end()) {
+                        return std::unexpected(ParseError{
+                            "--target `" + std::string(*value) + "` was specified more than once"
+                        });
+                    }
+
                     command.targets.emplace_back(*value);
+                    continue;
+                }
+                if (argument == "--example") {
+                    auto selected = parse_named_product(parser, argument, command.selection.examples);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--test") {
+                    auto selected = parse_named_product(parser, argument, command.selection.tests);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--bench") {
+                    auto selected = parse_named_product(parser, argument, command.selection.benchmarks);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--examples") {
+                    auto selected = select_all_products(parser, argument, command.selection.all_examples);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--tests") {
+                    auto selected = select_all_products(parser, argument, command.selection.all_tests);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--benchmarks") {
+                    auto selected = select_all_products(parser, argument, command.selection.all_benchmarks);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
+                    continue;
+                }
+                if (argument == "--all-targets") {
+                    auto selected = select_all_products(parser, argument, command.selection.all_targets);
+                    if (!selected)
+                        return std::unexpected(selected.error());
+
                     continue;
                 }
                 if (argument == "--list") {
@@ -260,6 +433,35 @@ namespace kaixa::cli {
                     "--list cannot be combined with --jobs"
                 });
             }
+            if (!command.targets.empty() && !command.selection.empty()) {
+                return std::unexpected(ParseError{
+                    "--target cannot be combined with semantic product selectors"
+                });
+            }
+            if (command.selection.all_targets
+                && (command.selection.all_examples || command.selection.all_tests
+                    || command.selection.all_benchmarks || !command.selection.examples.empty()
+                    || !command.selection.tests.empty() || !command.selection.benchmarks.empty())) {
+                return std::unexpected(ParseError{
+                    "--all-targets already selects every product and cannot be combined with category selectors"
+                });
+            }
+            if (command.selection.all_examples && !command.selection.examples.empty()) {
+                return std::unexpected(ParseError{
+                    "--examples already selects every example; remove --example"
+                });
+            }
+            if (command.selection.all_tests && !command.selection.tests.empty()) {
+                return std::unexpected(ParseError{
+                    "--tests already selects every test; remove --test"
+                });
+            }
+            if (command.selection.all_benchmarks && !command.selection.benchmarks.empty()) {
+                return std::unexpected(ParseError{
+                    "--benchmarks already selects every benchmark; remove --bench"
+                });
+            }
+
             return command;
         }
 
@@ -281,7 +483,41 @@ namespace kaixa::cli {
                     if (!value)
                         return std::unexpected(value.error());
 
+                    if (command.target) {
+                        return std::unexpected(ParseError{
+                            "--target can be specified only once for run"
+                        });
+                    }
+
                     command.target = *value;
+                    continue;
+                }
+
+                if (argument == "--example") {
+                    parser.take();
+                    auto value = parser.value(argument);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    if (command.example) {
+                        return std::unexpected(ParseError{
+                            "--example can be specified only once for run"
+                        });
+                    }
+
+                    command.example = *value;
+                    continue;
+                }
+
+                if (argument == "--examples") {
+                    parser.take();
+                    if (command.examples) {
+                        return std::unexpected(ParseError{
+                            "--examples was specified more than once"
+                        });
+                    }
+
+                    command.examples = true;
                     continue;
                 }
 
@@ -312,6 +548,27 @@ namespace kaixa::cli {
                     "--list cannot be combined with program arguments"
                 });
             }
+            if (command.target && command.example) {
+                return std::unexpected(ParseError{
+                    "--target selects a regular application; use only --example to run an example"
+                });
+            }
+            if (command.examples && command.example) {
+                return std::unexpected(ParseError{
+                    "--examples lists all examples; use --example <name> to select one"
+                });
+            }
+            if (command.examples && !command.list) {
+                return std::unexpected(ParseError{
+                    "--examples selects multiple programs and is valid only with --list; use --example <name> to run one"
+                });
+            }
+            if (command.list && command.example) {
+                return std::unexpected(ParseError{
+                    "--example selects one program and cannot be combined with --list; use --examples --list"
+                });
+            }
+
             return command;
         }
 
@@ -348,7 +605,8 @@ namespace kaixa::cli {
 
             if (command.all && (command.workspace.profile
                 || !command.workspace.configurations.empty()
-                || !command.workspace.resolver_arguments.empty())) {
+                || !command.workspace.resolver_arguments.empty()
+                || !command.workspace.use_default_configurations)) {
                 return std::unexpected(ParseError{
                     "--all cannot be combined with build configuration options"
                 });
@@ -481,23 +739,33 @@ namespace kaixa::cli {
             << "Kaixa " << version() << "\n\n"
             << "Usage:\n"
             << "  kaixa inspect [packages|targets|outputs|actions|config] [--path path]\n"
-            << "        [--verbose] [--profile name] [--config name]...\n"
+            << "        [--verbose] [--profile name] [--config name]...\n\n"
+
             << "  kaixa <check|generate> [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
             << "  kaixa build [--path path] [--list] [--target name]... [--jobs count]\n"
-            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n"
+            << "        [--example name]... [--examples] [--test name]... [--tests]\n"
+            << "        [--bench name]... [--benchmarks] [--all-targets]\n"
+            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n\n"
+
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa run [--list] [--target name] [--path path] [--profile name]\n"
+            << "  kaixa bench [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
+            << "  kaixa run [--list] [--target name] [--example name] [--examples] [--path path]\n"
+            << "        [--profile name]\n"
+            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n\n"
+
             << "  kaixa clean [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
-            << "  kaixa clean [--path path] --all [--generated-files] [--dry-run]\n"
+            << "  kaixa clean [--path path] --all [--generated-files] [--dry-run]\n\n"
+
             << "  kaixa config list [--path path]\n"
             << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
             << "        [--config name]... [--for resolver[.scope] <arguments...>]...\n"
             << "  kaixa config path [--path path]\n"
+            << "  Workspace builds accept --no-default-configs to replace configured defaults.\n"
             << "  kaixa --version\n";
     }
 
@@ -522,6 +790,14 @@ namespace kaixa::cli {
 
         if (name == "test") {
             auto command = parse_test(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "bench") {
+            auto command = parse_bench(parser);
             if (!command)
                 return std::unexpected(command.error());
 

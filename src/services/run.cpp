@@ -7,7 +7,7 @@
 #include <utility>
 
 namespace kaixa {
-    Result<std::vector<RunTarget>> discover_run_targets(
+    Result<std::vector<RunTarget>> discover_executable_targets(
         const Graph& graph,
         const ResolverRegistry& registry,
         const BuildEnvironment& environment
@@ -23,9 +23,26 @@ namespace kaixa {
 
             targets.push_back({
                 product.name,
+                product.purpose,
                 ProcessRequest{{product.artifact->string()}, graph[product.package].directory}
             });
         }
+        return targets;
+    }
+
+    Result<std::vector<RunTarget>> discover_run_targets(
+        const Graph& graph,
+        const ResolverRegistry& registry,
+        const BuildEnvironment& environment
+    ) {
+        auto targets = discover_executable_targets(graph, registry, environment);
+        if (!targets)
+            return std::unexpected(targets.error());
+
+        std::erase_if(*targets, [](const RunTarget& target) {
+            return target.purpose == ProductPurpose::test
+                || target.purpose == ProductPurpose::benchmark;
+        });
         return targets;
     }
 
@@ -94,6 +111,7 @@ namespace kaixa {
     ) {
         BuildRequest request;
         request.targets.push_back(std::move(target));
+        request.build_default = false;
         return plan_build(graph, registry, environment, request);
     }
 }

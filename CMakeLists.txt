@@ -118,6 +118,34 @@ set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 set_target_properties(kaixa_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
+add_executable(manifest_writer
+    [[examples/manifest_writer.cpp]]
+)
+
+target_link_libraries(manifest_writer PRIVATE
+    [[kaixa_core]]
+)
+
+target_compile_features(manifest_writer PRIVATE cxx_std_23)
+
+set_target_properties(manifest_writer PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(manifest_writer PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+add_executable(manifest_format
+    [[benchmarks/manifest_format.cpp]]
+)
+
+target_link_libraries(manifest_format PRIVATE
+    [[kaixa_core]]
+)
+
+target_compile_features(manifest_format PRIVATE cxx_std_23)
+
+set_target_properties(manifest_format PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(manifest_format PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
 enable_testing()
 
 set(_kaixa_discovery_0 "${CMAKE_CURRENT_BINARY_DIR}/kaixa-discovery-0")

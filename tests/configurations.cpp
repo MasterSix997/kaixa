@@ -101,6 +101,29 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     }
 }
 
+KAIXA_TEST(explicit_configuration_can_replace_layer_defaults) {
+    kaixa::ConfigurationSet configurations;
+    configurations.defaults.push_back("debug");
+    configurations.definitions.push_back({"debug", "debug", {}, {}, {}});
+    configurations.definitions.push_back({"release", "release", {}, {}, {}});
+
+    const std::vector<std::string> requested{"release"};
+    const auto effective = kaixa::resolve_configurations(
+        std::span<const kaixa::ConfigurationSet>(&configurations, 1),
+        requested,
+        std::nullopt,
+        {},
+        false
+    );
+    context.check(effective.has_value(), "configuration without defaults resolves");
+    if (!effective)
+        return;
+
+    context.check_equal(effective->selected.size(), std::size_t{1}, "only explicit configuration selected");
+    context.check_equal(effective->selected.front(), std::string("release"), "explicit configuration retained");
+    context.check_equal(effective->profile, std::string("release"), "explicit profile retained");
+}
+
 KAIXA_TEST(cmake_consumes_a_named_configuration) {
     const TempDirectory root("cmake-named-configuration");
     kaixa::Manifest manifest{"configured", "cmake"};

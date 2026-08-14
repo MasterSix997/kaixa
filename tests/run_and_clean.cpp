@@ -10,8 +10,8 @@ using kaixa::testing::TempDirectory;
 
 KAIXA_TEST(run_target_selection_prefers_the_package_name) {
     const std::array targets = {
-        kaixa::RunTarget{"tools", {{"tools"}, {}}},
-        kaixa::RunTarget{"app", {{"app"}, {}}}
+        kaixa::RunTarget{"tools", kaixa::ProductPurpose::primary, {{"tools"}, {}}},
+        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"app"}, {}}}
     };
 
     const auto selected = kaixa::select_run_target(targets, std::nullopt, "app");
@@ -22,8 +22,8 @@ KAIXA_TEST(run_target_selection_prefers_the_package_name) {
 
 KAIXA_TEST(run_target_selection_requires_a_choice_when_ambiguous) {
     const std::array targets = {
-        kaixa::RunTarget{"editor", {{"editor"}, {}}},
-        kaixa::RunTarget{"game", {{"game"}, {}}}
+        kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
+        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}
     };
 
     const auto selected = kaixa::select_run_target(targets, std::nullopt, "workspace");
@@ -39,8 +39,8 @@ KAIXA_TEST(run_target_selection_requires_a_choice_when_ambiguous) {
 
 KAIXA_TEST(run_target_selection_lists_available_targets_for_an_unknown_name) {
     const std::array targets = {
-        kaixa::RunTarget{"editor", {{"editor"}, {}}},
-        kaixa::RunTarget{"game", {{"game"}, {}}}
+        kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
+        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}
     };
 
     const auto selected = kaixa::select_run_target(targets, std::string("server"), "workspace");

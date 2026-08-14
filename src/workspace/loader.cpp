@@ -241,6 +241,7 @@ namespace kaixa {
                     PackageKind::managed,
                     manifest.resolver,
                     std::move(manifest),
+                    {},
                     {}
                 });
 
@@ -249,8 +250,29 @@ namespace kaixa {
                     auto target = load_dependency(directory, dependency);
                     if (!target)
                         return std::unexpected(target.error());
+
                     m_graph[id].dependencies.push_back(*target);
                 }
+
+                const std::vector<PackageTarget> package_targets = m_graph[id].manifest->resolved_targets;
+                for (const PackageTarget& package_target: package_targets) {
+                    if (package_target.dependencies.empty())
+                        continue;
+
+                    PackageTargetDependencies resolved;
+                    resolved.target = *package_target.name;
+                    resolved.kind = package_target.kind;
+                    for (const DependencySpec& dependency: package_target.dependencies) {
+                        auto target = load_dependency(package_target.source.parent_path(), dependency);
+                        if (!target)
+                            return std::unexpected(target.error());
+
+                        if (std::ranges::find(resolved.packages, *target) == resolved.packages.end())
+                            resolved.packages.push_back(*target);
+                    }
+                    m_graph[id].target_dependencies.push_back(std::move(resolved));
+                }
+
                 return id;
             }
 
@@ -298,6 +320,7 @@ namespace kaixa {
                     PackageKind::opaque,
                     {},
                     std::nullopt,
+                    {},
                     {}
                 });
             }

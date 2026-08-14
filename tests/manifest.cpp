@@ -100,6 +100,9 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
         "sources = [\"tests/*.cpp\"]\n"
         "discover = true\n"
         "\n"
+        "[test.dependencies]\n"
+        "support = { path = \"../support\" }\n"
+        "\n"
         "[test.cmake]\n"
         "link-libraries = [\"support\"]\n"
         "\n"
@@ -120,6 +123,12 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     context.check(!manifest->targets[0].each_source, "singular test is grouped");
     context.check(manifest->targets[1].each_source, "plural benchmarks are per source");
     context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
+    context.check_equal(manifest->targets[0].dependencies.size(), std::size_t{1}, "target dependency count");
+    context.check_equal(
+        manifest->targets[0].dependencies.front().name,
+        std::string("support"),
+        "target dependency name"
+    );
 }
 
 KAIXA_TEST(package_targets_do_not_silently_ignore_unavailable_features) {
@@ -160,6 +169,7 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     examples.kind = kaixa::PackageTargetKind::example;
     examples.each_source = true;
     examples.sources.include = {"examples/*.cpp"};
+    examples.dependencies.emplace_back("support", "../support");
     examples.resolver_options = kaixa::Value::table({
         {"link-libraries", kaixa::Value::array({"app"})}
     });
@@ -197,6 +207,7 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     context.check_contains(*text, "[[cmake.target]]", "canonical target syntax");
     context.check_contains(*text, "tests = [\"tests\"]", "target manifest references format");
     context.check_contains(*text, "[examples]", "package targets format");
+    context.check_contains(*text, "[examples.dependencies]", "package target dependencies format");
 
     const auto parsed = kaixa::parse_manifest_string(*text, "generated-manifest");
     context.check(parsed.has_value(), "formatted manifest parses");
@@ -218,6 +229,7 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     context.check(parsed->resolver_options.has_value(), "resolver options round-trip");
     context.check_equal(parsed->target_references.size(), std::size_t{1}, "target reference round-trips");
     context.check_equal(parsed->targets.size(), std::size_t{1}, "package target round-trips");
+    context.check_equal(parsed->targets.front().dependencies.size(), std::size_t{1}, "target dependency round-trips");
 }
 
 KAIXA_TEST(programmatic_manifest_rejects_invalid_data) {

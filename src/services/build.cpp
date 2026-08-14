@@ -45,8 +45,11 @@ namespace kaixa {
             }
 
             BuildRequest package_request = request;
-            if (id != graph.root())
+            if (id != graph.root()) {
                 package_request.targets.clear();
+                package_request.build_default = true;
+            }
+
             auto planned = resolver->plan(
                 graph,
                 package,

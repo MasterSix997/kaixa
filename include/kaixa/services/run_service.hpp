@@ -13,6 +13,12 @@
 #include <vector>
 
 namespace kaixa {
+    [[nodiscard]] Result<std::vector<RunTarget>> discover_executable_targets(
+        const Graph& graph,
+        const ResolverRegistry& registry,
+        const BuildEnvironment& environment
+    );
+
     [[nodiscard]] Result<std::vector<RunTarget>> discover_run_targets(
         const Graph& graph,
         const ResolverRegistry& registry,

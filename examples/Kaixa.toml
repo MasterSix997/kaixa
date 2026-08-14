@@ -1,0 +1,6 @@
+[example]
+name = "manifest_writer"
+sources = ["manifest_writer.cpp"]
+
+[example.cmake]
+link-libraries = ["kaixa_core"]

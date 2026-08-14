@@ -63,6 +63,7 @@ namespace kaixa {
         std::span<const ConfigurationSet> layers,
         std::span<const std::string> requested,
         const std::optional<std::string>& profile_override,
-        std::span<const ResolverArgumentOverride> argument_overrides
+        std::span<const ResolverArgumentOverride> argument_overrides,
+        bool use_defaults = true
     );
 }

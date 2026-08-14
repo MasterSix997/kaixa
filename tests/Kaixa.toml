@@ -1,0 +1,9 @@
+[test]
+name = "kaixa_tests"
+display-name = "kaixa"
+sources = ["*.cpp", "support/*.cpp", "../apps/kaixa/command_line.cpp"]
+discover = true
+
+[test.cmake]
+include-directories = ["support", "../apps/kaixa"]
+link-libraries = ["kaixa_core", "kaixa_plugins"]

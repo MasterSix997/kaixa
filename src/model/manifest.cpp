@@ -9,6 +9,8 @@
 
 namespace kaixa {
     namespace {
+        Result<DependencySpec> parse_dependency(const TableEntry& entry, const std::string& path);
+
         Result<std::string> read_identifier(TableReader& table, const std::string_view key) {
             auto value = table.string(key);
             if (!value)
@@ -66,6 +68,31 @@ namespace kaixa {
             }
 
             return *boolean;
+        }
+
+        Result<std::vector<DependencySpec>> read_dependencies(TableReader& table) {
+            auto dependencies_result = table.optional_table("dependencies");
+            if (!dependencies_result)
+                return std::unexpected(dependencies_result.error());
+
+            std::vector<DependencySpec> result;
+            if (!*dependencies_result)
+                return result;
+
+            TableReader dependencies = std::move(**dependencies_result);
+            result.reserve(dependencies.entries().size());
+            for (const TableEntry& entry: dependencies.entries()) {
+                auto dependency = parse_dependency(
+                    entry,
+                    join_config_path(dependencies.path(), entry.key)
+                );
+                if (!dependency)
+                    return std::unexpected(dependency.error());
+
+                result.push_back(std::move(*dependency));
+            }
+            dependencies.take_all();
+            return result;
         }
 
         Result<void> read_target_references(
@@ -156,6 +183,12 @@ namespace kaixa {
                 return std::unexpected(required_features.error());
 
             target.required_features = std::move(*required_features);
+
+            auto dependencies = read_dependencies(table);
+            if (!dependencies)
+                return std::unexpected(dependencies.error());
+
+            target.dependencies = std::move(*dependencies);
 
             auto arguments = read_string_array(table, "arguments");
             if (!arguments)
@@ -409,24 +442,11 @@ namespace kaixa {
         if (!package_finished)
             return std::unexpected(package_finished.error());
 
-        auto dependencies_result = root.optional_table("dependencies");
-        if (!dependencies_result)
-            return std::unexpected(dependencies_result.error());
+        auto dependencies = read_dependencies(root);
+        if (!dependencies)
+            return std::unexpected(dependencies.error());
 
-        if (*dependencies_result) {
-            TableReader dependencies = std::move(**dependencies_result);
-            for (const TableEntry& entry: dependencies.entries()) {
-                auto dependency = parse_dependency(
-                    entry,
-                    join_config_path(dependencies.path(), entry.key)
-                );
-                if (!dependency)
-                    return std::unexpected(dependency.error());
-
-                manifest.dependencies.push_back(std::move(*dependency));
-            }
-            dependencies.take_all();
-        }
+        manifest.dependencies = std::move(*dependencies);
 
         auto configurations = read_configuration_set(root);
         if (!configurations)

@@ -477,7 +477,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         const auto build = std::ranges::find_if(
             run_plan->actions(),
             [](const kaixa::Action& action) {
-                return action.description == "build test_generated";
+                return action.description == "build selected targets for test_generated";
             }
         );
         context.check(build != run_plan->actions().end(), "run plan has a build action");
@@ -721,13 +721,36 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         "tests/Kaixa.toml",
         "[test]\n"
         "sources = [\"*.cpp\"]\n"
+        "\n"
+        "[test.dependencies]\n"
+        "test_support = { path = \"../test_support\" }\n"
+        "\n"
+        "[test.cmake]\n"
+        "link-libraries = [\"test_support\"]\n"
     );
     workspace.write("tests/main.cpp", "int main() { return 0; }\n");
+    workspace.write(
+        "test_support/Kaixa.toml",
+        "[package]\n"
+        "name = \"test_support\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[cmake]\n"
+        "type = \"static-library\"\n"
+        "sources = [\"support.cpp\"]\n"
+    );
+    workspace.write("test_support/support.cpp", "int test_support() { return 1; }\n");
     workspace.write(
         "examples/rendering/Kaixa.toml",
         "[examples]\n"
         "sources = [\"*.cpp\"]\n"
         "category = \"Rendering\"\n"
+        "\n"
+        "[examples.dependencies]\n"
+        "test_support = { path = \"../../test_support\" }\n"
+        "\n"
+        "[examples.cmake]\n"
+        "link-libraries = [\"test_support\"]\n"
     );
     workspace.write("examples/rendering/first.cpp", "int main() { return 0; }\n");
     workspace.write("examples/rendering/second.cpp", "int main() { return 0; }\n");
@@ -735,6 +758,12 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         "benchmarks/Kaixa.toml",
         "[benchmark]\n"
         "sources = [\"*.cpp\"]\n"
+        "\n"
+        "[benchmark.dependencies]\n"
+        "test_support = { path = \"../test_support\" }\n"
+        "\n"
+        "[benchmark.cmake]\n"
+        "link-libraries = [\"test_support\"]\n"
     );
     workspace.write("benchmarks/main.cpp", "int main() { return 0; }\n");
 
@@ -753,6 +782,13 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
             return target.name.has_value() && !target.each_source && !target.sources.files.empty();
         }),
         "resolver receives concrete named targets"
+    );
+    const kaixa::PackageNode& root = (*graph)[graph->root()];
+    context.check_equal(root.target_dependencies.size(), std::size_t{4}, "target dependency group count");
+    context.check_equal(
+        (*graph)[root.target_dependencies.front().packages.front()].name,
+        std::string("test_support"),
+        "test dependency resolves independently from package dependencies"
     );
 
     const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
@@ -797,6 +833,46 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         "set_target_properties(app_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)",
         "package targets stay outside the default build"
     );
+    const auto dependencies = std::ranges::find_if(
+        plan->generated_files(),
+        [](const kaixa::GeneratedFile& file) {
+            return file.path.filename() == "dependencies.cmake";
+        }
+    );
+    context.check(dependencies != plan->generated_files().end(), "CMake dependency integration is generated");
+    if (dependencies != plan->generated_files().end()) {
+        context.check_contains(dependencies->content, "test_support", "test dependency is integrated");
+        context.check_contains(
+            dependencies->content,
+            "EXCLUDE_FROM_ALL",
+            "test dependency stays outside the default build"
+        );
+    }
+
+    const auto synchronization = kaixa::generate(*plan);
+    context.check(synchronization.has_value(), "package targets configure");
+    if (!synchronization) {
+        context.fail(kaixa::format_diagnostic(synchronization.error()));
+        return;
+    }
+
+    const auto run_targets = kaixa::discover_run_targets(*graph, registry, environment);
+    context.check(run_targets.has_value(), "official examples are discovered for running");
+    if (run_targets) {
+        context.check_equal(run_targets->size(), std::size_t{3}, "only examples are runnable");
+        context.check(
+            std::ranges::all_of(*run_targets, [](const kaixa::RunTarget& target) {
+                return target.purpose == kaixa::ProductPurpose::example;
+            }),
+            "runnable examples keep their semantic purpose"
+        );
+        context.check(
+            std::ranges::none_of(*run_targets, [](const kaixa::RunTarget& target) {
+                return target.name == "app_tests" || target.name == "app_benchmarks";
+            }),
+            "tests and benchmarks stay out of run targets"
+        );
+    }
 
     const auto test_plan = kaixa::plan_tests(*graph, registry, environment, {});
     context.check(test_plan.has_value(), "official tests plan");
@@ -814,5 +890,10 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
                 "test command builds the excluded test target"
             );
         }
+
+        const auto tested = kaixa::test(*test_plan);
+        context.check(tested.has_value(), "test target builds with its specific dependency");
+        if (!tested)
+            context.fail(kaixa::format_diagnostic(tested.error()));
     }
 }

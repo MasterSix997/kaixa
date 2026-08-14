@@ -17,9 +17,17 @@ namespace kaixa {
         utility
     };
 
+    enum class ProductPurpose {
+        primary,
+        test,
+        example,
+        benchmark
+    };
+
     struct BuildProduct {
         std::string name;
         ProductKind kind = ProductKind::utility;
+        ProductPurpose purpose = ProductPurpose::primary;
         PackageId package;
         std::optional<std::filesystem::path> artifact;
     };

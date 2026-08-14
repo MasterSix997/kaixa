@@ -33,10 +33,12 @@ namespace kaixa {
     struct BuildRequest {
         std::vector<std::string> targets;
         std::optional<std::size_t> jobs;
+        bool build_default = true;
     };
 
     struct RunTarget {
         std::string name;
+        ProductPurpose purpose = ProductPurpose::primary;
         ProcessRequest process;
     };
 

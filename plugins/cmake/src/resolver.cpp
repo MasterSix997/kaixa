@@ -185,6 +185,7 @@ namespace kaixa::plugin::cmake {
         Result<void> collect_source_dependencies(
             const Graph& graph,
             const PackageId id,
+            const bool include_associated,
             std::vector<bool>& visited,
             std::vector<PackageId>& packages
         ) {
@@ -204,9 +205,23 @@ namespace kaixa::plugin::cmake {
                 if (dependency_mode(*options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
-                auto collected = collect_source_dependencies(graph, dependency, visited, packages);
+                auto collected = collect_source_dependencies(graph, dependency, false, visited, packages);
                 if (!collected)
                     return std::unexpected(collected.error());
+            }
+
+            if (include_associated) {
+                for (const PackageTargetDependencies& dependencies: package.target_dependencies) {
+                    for (const PackageId dependency: dependencies.packages) {
+                        const PackageNode& target = graph[dependency];
+                        if (target.kind != PackageKind::managed || target.resolver != "cmake")
+                            continue;
+
+                        auto collected = collect_source_dependencies(graph, dependency, false, visited, packages);
+                        if (!collected)
+                            return std::unexpected(collected.error());
+                    }
+                }
             }
 
             packages.push_back(id);
@@ -364,6 +379,27 @@ namespace kaixa::plugin::cmake {
             return std::unexpected(error("unsupported CMake target type `" + std::string(type) + "`"));
         }
 
+        ProductPurpose product_purpose(const PackageNode& package, const std::string_view name) {
+            if (!package.manifest)
+                return ProductPurpose::primary;
+
+            const auto target = std::ranges::find_if(
+                package.manifest->resolved_targets,
+                [&](const PackageTarget& candidate) {
+                    return candidate.name == name;
+                }
+            );
+            if (target == package.manifest->resolved_targets.end())
+                return ProductPurpose::primary;
+
+            switch (target->kind) {
+                case PackageTargetKind::test: return ProductPurpose::test;
+                case PackageTargetKind::example: return ProductPurpose::example;
+                case PackageTargetKind::benchmark: return ProductPurpose::benchmark;
+            }
+            return ProductPurpose::primary;
+        }
+
         Result<std::vector<BuildProduct>> read_products(const PackageNode& package, const BuildContext& context) {
             const std::filesystem::path directory =
                 product_metadata_directory(context) / context.configuration;
@@ -427,7 +463,14 @@ namespace kaixa::plugin::cmake {
                         "in `" + entry.path().string() + "`"
                     ));
 
-                BuildProduct product{std::move(name), *kind, package.id, std::nullopt};
+                const ProductPurpose purpose = product_purpose(package, name);
+                BuildProduct product{
+                    std::move(name),
+                    *kind,
+                    purpose,
+                    package.id,
+                    std::nullopt
+                };
                 if (!artifact.empty())
                     product.artifact = std::move(artifact);
 
@@ -706,6 +749,7 @@ namespace kaixa::plugin::cmake {
                 auto install = requires_install(graph, package);
                 if (!install)
                     return std::unexpected(install.error());
+
                 if (package.id != graph.root() && !*install)
                     return {};
 
@@ -725,11 +769,24 @@ namespace kaixa::plugin::cmake {
                     plan.output({package.id, "cmake", context->output});
                 }
 
+                std::vector<bool> normal_source_visited(graph.size(), false);
+                std::vector<PackageId> normal_source_packages;
+                auto normal_source_result = collect_source_dependencies(
+                    graph,
+                    package.id,
+                    false,
+                    normal_source_visited,
+                    normal_source_packages
+                );
+                if (!normal_source_result)
+                    return std::unexpected(normal_source_result.error());
+
                 std::vector<bool> source_visited(graph.size(), false);
                 std::vector<PackageId> source_packages;
                 auto source_result = collect_source_dependencies(
                     graph,
                     package.id,
+                    true,
                     source_visited,
                     source_packages
                 );
@@ -747,6 +804,7 @@ namespace kaixa::plugin::cmake {
                     );
                     if (!project)
                         return std::unexpected(project.error());
+
                     projects[id.index] = std::move(*project);
                 }
 
@@ -765,12 +823,16 @@ namespace kaixa::plugin::cmake {
                 for (const PackageId id: source_packages) {
                     if (id == package.id)
                         continue;
+
                     const PackageNode& dependency = graph[id];
 
                     integration += "  add_subdirectory("
                         + cmake_quote(projects[id.index]->source) + " "
-                        + cmake_quote(context->directory / "_dependencies" / dependency.name)
-                        + ")\n";
+                        + cmake_quote(context->directory / "_dependencies" / dependency.name);
+                    if (!normal_source_visited[id.index])
+                        integration += " EXCLUDE_FROM_ALL";
+
+                    integration += ")\n";
                 }
                 integration += "endif()\n";
                 plan.generate({integration_file, std::move(integration)});
@@ -883,34 +945,50 @@ namespace kaixa::plugin::cmake {
                     : (checked_state ? *checked_state : ActionState::unknown);
                 plan.add(std::move(configure));
 
-                Action build;
-                build.description = "build " + package.name;
-                build.argv = {
-                    "cmake",
-                    "--build", context->directory.string(),
-                    "--config", context->configuration
-                };
-                build.working_directory = package.directory;
-                build.inputs.push_back(context->directory / "CMakeCache.txt");
-                build.outputs.push_back(context->directory);
-                build.package = package.id;
-                if (!request.targets.empty()) {
-                    build.argv.push_back("--target");
-                    build.argv.insert(build.argv.end(), request.targets.begin(), request.targets.end());
-                }
-                if (request.jobs) {
-                    build.argv.push_back("--parallel");
-                    build.argv.push_back(std::to_string(*request.jobs));
-                }
-                build.argv.insert(
-                    build.argv.end(),
-                    context->build.build_arguments.begin(),
-                    context->build.build_arguments.end()
-                );
-                if (*install)
-                    build.stage = ActionStage::synchronize;
+                const auto make_build_action = [&](const bool selected) {
+                    Action build;
+                    build.description = selected
+                        ? "build selected targets for " + package.name
+                        : "build " + package.name;
+                    build.argv = {
+                        "cmake",
+                        "--build", context->directory.string(),
+                        "--config", context->configuration
+                    };
+                    build.working_directory = package.directory;
+                    build.inputs.push_back(context->directory / "CMakeCache.txt");
+                    build.outputs.push_back(context->directory);
+                    build.package = package.id;
+                    if (selected) {
+                        build.argv.push_back("--target");
+                        build.argv.insert(build.argv.end(), request.targets.begin(), request.targets.end());
+                    }
+                    if (request.jobs) {
+                        build.argv.push_back("--parallel");
+                        build.argv.push_back(std::to_string(*request.jobs));
+                    }
+                    build.argv.insert(
+                        build.argv.end(),
+                        context->build.build_arguments.begin(),
+                        context->build.build_arguments.end()
+                    );
+                    if (*install)
+                        build.stage = ActionStage::synchronize;
 
-                plan.add(std::move(build));
+                    return build;
+                };
+
+                if (request.build_default)
+                    plan.add(make_build_action(false));
+
+                if (!request.targets.empty())
+                    plan.add(make_build_action(true));
+
+                if (!request.build_default && request.targets.empty()) {
+                    return std::unexpected(error(
+                        "CMake build request selects neither default nor explicit targets"
+                    ));
+                }
 
                 if (*install) {
                     const std::filesystem::path destination = artifact_directory(

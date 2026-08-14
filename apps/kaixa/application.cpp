@@ -128,7 +128,8 @@ namespace kaixa::cli {
                 layers,
                 options.configurations,
                 options.profile,
-                options.resolver_arguments
+                options.resolver_arguments,
+                options.use_default_configurations
             );
             if (!configuration)
                 return std::unexpected(configuration.error());
@@ -380,14 +381,28 @@ namespace kaixa::cli {
             return "product";
         }
 
+        std::string_view product_purpose_name(const ProductPurpose purpose) {
+            switch (purpose) {
+                case ProductPurpose::primary: return "primary";
+                case ProductPurpose::test: return "test";
+                case ProductPurpose::example: return "example";
+                case ProductPurpose::benchmark: return "benchmark";
+            }
+            return "product";
+        }
+
         void print_products(
             const std::span<const BuildProduct> products,
             const std::filesystem::path& workspace,
-            const std::span<const std::string> selected = {}
+            const std::span<const std::string> selected = {},
+            const bool filter = false
         ) {
             for (const BuildProduct& product: products) {
-                if (!selected.empty() && std::ranges::find(selected, product.name) == selected.end())
+                if (filter && std::ranges::find(selected, product.name) == selected.end())
                     continue;
+
+                if (product.purpose != ProductPurpose::primary)
+                    std::cout << product_purpose_name(product.purpose) << ' ';
 
                 std::cout << product_kind_name(product.kind) << ' ' << product.name;
                 if (product.artifact)
@@ -421,6 +436,218 @@ namespace kaixa::cli {
                 }
             }
             return {};
+        }
+
+        struct ResolvedProductSelection {
+            std::vector<std::string> targets;
+            std::vector<std::string> displayed;
+            bool build_default = false;
+        };
+
+        void append_products(
+            const std::span<const BuildProduct> products,
+            const ProductPurpose purpose,
+            std::vector<std::string>& output
+        ) {
+            for (const BuildProduct& product: products) {
+                if (product.purpose == purpose)
+                    output.push_back(product.name);
+            }
+        }
+
+        Result<void> append_named_products(
+            const std::span<const BuildProduct> products,
+            const std::span<const std::string> requested,
+            const ProductPurpose purpose,
+            const std::string_view option,
+            std::vector<std::string>& output
+        ) {
+            for (const std::string& name: requested) {
+                const auto product = std::ranges::find(products, name, &BuildProduct::name);
+                if (product == products.end()) {
+                    Diagnostic diagnostic = error(
+                        std::string(option) + " selected unknown "
+                            + std::string(product_purpose_name(purpose)) + " `" + name + "`"
+                    );
+                    std::string available;
+                    for (const BuildProduct& candidate: products) {
+                        if (candidate.purpose != purpose)
+                            continue;
+
+                        if (!available.empty())
+                            available += ", ";
+
+                        available += candidate.name;
+                    }
+                    if (!available.empty()) {
+                        return std::unexpected(std::move(diagnostic).add_note(
+                            "available " + std::string(product_purpose_name(purpose))
+                                + " products: " + available
+                        ));
+                    }
+
+                    return std::unexpected(std::move(diagnostic));
+                }
+                if (product->purpose != purpose) {
+                    return std::unexpected(error(
+                        "`" + name + "` has purpose `"
+                            + std::string(product_purpose_name(product->purpose))
+                            + "`, not `" + std::string(product_purpose_name(purpose)) + "`"
+                    ));
+                }
+
+                output.push_back(name);
+            }
+            return {};
+        }
+
+        Result<ResolvedProductSelection> resolve_product_selection(
+            const std::span<const BuildProduct> products,
+            const BuildCommand& command
+        ) {
+            ResolvedProductSelection result;
+            if (!command.targets.empty()) {
+                auto valid = validate_build_targets(products, command.targets);
+                if (!valid)
+                    return std::unexpected(valid.error());
+
+                result.targets = command.targets;
+                result.displayed = command.targets;
+                return result;
+            }
+
+            if (command.selection.empty()) {
+                result.build_default = true;
+                append_products(products, ProductPurpose::primary, result.displayed);
+                return result;
+            }
+
+            if (command.selection.all_targets) {
+                result.build_default = true;
+                for (const BuildProduct& product: products) {
+                    result.displayed.push_back(product.name);
+                    if (product.purpose != ProductPurpose::primary)
+                        result.targets.push_back(product.name);
+                }
+                return result;
+            }
+
+            if (command.selection.all_examples)
+                append_products(products, ProductPurpose::example, result.targets);
+
+            if (command.selection.all_tests)
+                append_products(products, ProductPurpose::test, result.targets);
+
+            if (command.selection.all_benchmarks)
+                append_products(products, ProductPurpose::benchmark, result.targets);
+
+            auto examples = append_named_products(
+                products,
+                command.selection.examples,
+                ProductPurpose::example,
+                "--example",
+                result.targets
+            );
+            if (!examples)
+                return std::unexpected(examples.error());
+
+            auto tests = append_named_products(
+                products,
+                command.selection.tests,
+                ProductPurpose::test,
+                "--test",
+                result.targets
+            );
+            if (!tests)
+                return std::unexpected(tests.error());
+
+            auto benchmarks = append_named_products(
+                products,
+                command.selection.benchmarks,
+                ProductPurpose::benchmark,
+                "--bench",
+                result.targets
+            );
+            if (!benchmarks)
+                return std::unexpected(benchmarks.error());
+
+            if (result.targets.empty() && !command.list) {
+                return std::unexpected(error(
+                    "the selected product categories contain no targets"
+                ));
+            }
+
+            result.displayed = result.targets;
+            return result;
+        }
+
+        Result<std::vector<RunTarget>> select_runnable_category(
+            const std::span<const RunTarget> targets,
+            const ProductPurpose purpose,
+            const std::optional<std::string>& requested
+        ) {
+            if (requested) {
+                const auto product = std::ranges::find(targets, *requested, &RunTarget::name);
+                if (product != targets.end() && product->purpose != purpose) {
+                    std::string expected;
+                    if (product->purpose == ProductPurpose::example)
+                        expected = "kaixa run --example " + *requested;
+                    else if (product->purpose == ProductPurpose::benchmark)
+                        expected = "kaixa bench --target " + *requested;
+                    else
+                        expected = "kaixa run --target " + *requested;
+
+                    return std::unexpected(error(
+                        "`" + *requested + "` is a "
+                            + std::string(product_purpose_name(product->purpose)) + " product"
+                    ).add_note("select it with `" + expected + "`"));
+                }
+            }
+
+            std::vector<RunTarget> result;
+            for (const RunTarget& target: targets) {
+                if (target.purpose == purpose)
+                    result.push_back(target);
+            }
+            return result;
+        }
+
+        int build_and_run_target(
+            const Workspace& workspace,
+            RunTarget selected,
+            const std::span<const std::string> arguments,
+            const std::string_view operation
+        ) {
+            auto plan = plan_run(
+                workspace.graph,
+                workspace.registry,
+                workspace.environment,
+                selected.name
+            );
+            if (!plan)
+                return fail(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
+            auto built = kaixa::execute(*plan);
+            if (!built)
+                return fail(built.error());
+
+            selected.process.argv.insert(
+                selected.process.argv.end(),
+                arguments.begin(),
+                arguments.end()
+            );
+            std::cout << operation << ": " << format_command(selected.process.argv) << '\n';
+            std::cout.flush();
+
+            auto result = run_process(selected.process);
+            if (!result)
+                return fail(result.error());
+
+            return result->exit_code;
         }
 
         int run(const HelpCommand&) {
@@ -567,7 +794,9 @@ namespace kaixa::cli {
             if (!workspace)
                 return fail(workspace.error());
 
-            if (command.list || !command.targets.empty()) {
+            ResolvedProductSelection selection;
+            bool selection_resolved = false;
+            if (command.list || !command.targets.empty() || !command.selection.empty()) {
                 auto synchronization = plan_build(
                     workspace->graph,
                     workspace->registry,
@@ -592,19 +821,32 @@ namespace kaixa::cli {
                 if (!products)
                     return fail(products.error());
 
+                auto resolved = resolve_product_selection(*products, command);
+                if (!resolved)
+                    return fail(resolved.error());
+
+                selection = std::move(*resolved);
+                selection_resolved = true;
                 if (command.list) {
-                    print_products(*products, workspace->environment.workspace);
+                    if (selection.displayed.empty()) {
+                        std::cout << "no matching products\n";
+                        return 0;
+                    }
+
+                    print_products(
+                        *products,
+                        workspace->environment.workspace,
+                        selection.displayed,
+                        true
+                    );
                     return 0;
                 }
-
-                auto valid = validate_build_targets(*products, command.targets);
-                if (!valid)
-                    return fail(valid.error());
             }
 
             BuildRequest request;
-            request.targets = command.targets;
+            request.targets = selection.targets;
             request.jobs = command.jobs;
+            request.build_default = selection_resolved ? selection.build_default : true;
             auto plan = plan_build(
                 workspace->graph,
                 workspace->registry,
@@ -631,7 +873,19 @@ namespace kaixa::cli {
             if (!products)
                 return fail(products.error());
 
-            print_products(*products, workspace->environment.workspace, command.targets);
+            if (!selection_resolved) {
+                auto resolved = resolve_product_selection(*products, command);
+                if (!resolved)
+                    return fail(resolved.error());
+
+                selection = std::move(*resolved);
+            }
+            print_products(
+                *products,
+                workspace->environment.workspace,
+                selection.displayed,
+                true
+            );
             return 0;
         }
 
@@ -660,6 +914,68 @@ namespace kaixa::cli {
             std::cout << "tests completed: " << report->executed << " action(s) run\n";
             print_outputs(*plan, workspace->environment.workspace);
             return 0;
+        }
+
+        int run(const BenchCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            auto synchronization = plan_build(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!synchronization)
+                return fail(synchronization.error());
+
+            auto printed = print_actions(*synchronization, true);
+            if (!printed)
+                return fail(printed.error());
+
+            auto generated = generate(*synchronization);
+            if (!generated)
+                return fail(generated.error());
+
+            auto targets = discover_executable_targets(
+                workspace->graph,
+                workspace->registry,
+                workspace->environment
+            );
+            if (!targets)
+                return fail(targets.error());
+
+            auto benchmarks = select_runnable_category(
+                *targets,
+                ProductPurpose::benchmark,
+                command.target
+            );
+            if (!benchmarks)
+                return fail(benchmarks.error());
+
+            if (command.list) {
+                if (benchmarks->empty()) {
+                    std::cout << "no runnable benchmarks\n";
+                    return 0;
+                }
+
+                for (const RunTarget& target: *benchmarks)
+                    std::cout << target.name << '\n';
+
+                return 0;
+            }
+
+            const PackageNode& root = workspace->graph[workspace->graph.root()];
+            auto selected = select_run_target(*benchmarks, command.target, root.name);
+            if (!selected)
+                return fail(selected.error());
+
+            return build_and_run_target(
+                *workspace,
+                std::move(*selected),
+                command.arguments,
+                "benchmarking"
+            );
         }
 
         int run(const RunCommand& command) {
@@ -691,53 +1007,41 @@ namespace kaixa::cli {
             if (!targets)
                 return fail(targets.error());
 
+            const ProductPurpose purpose = command.examples || command.example
+                ? ProductPurpose::example
+                : ProductPurpose::primary;
+            const std::optional<std::string>& requested = command.example
+                ? command.example
+                : command.target;
+            auto category = select_runnable_category(*targets, purpose, requested);
+            if (!category)
+                return fail(category.error());
+
             if (command.list) {
-                if (targets->empty()) {
-                    std::cout << "no runnable targets\n";
+                if (category->empty()) {
+                    std::cout << (purpose == ProductPurpose::example
+                        ? "no runnable examples\n"
+                        : "no runnable targets\n");
                     return 0;
                 }
 
-                for (const RunTarget& target: *targets)
+                for (const RunTarget& target: *category)
                     std::cout << target.name << '\n';
 
                 return 0;
             }
 
             const PackageNode& root = workspace->graph[workspace->graph.root()];
-            auto selected = select_run_target(*targets, command.target, root.name);
+            auto selected = select_run_target(*category, requested, root.name);
             if (!selected)
                 return fail(selected.error());
 
-            auto plan = plan_run(
-                workspace->graph,
-                workspace->registry,
-                workspace->environment,
-                selected->name
+            return build_and_run_target(
+                *workspace,
+                std::move(*selected),
+                command.arguments,
+                "running"
             );
-            if (!plan)
-                return fail(plan.error());
-
-            printed = print_actions(*plan);
-            if (!printed)
-                return fail(printed.error());
-
-            auto built = kaixa::execute(*plan);
-            if (!built)
-                return fail(built.error());
-
-            selected->process.argv.insert(
-                selected->process.argv.end(),
-                command.arguments.begin(),
-                command.arguments.end()
-            );
-            std::cout << "running: " << format_command(selected->process.argv) << '\n';
-            std::cout.flush();
-
-            auto result = run_process(selected->process);
-            if (!result)
-                return fail(result.error());
-
-            return result->exit_code;
         }
 
         int run(const CleanCommand& command) {

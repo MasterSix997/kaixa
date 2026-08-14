@@ -44,6 +44,27 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
     );
 }
 
+KAIXA_TEST(command_line_can_replace_default_configurations) {
+    constexpr std::array arguments = {
+        std::string_view("build"),
+        std::string_view("--no-default-configs"),
+        std::string_view("--config"),
+        std::string_view("clang-release")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "explicit configuration replacement parses");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*parsed);
+    context.check(command != nullptr, "replacement keeps build command type");
+    if (!command)
+        return;
+
+    context.check(!command->workspace.use_default_configurations, "configured defaults are disabled");
+    context.check_equal(command->workspace.configurations.front(), std::string("clang-release"), "release config");
+}
+
 KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
     constexpr std::array selected_arguments = {
         std::string_view("build"),
@@ -114,6 +135,101 @@ KAIXA_TEST(command_line_build_rejects_invalid_job_counts) {
             "job count error explains requirement"
         );
     }
+}
+
+KAIXA_TEST(command_line_build_parses_semantic_product_selectors) {
+    constexpr std::array arguments = {
+        std::string_view("build"),
+        std::string_view("--example"),
+        std::string_view("hello_world"),
+        std::string_view("--test"),
+        std::string_view("unit_tests"),
+        std::string_view("--bench"),
+        std::string_view("allocation"),
+        std::string_view("--list")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "named product selectors parse");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*parsed);
+    context.check(command != nullptr, "product selection keeps build command type");
+    if (!command)
+        return;
+
+    context.check_equal(command->selection.examples.front(), std::string("hello_world"), "selected example");
+    context.check_equal(command->selection.tests.front(), std::string("unit_tests"), "selected test");
+    context.check_equal(command->selection.benchmarks.front(), std::string("allocation"), "selected benchmark");
+    context.check(command->list, "semantic selection composes with list");
+}
+
+KAIXA_TEST(command_line_build_rejects_conflicting_product_selectors) {
+    constexpr std::array redundant_examples = {
+        std::string_view("build"),
+        std::string_view("--examples"),
+        std::string_view("--example"),
+        std::string_view("hello_world")
+    };
+    const auto examples = kaixa::cli::parse_command_line(redundant_examples);
+    context.check(!examples.has_value(), "all and named examples conflict");
+    if (!examples)
+        context.check_contains(examples.error().message, "already selects every example", "example conflict reason");
+
+    constexpr std::array all_targets = {
+        std::string_view("build"),
+        std::string_view("--all-targets"),
+        std::string_view("--tests")
+    };
+    const auto all = kaixa::cli::parse_command_line(all_targets);
+    context.check(!all.has_value(), "all targets and category conflict");
+    if (!all)
+        context.check_contains(all.error().message, "already selects every product", "all-targets conflict reason");
+
+    constexpr std::array raw_target = {
+        std::string_view("build"),
+        std::string_view("--target"),
+        std::string_view("hello_world"),
+        std::string_view("--example"),
+        std::string_view("hello_world")
+    };
+    const auto raw = kaixa::cli::parse_command_line(raw_target);
+    context.check(!raw.has_value(), "raw and semantic target selection conflict");
+    if (!raw)
+        context.check_contains(raw.error().message, "semantic product selectors", "raw target conflict reason");
+}
+
+KAIXA_TEST(command_line_run_distinguishes_one_example_from_example_listing) {
+    constexpr std::array selected_arguments = {
+        std::string_view("run"),
+        std::string_view("--example"),
+        std::string_view("hello_world")
+    };
+    const auto selected = kaixa::cli::parse_command_line(selected_arguments);
+    context.check(selected.has_value(), "named run example parses");
+    if (selected) {
+        const auto* command = std::get_if<kaixa::cli::RunCommand>(&*selected);
+        context.check(command != nullptr, "named example keeps run command type");
+        if (command)
+            context.check_equal(command->example.value_or(""), std::string("hello_world"), "run example");
+    }
+
+    constexpr std::array listed_arguments = {
+        std::string_view("run"),
+        std::string_view("--examples"),
+        std::string_view("--list")
+    };
+    const auto listed = kaixa::cli::parse_command_line(listed_arguments);
+    context.check(listed.has_value(), "example listing parses");
+
+    constexpr std::array invalid_arguments = {
+        std::string_view("run"),
+        std::string_view("--examples")
+    };
+    const auto invalid = kaixa::cli::parse_command_line(invalid_arguments);
+    context.check(!invalid.has_value(), "running all examples is rejected");
+    if (!invalid)
+        context.check_contains(invalid.error().message, "valid only with --list", "run examples error explains fix");
 }
 
 KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
@@ -264,6 +380,47 @@ KAIXA_TEST(command_line_run_separates_program_arguments) {
         command->workspace.configurations.front(),
         std::string("clang"),
         "run configuration"
+    );
+}
+
+KAIXA_TEST(command_line_bench_selects_a_target_and_forwards_arguments) {
+    constexpr std::array arguments = {
+        std::string_view("bench"),
+        std::string_view("--target"),
+        std::string_view("manifest_format"),
+        std::string_view("--"),
+        std::string_view("--iterations"),
+        std::string_view("500")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "bench command parses");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::BenchCommand>(&*parsed);
+    context.check(command != nullptr, "bench command has its own type");
+    if (!command)
+        return;
+
+    context.check_equal(command->target.value_or(""), std::string("manifest_format"), "benchmark target");
+    context.check_equal(command->arguments.size(), std::size_t{2}, "benchmark argument count");
+}
+
+KAIXA_TEST(command_line_bench_rejects_a_target_while_listing) {
+    constexpr std::array arguments = {
+        std::string_view("bench"),
+        std::string_view("--list"),
+        std::string_view("--target"),
+        std::string_view("manifest_format")
+    };
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(!parsed.has_value(), "bench list rejects a selected target");
+    if (parsed)
+        return;
+
+    context.check(
+        parsed.error().message.find("omit --target to list benchmarks") != std::string::npos,
+        "bench conflict explains the valid form"
     );
 }
 

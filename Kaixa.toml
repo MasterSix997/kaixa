@@ -3,6 +3,8 @@ name = "kaixa"
 version = "0.2.0-dev"
 resolver = "cmake"
 tests = ["tests"]
+examples = ["examples"]
+benchmarks = ["benchmarks"]
 
 [cmake]
 languages = ["CXX"]

@@ -20,6 +20,7 @@ namespace kaixa::cli {
         std::optional<std::string> profile;
         std::vector<std::string> configurations;
         std::vector<ResolverArgumentOverride> resolver_arguments;
+        bool use_default_configurations = true;
     };
 
     struct HelpCommand {};
@@ -47,9 +48,25 @@ namespace kaixa::cli {
         WorkspaceOptions workspace;
     };
 
+    struct ProductSelection {
+        std::vector<std::string> examples;
+        std::vector<std::string> tests;
+        std::vector<std::string> benchmarks;
+        bool all_examples = false;
+        bool all_tests = false;
+        bool all_benchmarks = false;
+        bool all_targets = false;
+
+        [[nodiscard]] bool empty() const noexcept {
+            return examples.empty() && tests.empty() && benchmarks.empty()
+                && !all_examples && !all_tests && !all_benchmarks && !all_targets;
+        }
+    };
+
     struct BuildCommand {
         WorkspaceOptions workspace;
         std::vector<std::string> targets;
+        ProductSelection selection;
         std::optional<std::size_t> jobs;
         bool list = false;
     };
@@ -59,11 +76,20 @@ namespace kaixa::cli {
         TestRequest request;
     };
 
-    struct RunCommand {
+    struct BenchCommand {
         WorkspaceOptions workspace;
         std::optional<std::string> target;
         std::vector<std::string> arguments;
         bool list = false;
+    };
+
+    struct RunCommand {
+        WorkspaceOptions workspace;
+        std::optional<std::string> target;
+        std::optional<std::string> example;
+        std::vector<std::string> arguments;
+        bool list = false;
+        bool examples = false;
     };
 
     struct CleanCommand {
@@ -94,6 +120,7 @@ namespace kaixa::cli {
         GenerateCommand,
         BuildCommand,
         TestCommand,
+        BenchCommand,
         RunCommand,
         CleanCommand,
         ConfigListCommand,

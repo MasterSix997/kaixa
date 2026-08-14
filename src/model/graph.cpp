@@ -69,6 +69,14 @@ namespace kaixa {
                 if (!result)
                     return result;
             }
+            for (const PackageTargetDependencies& dependencies: m_nodes[id.index].target_dependencies) {
+                for (const PackageId dependency: dependencies.packages) {
+                    auto result = visit(dependency);
+                    if (!result)
+                        return result;
+                }
+            }
+
             stack.pop_back();
             states[id.index] = State::complete;
             order.push_back(id);
