@@ -127,6 +127,7 @@ endforeach()
         const TestRequest& request,
         BuildPlan& plan
     ) {
+        std::vector<std::string> build_targets;
         if (request.target) {
             const auto target = std::ranges::find_if(
                 options.targets,
@@ -147,12 +148,25 @@ endforeach()
                 ));
             }
 
+            build_targets.push_back(*request.target);
+        } else {
+            for (const TestOptions& test: options.tests) {
+                if (std::ranges::find(build_targets, test.target) == build_targets.end())
+                    build_targets.push_back(test.target);
+            }
+        }
+
+        if (!build_targets.empty()) {
             auto build = find_build_action(plan, package);
             if (!build)
                 return std::unexpected(build.error());
 
             (*build)->argv.push_back("--target");
-            (*build)->argv.push_back(*request.target);
+            (*build)->argv.insert(
+                (*build)->argv.end(),
+                build_targets.begin(),
+                build_targets.end()
+            );
         }
 
         const bool list = request.mode == TestMode::list;

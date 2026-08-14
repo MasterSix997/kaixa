@@ -16,22 +16,23 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(kaixa_core STATIC
-    [[src/kaixa.cpp]]
+    [[src/build/executor.cpp]]
+    [[src/config/build_configuration.cpp]]
+    [[src/config/parser.cpp]]
+    [[src/config/table_reader.cpp]]
+    [[src/config/value.cpp]]
     [[src/foundation/diagnostic.cpp]]
     [[src/foundation/filesystem.cpp]]
     [[src/foundation/process.cpp]]
-    [[src/config/value.cpp]]
-    [[src/config/parser.cpp]]
-    [[src/config/table_reader.cpp]]
-    [[src/config/build_configuration.cpp]]
+    [[src/kaixa.cpp]]
+    [[src/model/file_set.cpp]]
+    [[src/model/graph.cpp]]
     [[src/model/manifest.cpp]]
     [[src/model/manifest_writer.cpp]]
-    [[src/model/graph.cpp]]
-    [[src/workspace/loader.cpp]]
-    [[src/build/executor.cpp]]
     [[src/services/build.cpp]]
-    [[src/services/run.cpp]]
     [[src/services/clean.cpp]]
+    [[src/services/run.cpp]]
+    [[src/workspace/loader.cpp]]
 )
 
 target_include_directories(kaixa_core PUBLIC
@@ -72,10 +73,10 @@ target_compile_features(kaixa_plugins PUBLIC cxx_std_23)
 set_target_properties(kaixa_plugins PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(kaixa
-    [[apps/kaixa/main.cpp]]
-    [[apps/kaixa/command_line.cpp]]
     [[apps/kaixa/application.cpp]]
+    [[apps/kaixa/command_line.cpp]]
     [[apps/kaixa/configuration_output.cpp]]
+    [[apps/kaixa/main.cpp]]
 )
 
 target_link_libraries(kaixa PRIVATE
@@ -87,48 +88,35 @@ target_compile_features(kaixa PRIVATE cxx_std_23)
 
 set_target_properties(kaixa PROPERTIES CXX_EXTENSIONS OFF)
 
-add_library(kaixa_test_support STATIC
-    [[tests/support/test_support.cpp]]
-)
-
-target_include_directories(kaixa_test_support PUBLIC
-    [[tests/support]]
-)
-
-target_link_libraries(kaixa_test_support PUBLIC
-    [[kaixa_core]]
-)
-
-target_compile_features(kaixa_test_support PUBLIC cxx_std_23)
-
-set_target_properties(kaixa_test_support PROPERTIES CXX_EXTENSIONS OFF)
-
 add_executable(kaixa_tests
-    [[tests/support/test_main.cpp]]
     [[apps/kaixa/command_line.cpp]]
-    [[tests/command_line.cpp]]
-    [[tests/smoke.cpp]]
-    [[tests/manifest.cpp]]
-    [[tests/configurations.cpp]]
     [[tests/build_operations.cpp]]
+    [[tests/command_line.cpp]]
+    [[tests/configurations.cpp]]
+    [[tests/manifest.cpp]]
     [[tests/run_and_clean.cpp]]
-    [[tests/workspace_fixtures.cpp]]
+    [[tests/smoke.cpp]]
+    [[tests/support/test_main.cpp]]
+    [[tests/support/test_support.cpp]]
     [[tests/workspace_errors.cpp]]
+    [[tests/workspace_fixtures.cpp]]
 )
 
 target_include_directories(kaixa_tests PRIVATE
+    [[tests/support]]
     [[apps/kaixa]]
 )
 
 target_link_libraries(kaixa_tests PRIVATE
     [[kaixa_core]]
     [[kaixa_plugins]]
-    [[kaixa_test_support]]
 )
 
 target_compile_features(kaixa_tests PRIVATE cxx_std_23)
 
 set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(kaixa_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 enable_testing()
 

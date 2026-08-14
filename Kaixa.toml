@@ -2,6 +2,7 @@
 name = "kaixa"
 version = "0.2.0-dev"
 resolver = "cmake"
+tests = ["tests"]
 
 [cmake]
 languages = ["CXX"]
@@ -13,24 +14,7 @@ output = { runtime = "bin", library = "lib", archive = "lib" }
 [[cmake.target]]
 name = "kaixa_core"
 type = "static-library"
-sources = [
-    "src/kaixa.cpp",
-    "src/foundation/diagnostic.cpp",
-    "src/foundation/filesystem.cpp",
-    "src/foundation/process.cpp",
-    "src/config/value.cpp",
-    "src/config/parser.cpp",
-    "src/config/table_reader.cpp",
-    "src/config/build_configuration.cpp",
-    "src/model/manifest.cpp",
-    "src/model/manifest_writer.cpp",
-    "src/model/graph.cpp",
-    "src/workspace/loader.cpp",
-    "src/build/executor.cpp",
-    "src/services/build.cpp",
-    "src/services/run.cpp",
-    "src/services/clean.cpp",
-]
+sources = ["src/**/*.cpp"]
 public-include-directories = ["include"]
 system-include-directories = ["third_party"]
 compile-definitions = ["TOML_EXCEPTIONS=0"]
@@ -38,13 +22,7 @@ compile-definitions = ["TOML_EXCEPTIONS=0"]
 [[cmake.target]]
 name = "kaixa_plugins"
 type = "static-library"
-sources = [
-    "plugins/bundle/src/plugins.cpp",
-    "plugins/cmake/src/configuration.cpp",
-    "plugins/cmake/src/file_api.cpp",
-    "plugins/cmake/src/resolver.cpp",
-    "plugins/cmake/src/testing.cpp",
-]
+sources = ["plugins/**/*.cpp"]
 public-include-directories = [
     "plugins/bundle/include",
     "plugins/cmake/include",
@@ -54,44 +32,5 @@ public-link-libraries = ["kaixa_core"]
 [[cmake.target]]
 name = "kaixa"
 type = "executable"
-sources = [
-    "apps/kaixa/main.cpp",
-    "apps/kaixa/command_line.cpp",
-    "apps/kaixa/application.cpp",
-    "apps/kaixa/configuration_output.cpp",
-]
+sources = ["apps/kaixa/*.cpp"]
 link-libraries = ["kaixa_core", "kaixa_plugins"]
-
-[[cmake.target]]
-name = "kaixa_test_support"
-type = "static-library"
-sources = ["tests/support/test_support.cpp"]
-public-include-directories = ["tests/support"]
-public-link-libraries = ["kaixa_core"]
-
-[[cmake.target]]
-name = "kaixa_tests"
-type = "executable"
-sources = [
-    "tests/support/test_main.cpp",
-    "apps/kaixa/command_line.cpp",
-    "tests/command_line.cpp",
-    "tests/smoke.cpp",
-    "tests/manifest.cpp",
-    "tests/configurations.cpp",
-    "tests/build_operations.cpp",
-    "tests/run_and_clean.cpp",
-    "tests/workspace_fixtures.cpp",
-    "tests/workspace_errors.cpp",
-]
-include-directories = ["apps/kaixa"]
-link-libraries = [
-    "kaixa_core",
-    "kaixa_plugins",
-    "kaixa_test_support",
-]
-
-[[cmake.test]]
-name = "kaixa"
-target = "kaixa_tests"
-discover = true

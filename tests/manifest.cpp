@@ -4,6 +4,7 @@
 #include <kaixa/plugin/bundle.hpp>
 
 #include <cstddef>
+#include <ranges>
 #include <string>
 #include <utility>
 
@@ -55,10 +56,114 @@ KAIXA_TEST(manifest_rejects_unknown_keys) {
     }
 }
 
+KAIXA_TEST(file_sets_expand_globs_and_keep_literal_generated_files) {
+    const TempDirectory root("file-set");
+    root.write("src/first.cpp", "");
+    root.write("src/nested/second.cpp", "");
+    root.write("src/generated/ignored.cpp", "");
+    root.write("src/not-a-source.hpp", "");
+
+    kaixa::FileSet files;
+    files.include = {"src/**/*.cpp", "generated.cpp"};
+    files.exclude = {"src/generated/**"};
+    const auto expanded = kaixa::expand_file_set(files, root.path(), root.path());
+    context.check(expanded.has_value(), "file set expands");
+    if (!expanded) {
+        context.fail(kaixa::format_diagnostic(expanded.error()));
+        return;
+    }
+
+    context.check_equal(expanded->size(), std::size_t{3}, "matched and literal file count");
+    context.check(
+        std::ranges::find(*expanded, std::filesystem::path("src/first.cpp")) != expanded->end(),
+        "direct match is included"
+    );
+    context.check(
+        std::ranges::find(*expanded, std::filesystem::path("src/nested/second.cpp")) != expanded->end(),
+        "recursive match is included"
+    );
+    context.check(
+        std::ranges::find(*expanded, std::filesystem::path("generated.cpp")) != expanded->end(),
+        "literal generated file is preserved"
+    );
+}
+
+KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
+    const auto manifest = kaixa::parse_manifest_string(
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "tests = [\"tests\"]\n"
+        "examples = [\"examples/*\"]\n"
+        "\n"
+        "[test]\n"
+        "sources = [\"tests/*.cpp\"]\n"
+        "discover = true\n"
+        "\n"
+        "[test.cmake]\n"
+        "link-libraries = [\"support\"]\n"
+        "\n"
+        "[benchmarks]\n"
+        "sources = [\"benchmarks/*.cpp\"]\n",
+        "target-manifest"
+    );
+
+    context.check(manifest.has_value(), "target manifest parses");
+    if (!manifest) {
+        context.fail(kaixa::format_diagnostic(manifest.error()));
+        return;
+    }
+
+    context.check_equal(manifest->target_references.size(), std::size_t{2}, "reference count");
+    context.check_equal(manifest->targets.size(), std::size_t{2}, "inline target group count");
+    context.check(manifest->targets[0].discover, "test discovery is retained");
+    context.check(!manifest->targets[0].each_source, "singular test is grouped");
+    context.check(manifest->targets[1].each_source, "plural benchmarks are per source");
+    context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
+}
+
+KAIXA_TEST(package_targets_do_not_silently_ignore_unavailable_features) {
+    const TempDirectory root("target-features");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[example]\n"
+        "sources = [\"example.cpp\"]\n"
+        "required-features = [\"graphics\"]\n"
+    );
+    root.write("example.cpp", "int main() { return 0; }\n");
+
+    const auto graph = kaixa::load_workspace(root.path());
+    context.check(!graph.has_value(), "unsupported feature requirement is rejected");
+    if (!graph) {
+        context.check_contains(
+            kaixa::format_diagnostic(graph.error()),
+            "cannot be evaluated yet",
+            "diagnostic prevents a misleading build"
+        );
+    }
+}
+
 KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     kaixa::Manifest authored{"app", "cmake"};
     authored.version = kaixa::Version{"0.1.0"};
     authored.dependencies.emplace_back("math", "../math");
+    authored.target_references.push_back({
+        kaixa::PackageTargetKind::test,
+        "tests",
+        {}
+    });
+    kaixa::PackageTarget examples;
+    examples.kind = kaixa::PackageTargetKind::example;
+    examples.each_source = true;
+    examples.sources.include = {"examples/*.cpp"};
+    examples.resolver_options = kaixa::Value::table({
+        {"link-libraries", kaixa::Value::array({"app"})}
+    });
+    authored.targets.push_back(std::move(examples));
     authored.configurations.defaults.push_back("dev");
 
     kaixa::ConfigurationDefinition dev;
@@ -90,6 +195,8 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     }
     context.check_contains(*text, "[[config]]", "canonical configuration syntax");
     context.check_contains(*text, "[[cmake.target]]", "canonical target syntax");
+    context.check_contains(*text, "tests = [\"tests\"]", "target manifest references format");
+    context.check_contains(*text, "[examples]", "package targets format");
 
     const auto parsed = kaixa::parse_manifest_string(*text, "generated-manifest");
     context.check(parsed.has_value(), "formatted manifest parses");
@@ -109,6 +216,8 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
         "configuration round-trips"
     );
     context.check(parsed->resolver_options.has_value(), "resolver options round-trip");
+    context.check_equal(parsed->target_references.size(), std::size_t{1}, "target reference round-trips");
+    context.check_equal(parsed->targets.size(), std::size_t{1}, "package target round-trips");
 }
 
 KAIXA_TEST(programmatic_manifest_rejects_invalid_data) {

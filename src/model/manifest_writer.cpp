@@ -55,6 +55,36 @@ namespace kaixa {
             return is_bare_key(name) ? std::string(name) : toml_string(name);
         }
 
+        std::string_view target_section(const PackageTarget& target) {
+            switch (target.kind) {
+                case PackageTargetKind::test: return target.each_source ? "tests" : "test";
+                case PackageTargetKind::example: return target.each_source ? "examples" : "example";
+                case PackageTargetKind::benchmark:
+                    return target.each_source ? "benchmarks" : "benchmark";
+            }
+            return "target";
+        }
+
+        std::string_view reference_key(const PackageTargetKind kind) {
+            switch (kind) {
+                case PackageTargetKind::test: return "tests";
+                case PackageTargetKind::example: return "examples";
+                case PackageTargetKind::benchmark: return "benchmarks";
+            }
+            return "targets";
+        }
+
+        void append_strings(std::string& output, const std::string_view name, const std::vector<std::string>& values) {
+            output += key(name) + " = [";
+            for (std::size_t index = 0; index < values.size(); ++index) {
+                if (index != 0)
+                    output += ", ";
+
+                output += toml_string(values[index]);
+            }
+            output += "]\n";
+        }
+
         Result<std::string> format_value(const Value& value) {
             if (const bool* boolean = value.as_boolean())
                 return *boolean ? "true" : "false";
@@ -120,6 +150,7 @@ namespace kaixa {
             const std::vector<TableEntry>* entries = value.as_table();
             if (!entries)
                 return std::unexpected(error("manifest resolver settings must be a table"));
+
             for (std::size_t index = 0; index < entries->size(); ++index) {
                 const TableEntry& entry = (*entries)[index];
                 const auto duplicate = std::ranges::find_if(
@@ -135,6 +166,7 @@ namespace kaixa {
                 auto formatted = format_value(entry.value);
                 if (!formatted)
                     return std::unexpected(formatted.error());
+
                 output += key(entry.key) + " = " + *formatted + '\n';
             }
             return {};
@@ -142,6 +174,56 @@ namespace kaixa {
 
         void append_header(std::string& output, std::initializer_list<std::string_view> path);
         void append_array_header(std::string& output, std::initializer_list<std::string_view> path);
+
+        Result<void> append_package_target(
+            std::string& output,
+            const PackageTarget& target,
+            const std::string_view resolver,
+            const bool repeated
+        ) {
+            const std::string_view section = target_section(target);
+            if (repeated)
+                append_array_header(output, {section});
+            else
+                append_header(output, {section});
+
+            if (target.name)
+                output += "name = " + toml_string(*target.name) + '\n';
+
+            if (target.display_name)
+                output += "display-name = " + toml_string(*target.display_name) + '\n';
+
+            if (target.description)
+                output += "description = " + toml_string(*target.description) + '\n';
+
+            if (target.category)
+                output += "category = " + toml_string(*target.category) + '\n';
+
+            append_strings(output, "sources", target.sources.include);
+            if (!target.sources.exclude.empty())
+                append_strings(output, "source-excludes", target.sources.exclude);
+
+            if (!target.required_features.empty())
+                append_strings(output, "required-features", target.required_features);
+
+            if (!target.arguments.empty())
+                append_strings(output, "arguments", target.arguments);
+
+            if (target.discover)
+                output += "discover = true\n";
+
+            if (target.hidden)
+                output += "hidden = true\n";
+
+            if (target.resolver_options) {
+                append_header(output, {section, resolver});
+                auto appended = append_table(output, *target.resolver_options);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+
+            return {};
+        }
 
         Result<void> append_resolver_document(
             std::string& output,
@@ -202,13 +284,16 @@ namespace kaixa {
         void append_header(std::string& output, const std::initializer_list<std::string_view> path) {
             if (!output.empty() && output.back() != '\n')
                 output.push_back('\n');
+
             if (!output.empty())
                 output.push_back('\n');
+
             output.push_back('[');
             bool first = true;
             for (const std::string_view component: path) {
                 if (!first)
                     output.push_back('.');
+
                 output += key(component);
                 first = false;
             }
@@ -238,8 +323,10 @@ namespace kaixa {
         Result<void> validate_manifest(const Manifest& manifest) {
             if (!is_valid_identifier(manifest.name))
                 return std::unexpected(error("invalid package name `" + manifest.name + "`"));
+
             if (!is_valid_identifier(manifest.resolver))
                 return std::unexpected(error("invalid resolver name `" + manifest.resolver + "`"));
+
             if (manifest.version && manifest.version->text.empty())
                 return std::unexpected(error("package version cannot be empty"));
 
@@ -247,8 +334,10 @@ namespace kaixa {
                 const DependencySpec& dependency = manifest.dependencies[index];
                 if (!is_valid_identifier(dependency.name))
                     return std::unexpected(error("invalid dependency name `" + dependency.name + "`"));
+
                 if (dependency.path.empty())
                     return std::unexpected(error("dependency `" + dependency.name + "` has an empty path"));
+
                 const auto duplicate = std::ranges::find_if(
                     manifest.dependencies.begin(),
                     manifest.dependencies.begin() + static_cast<std::ptrdiff_t>(index),
@@ -260,10 +349,29 @@ namespace kaixa {
             if (manifest.resolver_options && !manifest.resolver_options->is_table())
                 return std::unexpected(error("manifest resolver options must be a table"));
 
+            for (const PackageTargetReference& reference: manifest.target_references) {
+                if (reference.path.empty())
+                    return std::unexpected(error("package target manifest path cannot be empty"));
+            }
+            for (const PackageTarget& target: manifest.targets) {
+                if (target.name && !is_valid_identifier(*target.name))
+                    return std::unexpected(error("invalid package target name `" + *target.name + "`"));
+
+                if (target.sources.include.empty())
+                    return std::unexpected(error("package target requires source patterns"));
+
+                if (target.resolver_options && !target.resolver_options->is_table()) {
+                    return std::unexpected(error(
+                        "package target resolver options must be a table"
+                    ));
+                }
+            }
+
             for (std::size_t index = 0; index < manifest.configurations.definitions.size(); ++index) {
                 const ConfigurationDefinition& configuration = manifest.configurations.definitions[index];
                 if (configuration.name.empty())
                     return std::unexpected(error("build configuration name cannot be empty"));
+
                 const auto duplicate = std::ranges::find_if(
                     manifest.configurations.definitions.begin(),
                     manifest.configurations.definitions.begin() + static_cast<std::ptrdiff_t>(index),
@@ -323,7 +431,22 @@ namespace kaixa {
         std::string output = "[package]\nname = " + toml_string(manifest.name) + '\n';
         if (manifest.version)
             output += "version = " + toml_string(manifest.version->text) + '\n';
+
         output += "resolver = " + toml_string(manifest.resolver) + '\n';
+
+        for (const PackageTargetKind kind: {
+                 PackageTargetKind::test,
+                 PackageTargetKind::example,
+                 PackageTargetKind::benchmark
+             }) {
+            std::vector<std::string> paths;
+            for (const PackageTargetReference& reference: manifest.target_references) {
+                if (reference.kind == kind)
+                    paths.push_back(reference.path.generic_string());
+            }
+            if (!paths.empty())
+                append_strings(output, reference_key(kind), paths);
+        }
 
         if (!manifest.dependencies.empty()) {
             append_header(output, {"dependencies"});
@@ -340,6 +463,7 @@ namespace kaixa {
                 for (std::size_t index = 0; index < manifest.configurations.defaults.size(); ++index) {
                     if (index != 0)
                         output += ", ";
+
                     output += toml_string(manifest.configurations.defaults[index]);
                 }
                 output += "]\n";
@@ -350,6 +474,7 @@ namespace kaixa {
                 output += "name = " + toml_string(configuration.name) + '\n';
                 if (configuration.profile)
                     output += "profile = " + toml_string(*configuration.profile) + '\n';
+
                 for (const ResolverConfigurationDefinition& resolver: configuration.resolvers) {
                     append_header(output, {"config", resolver.resolver});
                     auto appended = append_table(output, resolver.settings);
@@ -368,6 +493,24 @@ namespace kaixa {
             if (!appended)
                 return std::unexpected(appended.error());
         }
+
+        for (const PackageTarget& target: manifest.targets) {
+            const std::string_view section = target_section(target);
+            const std::size_t count = static_cast<std::size_t>(std::ranges::count_if(
+                manifest.targets,
+                [&](const PackageTarget& candidate) {
+                    return target_section(candidate) == section;
+                }
+            ));
+            auto appended = append_package_target(
+                output,
+                target,
+                manifest.resolver,
+                count > 1
+            );
+            if (!appended)
+                return std::unexpected(appended.error());
+        }
         return output;
     }
 
@@ -375,6 +518,7 @@ namespace kaixa {
         auto contents = format_manifest(manifest);
         if (!contents)
             return std::unexpected(contents.error());
+
         return write_file(path, *contents);
     }
 }

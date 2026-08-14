@@ -2,8 +2,10 @@
 #include "testing.hpp"
 
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/model/file_set.hpp>
 
 #include <algorithm>
+#include <array>
 #include <string_view>
 #include <utility>
 
@@ -58,7 +60,9 @@ namespace kaixa::plugin::cmake::detail {
         Result<TargetOptions> read_target(
             std::string name,
             TableReader& target,
-            const std::optional<std::int64_t> default_standard
+            const std::optional<std::int64_t> default_standard,
+            const std::filesystem::path& source_root,
+            const std::filesystem::path& output_root
         ) {
             TargetOptions result;
             result.name = std::move(name);
@@ -87,7 +91,23 @@ namespace kaixa::plugin::cmake::detail {
             auto sources = string_array(target, "sources");
             if (!sources)
                 return std::unexpected(sources.error());
-            result.sources = std::move(*sources);
+
+            auto source_excludes = string_array(target, "source-excludes");
+            if (!source_excludes)
+                return std::unexpected(source_excludes.error());
+
+            FileSet source_files{
+                std::move(*sources),
+                std::move(*source_excludes),
+                {},
+                target.location_of("sources")
+            };
+            auto expanded_sources = expand_file_set(source_files, source_root, output_root);
+            if (!expanded_sources)
+                return std::unexpected(expanded_sources.error());
+
+            for (const std::filesystem::path& source: *expanded_sources)
+                result.sources.push_back(source.generic_string());
 
             auto includes = string_array(target, "include-directories");
             if (!includes)
@@ -287,16 +307,110 @@ namespace kaixa::plugin::cmake::detail {
             }
             return result;
         }
+
+        Result<TargetOptions> read_package_target(
+            const PackageTarget& declared,
+            const std::optional<std::int64_t> default_standard,
+            const std::filesystem::path& project_root
+        ) {
+            std::vector<TableEntry> entries;
+            if (declared.resolver_options) {
+                const std::vector<TableEntry>* options = declared.resolver_options->as_table();
+                if (!options)
+                    return std::unexpected(error_at(declared.location, "CMake target options must be a table"));
+
+                entries = *options;
+            }
+
+            constexpr std::array path_fields{
+                std::string_view("include-directories"),
+                std::string_view("public-include-directories"),
+                std::string_view("system-include-directories"),
+                std::string_view("public-system-include-directories")
+            };
+            for (TableEntry& entry: entries) {
+                if (std::ranges::find(path_fields, entry.key) == path_fields.end())
+                    continue;
+
+                const std::vector<Value>* values = entry.value.as_array();
+                if (!values)
+                    continue;
+
+                std::vector<Value> normalized;
+                normalized.reserve(values->size());
+                for (const Value& value: *values) {
+                    const std::string* text = value.as_string();
+                    if (!text || text->starts_with("$<") || std::filesystem::path(*text).is_absolute()) {
+                        normalized.push_back(value);
+                        continue;
+                    }
+
+                    const std::filesystem::path absolute =
+                        declared.source.parent_path() / std::filesystem::path(*text);
+                    normalized.push_back(Value::string(
+                        absolute.lexically_relative(project_root).lexically_normal().generic_string(),
+                        value.location()
+                    ));
+                }
+                entry.value = Value::array(std::move(normalized), entry.value.location());
+            }
+
+            for (const std::string_view reserved: {"name", "type", "sources", "source-excludes"}) {
+                if (std::ranges::any_of(entries, [&](const TableEntry& entry) {
+                        return entry.key == reserved;
+                    })) {
+                    return std::unexpected(error_at(
+                        declared.location,
+                        "`" + std::string(reserved)
+                            + "` is defined by the package target and cannot appear in its CMake options"
+                    ));
+                }
+            }
+
+            std::vector<Value> sources;
+            sources.reserve(declared.sources.files.size());
+            for (const std::filesystem::path& source: declared.sources.files)
+                sources.emplace_back(source.generic_string());
+
+            entries.push_back({"type", Value("executable")});
+            entries.push_back({"sources", Value::array(std::move(sources))});
+
+            Value document = Value::table(std::move(entries), declared.location);
+            auto table_result = TableReader::bind(document, "cmake");
+            if (!table_result)
+                return std::unexpected(table_result.error());
+
+            TableReader table = std::move(*table_result);
+            auto target = read_target(
+                *declared.name,
+                table,
+                default_standard,
+                project_root,
+                project_root
+            );
+            if (!target)
+                return std::unexpected(target.error());
+
+            auto finished = table.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+
+            return target;
+        }
     }
 
     Result<Options> read_options(const Graph& graph, const PackageNode& package) {
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
-        if (!package.manifest || !package.manifest->resolver_options)
+        if (!package.manifest)
             return result;
 
-        auto options_result = TableReader::bind(*package.manifest->resolver_options, "cmake");
+        const Value empty_options = Value::table({});
+        const Value& resolver_options = package.manifest->resolver_options
+            ? *package.manifest->resolver_options
+            : empty_options;
+        auto options_result = TableReader::bind(resolver_options, "cmake");
         if (!options_result)
             return std::unexpected(options_result.error());
         TableReader options = std::move(*options_result);
@@ -447,7 +561,13 @@ namespace kaixa::plugin::cmake::detail {
                 ));
             }
 
-            auto target = read_target(std::move(name), table, *default_standard);
+            auto target = read_target(
+                std::move(name),
+                table,
+                *default_standard,
+                result.source,
+                result.source
+            );
             if (!target)
                 return std::unexpected(target.error());
 
@@ -460,7 +580,13 @@ namespace kaixa::plugin::cmake::detail {
         };
 
         if (direct_target) {
-            auto target = read_target(package.name, options, *default_standard);
+            auto target = read_target(
+                package.name,
+                options,
+                *default_standard,
+                result.source,
+                result.source
+            );
             if (!target)
                 return std::unexpected(target.error());
 
@@ -584,6 +710,39 @@ namespace kaixa::plugin::cmake::detail {
                     return std::unexpected(appended.error());
             }
             tests.take_all();
+        }
+
+        for (const PackageTarget& declared: package.manifest->resolved_targets) {
+            if (!declared.name) {
+                return std::unexpected(error_at(
+                    declared.location,
+                    "package target was not normalized before CMake interpretation"
+                ));
+            }
+            if (std::ranges::any_of(result.targets, [&](const TargetOptions& target) {
+                    return target.name == *declared.name;
+                })) {
+                return std::unexpected(error_at(
+                    declared.location,
+                    "duplicate CMake target `" + *declared.name + "`"
+                ));
+            }
+
+            auto target = read_package_target(declared, *default_standard, result.source);
+            if (!target)
+                return std::unexpected(target.error());
+
+            target->default_build = false;
+            result.targets.push_back(std::move(*target));
+
+            if (declared.kind == PackageTargetKind::test) {
+                result.tests.push_back({
+                    declared.display_name.value_or(*declared.name),
+                    *declared.name,
+                    declared.arguments,
+                    declared.discover
+                });
+            }
         }
 
         auto dependencies_result = options.optional_table("dependencies");
@@ -863,6 +1022,10 @@ namespace kaixa::plugin::cmake::detail {
                     + " cxx_std_" + std::to_string(*target.cxx_standard) + ")\n\n";
                 output += "set_target_properties(" + target.name
                     + " PROPERTIES CXX_EXTENSIONS OFF)\n\n";
+            }
+            if (!target.default_build) {
+                output += "set_target_properties(" + target.name
+                    + " PROPERTIES EXCLUDE_FROM_ALL TRUE)\n\n";
             }
         }
 

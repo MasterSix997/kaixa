@@ -56,6 +56,7 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<std::string> compile_options;
         std::vector<std::string> public_compile_options;
         std::optional<std::int64_t> cxx_standard;
+        bool default_build = true;
     };
 
     struct TestOptions {

@@ -1,7 +1,10 @@
 #include <kaixa/workspace/loader.hpp>
 
+#include <kaixa/model/file_set.hpp>
 #include <kaixa/model/manifest.hpp>
 
+#include <algorithm>
+#include <cctype>
 #include <system_error>
 #include <utility>
 
@@ -38,6 +41,137 @@ namespace kaixa {
                     "cannot canonicalize directory `" + path.string() + "`: " + failure.message()
                 ));
             return canonical;
+        }
+
+        std::string target_kind_name(const PackageTargetKind kind) {
+            switch (kind) {
+                case PackageTargetKind::test: return "test";
+                case PackageTargetKind::example: return "example";
+                case PackageTargetKind::benchmark: return "benchmark";
+            }
+            return "target";
+        }
+
+        std::string default_target_name(const std::string& package, const PackageTargetKind kind) {
+            switch (kind) {
+                case PackageTargetKind::test: return package + "_tests";
+                case PackageTargetKind::example: return package + "_example";
+                case PackageTargetKind::benchmark: return package + "_benchmarks";
+            }
+            return package + "_target";
+        }
+
+        std::string identifier_from_path(std::filesystem::path path) {
+            path.replace_extension();
+            std::string result = path.generic_string();
+            for (char& character: result) {
+                const auto byte = static_cast<unsigned char>(character);
+                if (!std::isalnum(byte) && character != '_' && character != '-')
+                    character = '_';
+            }
+            return result;
+        }
+
+        Result<void> normalize_package_targets(Manifest& manifest, const std::filesystem::path& package_directory) {
+            std::vector<PackageTarget> declarations = manifest.targets;
+            for (const PackageTargetReference& reference: manifest.target_references) {
+                std::filesystem::path declared = reference.path;
+                if (declared.filename() != "Kaixa.toml")
+                    declared /= "Kaixa.toml";
+
+                FileSet manifests;
+                manifests.include.push_back(declared.generic_string());
+                manifests.location = reference.location;
+                auto files = expand_file_set(manifests, package_directory, package_directory);
+                if (!files)
+                    return std::unexpected(files.error());
+
+                for (const std::filesystem::path& relative: *files) {
+                    auto targets = parse_package_targets_file(package_directory / relative, reference.kind, manifest.resolver);
+                    if (!targets)
+                        return std::unexpected(targets.error());
+
+                    declarations.insert(
+                        declarations.end(),
+                        std::make_move_iterator(targets->begin()),
+                        std::make_move_iterator(targets->end())
+                    );
+                }
+            }
+
+            std::vector<PackageTarget> normalized;
+            for (PackageTarget& declared: declarations) {
+                if (!declared.required_features.empty()) {
+                    return std::unexpected(error_at(
+                        declared.location,
+                        "required package features cannot be evaluated yet"
+                    ));
+                }
+                if (declared.kind != PackageTargetKind::test
+                    && (declared.discover || !declared.arguments.empty())) {
+                    return std::unexpected(error_at(
+                        declared.location,
+                        "discovery and execution arguments are currently supported only for tests"
+                    ));
+                }
+
+                const std::filesystem::path source_directory = declared.source.parent_path();
+                auto files = expand_file_set(
+                    declared.sources,
+                    source_directory,
+                    package_directory
+                );
+                if (!files)
+                    return std::unexpected(files.error());
+
+                declared.sources.files = std::move(*files);
+
+                if (!declared.each_source) {
+                    if (!declared.name)
+                        declared.name = default_target_name(manifest.name, declared.kind);
+
+                    normalized.push_back(std::move(declared));
+                    continue;
+                }
+
+                const std::string prefix = declared.name.value_or(
+                    manifest.name + "_" + target_kind_name(declared.kind)
+                );
+                const std::filesystem::path relative_source_directory =
+                    source_directory.lexically_relative(package_directory);
+                for (const std::filesystem::path& file: declared.sources.files) {
+                    PackageTarget target = declared;
+                    target.each_source = false;
+                    target.sources.include = {file.generic_string()};
+                    target.sources.exclude.clear();
+                    target.sources.files = {file};
+
+                    std::filesystem::path local = file.lexically_relative(relative_source_directory);
+                    if (local.empty())
+                        local = file.filename();
+
+                    target.name = prefix + "_" + identifier_from_path(local);
+                    normalized.push_back(std::move(target));
+                }
+            }
+
+            for (std::size_t index = 0; index < normalized.size(); ++index) {
+                const auto duplicate = std::ranges::find_if(
+                    normalized.begin(),
+                    normalized.begin() + static_cast<std::ptrdiff_t>(index),
+                    [&](const PackageTarget& candidate) {
+                        return candidate.name == normalized[index].name;
+                    }
+                );
+                if (duplicate != normalized.begin() + static_cast<std::ptrdiff_t>(index)) {
+                    return std::unexpected(error_at(
+                        normalized[index].location,
+                        "duplicate package target `" + *normalized[index].name + "`"
+                    ));
+                }
+            }
+            manifest.resolved_targets = std::move(normalized);
+            return {};
         }
 
         class WorkspaceLoader {
@@ -87,6 +221,10 @@ namespace kaixa {
                             + "` points to package `" + manifest.name + "`"
                     ));
                 }
+
+                auto targets = normalize_package_targets(manifest, directory);
+                if (!targets)
+                    return std::unexpected(targets.error());
 
                 if (const auto same_name = m_graph.find_by_name(manifest.name)) {
                     return std::unexpected(error_at(

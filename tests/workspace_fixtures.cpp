@@ -701,3 +701,118 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
         );
     }
 }
+
+KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
+    const kaixa::testing::TempDirectory workspace("package-targets");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "tests = [\"tests\"]\n"
+        "examples = [\"examples/*\"]\n"
+        "benchmarks = [\"benchmarks\"]\n"
+        "\n"
+        "[example]\n"
+        "sources = [\"inline.cpp\"]\n"
+    );
+    workspace.write("inline.cpp", "int main() { return 0; }\n");
+    workspace.write(
+        "tests/Kaixa.toml",
+        "[test]\n"
+        "sources = [\"*.cpp\"]\n"
+    );
+    workspace.write("tests/main.cpp", "int main() { return 0; }\n");
+    workspace.write(
+        "examples/rendering/Kaixa.toml",
+        "[examples]\n"
+        "sources = [\"*.cpp\"]\n"
+        "category = \"Rendering\"\n"
+    );
+    workspace.write("examples/rendering/first.cpp", "int main() { return 0; }\n");
+    workspace.write("examples/rendering/second.cpp", "int main() { return 0; }\n");
+    workspace.write(
+        "benchmarks/Kaixa.toml",
+        "[benchmark]\n"
+        "sources = [\"*.cpp\"]\n"
+    );
+    workspace.write("benchmarks/main.cpp", "int main() { return 0; }\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "workspace with package targets loads");
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::Manifest& manifest = *(*graph)[graph->root()].manifest;
+    context.check_equal(manifest.targets.size(), std::size_t{1}, "inline declaration is preserved");
+    context.check_equal(manifest.resolved_targets.size(), std::size_t{5}, "targets are normalized");
+    context.check(
+        std::ranges::all_of(manifest.resolved_targets, [](const kaixa::PackageTarget& target) {
+            return target.name.has_value() && !target.each_source && !target.sources.files.empty();
+        }),
+        "resolver receives concrete named targets"
+    );
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        "debug"
+    };
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "package targets plan through CMake");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto generated = std::ranges::find_if(
+        plan->generated_files(),
+        [&](const kaixa::GeneratedFile& file) {
+            return file.path == workspace.path() / "CMakeLists.txt";
+        }
+    );
+    context.check(generated != plan->generated_files().end(), "source CMakeLists is generated");
+    if (generated == plan->generated_files().end())
+        return;
+
+    context.check_contains(generated->content, "add_executable(app_example", "inline example target");
+    context.check_contains(generated->content, "add_executable(app_tests", "external test target");
+    context.check_contains(
+        generated->content,
+        "add_executable(app_example_first",
+        "first discovered example target"
+    );
+    context.check_contains(
+        generated->content,
+        "add_executable(app_example_second",
+        "second discovered example target"
+    );
+    context.check_contains(generated->content, "add_executable(app_benchmarks", "benchmark target");
+    context.check_contains(generated->content, "add_test(NAME [[app_tests]]", "test registration");
+    context.check_contains(
+        generated->content,
+        "set_target_properties(app_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)",
+        "package targets stay outside the default build"
+    );
+
+    const auto test_plan = kaixa::plan_tests(*graph, registry, environment, {});
+    context.check(test_plan.has_value(), "official tests plan");
+    if (test_plan) {
+        const auto build = std::ranges::find_if(
+            test_plan->actions(),
+            [](const kaixa::Action& action) {
+                return action.stage == kaixa::ActionStage::build;
+            }
+        );
+        context.check(build != test_plan->actions().end(), "test build action exists");
+        if (build != test_plan->actions().end()) {
+            context.check(
+                std::ranges::find(build->argv, "app_tests") != build->argv.end(),
+                "test command builds the excluded test target"
+            );
+        }
+    }
+}
