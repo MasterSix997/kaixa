@@ -39,6 +39,9 @@ namespace kaixa {
         [[nodiscard]] std::span<const LocalPackageCandidate> candidates() const noexcept {
             return m_candidates;
         }
+        [[nodiscard]] std::span<const std::filesystem::path> context_manifests() const noexcept {
+            return m_context_manifests;
+        }
 
     private:
         struct Scope {
@@ -59,6 +62,7 @@ namespace kaixa {
         [[nodiscard]] Result<void> add_candidate(std::size_t scope, std::size_t candidate);
 
         std::vector<LocalPackageCandidate> m_candidates;
+        std::vector<std::filesystem::path> m_context_manifests;
         std::vector<Scope> m_scopes;
         std::map<std::filesystem::path, std::size_t> m_set_scopes;
         std::map<std::filesystem::path, std::size_t> m_package_scopes;

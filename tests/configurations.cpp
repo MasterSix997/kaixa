@@ -12,6 +12,58 @@
 
 using kaixa::testing::TempDirectory;
 
+KAIXA_TEST(configuration_document_reads_provider_definitions) {
+    const TempDirectory root("provider-configuration-document");
+    root.write(
+        "config.toml",
+        "[build]\n"
+        "default-configs = [\"debug\"]\n"
+        "\n"
+        "[[config]]\n"
+        "name = \"debug\"\n"
+        "profile = \"debug\"\n"
+        "\n"
+        "[providers.engine]\n"
+        "driver = \"path\"\n"
+        "default = true\n"
+        "path = \"../engine\"\n"
+    );
+
+    const auto document = kaixa::parse_configuration_document_file(root.path() / "config.toml");
+    context.check(document.has_value(), "configuration document parses");
+    if (!document) {
+        context.fail(kaixa::format_diagnostic(document.error()));
+        return;
+    }
+
+    context.check_equal(document->configurations.definitions.size(), std::size_t{1}, "build configuration count");
+    context.check_equal(document->providers.size(), std::size_t{1}, "provider count");
+    const kaixa::ProviderDefinition& provider = document->providers.front();
+    context.check_equal(provider.name, std::string("engine"), "provider name");
+    context.check_equal(provider.driver, std::string("path"), "provider driver");
+    context.check(provider.is_default, "default provider flag");
+    const kaixa::Value* path = provider.options.find("path");
+    context.check(path && path->as_string() && *path->as_string() == "../engine", "opaque provider options");
+}
+
+KAIXA_TEST(provider_default_must_be_a_boolean) {
+    const TempDirectory root("provider-default-type");
+    root.write(
+        "config.toml",
+        "[providers.engine]\n"
+        "driver = \"path\"\n"
+        "default = \"yes\"\n"
+        "path = \"../engine\"\n"
+    );
+
+    const auto document = kaixa::parse_configuration_document_file(root.path() / "config.toml");
+    context.check(!document.has_value(), "invalid provider default is rejected");
+    if (document)
+        return;
+
+    context.check_contains(document.error().message, "provider `default` must be a boolean", "type diagnostic");
+}
+
 KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     const TempDirectory root("build-configurations");
     root.write(

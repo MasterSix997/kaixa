@@ -19,8 +19,9 @@ namespace kaixa {
 
     struct ResolutionOptions {
         std::span<const std::string> packages;
-        const ExtensionRegistry* extensions = nullptr;
+        ExtensionRegistry* extensions = nullptr;
         std::filesystem::path source_cache;
+        std::span<const ProviderLayer> provider_layers;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

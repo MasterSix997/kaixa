@@ -50,6 +50,7 @@ namespace kaixa::cli {
         Result<void> append_configuration_file(
             std::vector<ConfigurationSet>& layers,
             std::vector<ConfigurationSource>& sources,
+            std::vector<ProviderLayer>& provider_layers,
             std::string name,
             const std::filesystem::path& path
         ) {
@@ -71,12 +72,18 @@ namespace kaixa::cli {
                 ));
             }
 
-            auto configuration = parse_configuration_file(path);
-            if (!configuration)
-                return std::unexpected(configuration.error());
+            auto document = parse_configuration_document_file(path);
+            if (!document)
+                return std::unexpected(document.error());
 
-            sources.push_back({std::move(name), *configuration});
-            layers.push_back(std::move(*configuration));
+            sources.push_back({std::move(name), document->configurations});
+            layers.push_back(std::move(document->configurations));
+            if (!document->providers.empty()) {
+                provider_layers.push_back({
+                    std::move(document->providers),
+                    ProviderContext{path.parent_path()}
+                });
+            }
             return {};
         }
 
@@ -87,10 +94,40 @@ namespace kaixa::cli {
         }
 
         Result<Workspace> open_workspace(const WorkspaceOptions& options) {
+            auto manifest = find_manifest(options.path);
+            if (!manifest)
+                return std::unexpected(manifest.error());
+
+            const std::filesystem::path directory = manifest->parent_path();
+            std::vector<ConfigurationSet> external_layers;
+            std::vector<ConfigurationSource> external_sources;
+            std::vector<ProviderLayer> provider_layers;
+            if (const auto user = user_configuration_path()) {
+                auto loaded = append_configuration_file(
+                    external_layers,
+                    external_sources,
+                    provider_layers,
+                    "user",
+                    *user
+                );
+                if (!loaded)
+                    return std::unexpected(loaded.error());
+            }
+
+            auto local = append_configuration_file(
+                external_layers,
+                external_sources,
+                provider_layers,
+                "local",
+                directory / "Kaixa.user.toml"
+            );
+            if (!local)
+                return std::unexpected(local.error());
+
             ExtensionRegistry registry = plugin::default_registry();
             auto resolved = resolve_workspace(
                 options.path,
-                ResolutionOptions{options.packages, &registry, {}}
+                ResolutionOptions{options.packages, &registry, {}, provider_layers}
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
@@ -104,26 +141,12 @@ namespace kaixa::cli {
                 }
             }
 
-            const std::filesystem::path directory = resolved->manifest.parent_path();
             std::vector<ConfigurationSet> layers;
             std::vector<ConfigurationSource> sources;
             sources.push_back({"manifest", resolved->configurations});
             layers.push_back(resolved->configurations);
-
-            if (const auto user = user_configuration_path()) {
-                auto loaded = append_configuration_file(layers, sources, "user", *user);
-                if (!loaded)
-                    return std::unexpected(loaded.error());
-            }
-
-            auto local = append_configuration_file(
-                layers,
-                sources,
-                "local",
-                directory / "Kaixa.user.toml"
-            );
-            if (!local)
-                return std::unexpected(local.error());
+            layers.insert(layers.end(), external_layers.begin(), external_layers.end());
+            sources.insert(sources.end(), external_sources.begin(), external_sources.end());
 
             auto configuration = resolve_configurations(
                 layers,
@@ -258,6 +281,21 @@ namespace kaixa::cli {
             }
             for (const PackageId dependency: package.dependencies)
                 print_package(graph, dependency, depth + 1, verbose);
+        }
+
+        void print_providers(const ExtensionRegistry& registry) {
+            if (registry.providers().empty())
+                return;
+
+            std::cout << "providers:\n";
+            for (const auto& provider: registry.providers()) {
+                const ProviderInfo info = provider->info();
+                std::cout << "  " << info.name << ": " << info.driver;
+                if (info.is_default)
+                    std::cout << " (default)";
+
+                std::cout << '\n';
+            }
         }
 
         std::string_view state_name(const GeneratedFileState state) {
@@ -751,16 +789,12 @@ namespace kaixa::cli {
 
         int run(const InspectCommand& command) {
             if (command.mode == InspectMode::packages) {
-                ExtensionRegistry registry = plugin::default_registry();
-                auto resolved = resolve_workspace(
-                    command.workspace.path,
-                    ResolutionOptions{command.workspace.packages, &registry, {}}
-                );
-                if (!resolved)
-                    return fail(resolved.error());
+                auto workspace = open_workspace(command.workspace);
+                if (!workspace)
+                    return fail(workspace.error());
 
-                for (const PackageId root: resolved->graph.roots())
-                    print_package(resolved->graph, root, 0, command.verbose);
+                for (const PackageId root: workspace->graph.roots())
+                    print_package(workspace->graph, root, 0, command.verbose);
                 return 0;
             }
 
@@ -777,6 +811,7 @@ namespace kaixa::cli {
                     workspace->environment.workspace,
                     command.verbose
                 );
+                print_providers(workspace->registry);
                 return 0;
             }
 
@@ -1266,6 +1301,7 @@ namespace kaixa::cli {
                 workspace->environment.workspace,
                 command.verbose
             );
+            print_providers(workspace->registry);
             return 0;
         }
 

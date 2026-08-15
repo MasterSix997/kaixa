@@ -113,6 +113,7 @@ namespace kaixa {
         std::optional<Manifest> package;
         std::optional<PackageSet> package_set;
         ConfigurationSet configurations;
+        std::vector<ProviderDefinition> providers;
         std::filesystem::path source;
     };
 

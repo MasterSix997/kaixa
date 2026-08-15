@@ -129,6 +129,9 @@ namespace kaixa {
             directory = parent;
         }
 
+        result.m_context_manifests.assign(containers.rbegin(), containers.rend());
+        result.m_context_manifests.push_back(selected);
+
         if (!containers.empty()) {
             auto indexed = result.index_scope(containers.back(), std::nullopt);
             if (!indexed)

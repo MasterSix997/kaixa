@@ -175,9 +175,12 @@ namespace kaixa {
         class WorkspaceLoader {
         public:
             WorkspaceLoader(
-                const ExtensionRegistry* extensions,
-                std::filesystem::path source_cache
-            ) : m_extensions(extensions), m_source_cache(std::move(source_cache)) {
+                ExtensionRegistry* extensions,
+                std::filesystem::path source_cache,
+                const std::span<const ProviderLayer> provider_layers
+            ) : m_extensions(extensions),
+                m_source_cache(std::move(source_cache)),
+                m_provider_layers(provider_layers) {
             }
 
             Result<PackageResolution> load(const std::filesystem::path& manifest_path, const std::span<const std::string> selected_packages) {
@@ -199,6 +202,10 @@ namespace kaixa {
                     return std::unexpected(packages.error());
 
                 m_packages = std::move(*packages);
+
+                auto providers = configure_context_providers();
+                if (!providers)
+                    return std::unexpected(providers.error());
 
                 auto roots = selected_packages.empty()
                     ? load_default_packages(selected, *document)
@@ -222,6 +229,29 @@ namespace kaixa {
             }
 
         private:
+            Result<void> configure_context_providers() {
+                std::vector<ProviderLayer> layers;
+                for (const std::filesystem::path& manifest: m_packages.context_manifests()) {
+                    auto document = parse_manifest_document_file(manifest);
+                    if (!document)
+                        return std::unexpected(document.error());
+                    if (!document->providers.empty()) {
+                        layers.push_back({
+                            std::move(document->providers),
+                            ProviderContext{manifest.parent_path()}
+                        });
+                    }
+                }
+                layers.insert(layers.end(), m_provider_layers.begin(), m_provider_layers.end());
+                if (layers.empty())
+                    return {};
+
+                if (!m_extensions)
+                    return std::unexpected(error("provider configuration requires an extension registry"));
+
+                return configure_providers(*m_extensions, layers);
+            }
+
             Result<std::vector<PackageId>> load_default_packages(const std::filesystem::path& manifest_path, const ManifestDocument& document) {
                 if (document.package) {
                     auto root = load_managed(manifest_path, std::nullopt, {});
@@ -865,8 +895,9 @@ namespace kaixa {
 
             Graph m_graph;
             PackageIndex m_packages;
-            const ExtensionRegistry* m_extensions = nullptr;
+            ExtensionRegistry* m_extensions = nullptr;
             std::filesystem::path m_source_cache;
+            std::span<const ProviderLayer> m_provider_layers;
         };
     }
 
@@ -906,7 +937,7 @@ namespace kaixa {
     }
 
     Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const std::span<const std::string> selected_packages) {
-        return resolve_workspace(start, ResolutionOptions{selected_packages, nullptr, {}});
+        return resolve_workspace(start, ResolutionOptions{selected_packages, nullptr, {}, {}});
     }
 
     Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options) {
@@ -917,7 +948,7 @@ namespace kaixa {
         const std::filesystem::path source_cache = options.source_cache.empty()
             ? manifest->parent_path() / ".kaixa" / "sources"
             : options.source_cache;
-        WorkspaceLoader loader(options.extensions, source_cache);
+        WorkspaceLoader loader(options.extensions, source_cache, options.provider_layers);
         return loader.load(*manifest, options.packages);
     }
 }

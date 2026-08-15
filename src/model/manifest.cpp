@@ -688,6 +688,12 @@ namespace kaixa {
         if (result.package)
             result.package->configurations = result.configurations;
 
+        auto providers = read_provider_definitions(root);
+        if (!providers)
+            return std::unexpected(providers.error());
+
+        result.providers = std::move(*providers);
+
         auto root_finished = root.finish();
         if (!root_finished)
             return std::unexpected(root_finished.error());

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kaixa/config/provider_configuration.hpp>
 #include <kaixa/config/table_reader.hpp>
 #include <kaixa/config/value.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
@@ -30,6 +31,11 @@ namespace kaixa {
         std::vector<ConfigurationDefinition> definitions;
     };
 
+    struct ConfigurationDocument {
+        ConfigurationSet configurations;
+        std::vector<ProviderDefinition> providers;
+    };
+
     struct ResolverArgumentOverride {
         std::string resolver;
         std::vector<std::string> arguments;
@@ -58,6 +64,7 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<ConfigurationSet> read_configuration_set(TableReader& root);
+    [[nodiscard]] Result<ConfigurationDocument> parse_configuration_document_file(const std::filesystem::path& path);
     [[nodiscard]] Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path);
     [[nodiscard]] Result<EffectiveBuildConfiguration> resolve_configurations(
         std::span<const ConfigurationSet> layers,

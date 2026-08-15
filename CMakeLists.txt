@@ -19,8 +19,10 @@ add_library(kaixa_core STATIC
     [[src/build/executor.cpp]]
     [[src/config/build_configuration.cpp]]
     [[src/config/parser.cpp]]
+    [[src/config/provider_configuration.cpp]]
     [[src/config/table_reader.cpp]]
     [[src/config/value.cpp]]
+    [[src/extension/provider.cpp]]
     [[src/foundation/diagnostic.cpp]]
     [[src/foundation/filesystem.cpp]]
     [[src/foundation/process.cpp]]
@@ -59,6 +61,7 @@ add_library(kaixa_plugins STATIC
     [[plugins/cmake/src/file_api.cpp]]
     [[plugins/cmake/src/resolver.cpp]]
     [[plugins/cmake/src/testing.cpp]]
+    [[plugins/path/src/provider.cpp]]
     [[plugins/path/src/source.cpp]]
 )
 

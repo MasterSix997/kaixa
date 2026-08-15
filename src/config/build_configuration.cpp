@@ -258,7 +258,7 @@ namespace kaixa {
         return result;
     }
 
-    Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path) {
+    Result<ConfigurationDocument> parse_configuration_document_file(const std::filesystem::path& path) {
         auto document = parse_file(path);
         if (!document)
             return std::unexpected(document.error());
@@ -270,10 +270,22 @@ namespace kaixa {
         auto configurations = read_configuration_set(root);
         if (!configurations)
             return std::unexpected(configurations.error());
+
+        auto providers = read_provider_definitions(root);
+        if (!providers)
+            return std::unexpected(providers.error());
+
         auto finished = root.finish();
         if (!finished)
             return std::unexpected(finished.error());
-        return configurations;
+        return ConfigurationDocument{std::move(*configurations), std::move(*providers)};
+    }
+
+    Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path) {
+        auto document = parse_configuration_document_file(path);
+        if (!document)
+            return std::unexpected(document.error());
+        return std::move(document->configurations);
     }
 
     Result<EffectiveBuildConfiguration> resolve_configurations(

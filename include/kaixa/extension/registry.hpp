@@ -25,6 +25,10 @@ namespace kaixa {
             m_providers.push_back(std::move(provider));
         }
 
+        void add(std::unique_ptr<ProviderDriver> driver) {
+            m_provider_drivers.push_back(std::move(driver));
+        }
+
         [[nodiscard]] Resolver* find_resolver(std::string_view name) const {
             for (const auto& resolver: m_resolvers) {
                 if (resolver->info().name == name)
@@ -49,6 +53,51 @@ namespace kaixa {
             return nullptr;
         }
 
+        [[nodiscard]] ProviderDriver* find_provider_driver(std::string_view name) const {
+            for (const auto& driver: m_provider_drivers) {
+                if (driver->info().name == name)
+                    return driver.get();
+            }
+            return nullptr;
+        }
+
+        Result<void> configure_provider(const ProviderDefinition& definition, const ProviderContext& context) {
+            if (!is_valid_identifier(definition.name))
+                return std::unexpected(error_at(definition.location, "invalid provider name `" + definition.name + "`"));
+            if (!is_valid_identifier(definition.driver))
+                return std::unexpected(error_at(definition.location, "invalid provider driver name `" + definition.driver + "`"));
+
+            ProviderDriver* driver = find_provider_driver(definition.driver);
+            if (!driver) {
+                return std::unexpected(error_at(
+                    definition.location,
+                    "provider driver `" + definition.driver + "` is not installed"
+                ));
+            }
+            if (find_provider(definition.name)) {
+                return std::unexpected(error_at(
+                    definition.location,
+                    "provider `" + definition.name + "` is already configured"
+                ));
+            }
+
+            auto provider = driver->create(definition, context);
+            if (!provider)
+                return std::unexpected(provider.error());
+
+            const ProviderInfo configured = (*provider)->info();
+            if (configured.name != definition.name || configured.driver != definition.driver
+                || configured.is_default != definition.is_default) {
+                return std::unexpected(error_at(
+                    definition.location,
+                    "provider driver `" + definition.driver + "` returned inconsistent metadata"
+                ));
+            }
+
+            m_providers.push_back(std::move(*provider));
+            return {};
+        }
+
         [[nodiscard]] std::span<const std::unique_ptr<Resolver>> resolvers() const noexcept {
             return m_resolvers;
         }
@@ -61,10 +110,15 @@ namespace kaixa {
             return m_providers;
         }
 
+        [[nodiscard]] std::span<const std::unique_ptr<ProviderDriver>> provider_drivers() const noexcept {
+            return m_provider_drivers;
+        }
+
     private:
         std::vector<std::unique_ptr<Resolver>> m_resolvers;
         std::vector<std::unique_ptr<SourceDriver>> m_source_drivers;
         std::vector<std::unique_ptr<PackageProvider>> m_providers;
+        std::vector<std::unique_ptr<ProviderDriver>> m_provider_drivers;
     };
 
 }

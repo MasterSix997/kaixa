@@ -139,7 +139,7 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
     extensions.add(std::make_unique<TestSourceDriver>());
     const auto resolved = kaixa::resolve_workspace(
         root.path(),
-        kaixa::ResolutionOptions{{}, &extensions, {}}
+        kaixa::ResolutionOptions{{}, &extensions, {}, {}}
     );
     context.check(resolved.has_value(), "direct source resolves");
     if (!resolved) {
@@ -210,6 +210,212 @@ KAIXA_TEST(path_dependency_opens_a_local_package_set_directly) {
     );
 }
 
+KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
+    const TempDirectory root("configured-path-provider");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "engine = \"1\"\n"
+    );
+    root.write(
+        "repository/Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"packages/*\"]\n"
+    );
+    root.write(
+        "repository/packages/engine/Kaixa.toml",
+        "[package]\n"
+        "name = \"engine\"\n"
+        "version = \"1.3.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    kaixa::ProviderDefinition provider{
+        "local-engine",
+        "path",
+        true,
+        kaixa::Value::table({
+            {"path", "repository"}
+        }),
+        {}
+    };
+    const auto configured = extensions.configure_provider(provider, {root.path()});
+    context.check(configured.has_value(), "path provider configures");
+    if (!configured) {
+        context.fail(kaixa::format_diagnostic(configured.error()));
+        return;
+    }
+
+    const auto resolved = kaixa::resolve_workspace(
+        root.path(),
+        kaixa::ResolutionOptions{{}, &extensions, {}, {}}
+    );
+    context.check(resolved.has_value(), "configured path provider resolves");
+    if (!resolved) {
+        context.fail(kaixa::format_diagnostic(resolved.error()));
+        return;
+    }
+
+    const std::optional<kaixa::PackageId> engine_id = resolved->graph.find_by_name("engine");
+    context.check(engine_id.has_value(), "provider package enters the graph");
+    if (!engine_id)
+        return;
+
+    const kaixa::PackageNode& engine = resolved->graph[*engine_id];
+    context.check(engine.source.has_value(), "provider source metadata is retained");
+    if (!engine.source)
+        return;
+
+    context.check_equal(engine.source->provider.value_or(""), std::string("local-engine"), "configured provider name");
+    context.check_equal(engine.source->locator.driver, std::string("path"), "configured source driver");
+}
+
+KAIXA_TEST(provider_configuration_rejects_an_unknown_driver) {
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    kaixa::ProviderDefinition provider{
+        "company",
+        "missing",
+        false,
+        kaixa::Value::table({}),
+        {}
+    };
+
+    const auto configured = extensions.configure_provider(provider, {});
+    context.check(!configured.has_value(), "unknown provider driver is rejected");
+    if (configured)
+        return;
+
+    context.check_contains(configured.error().message, "provider driver `missing` is not installed", "driver diagnostic");
+}
+
+KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
+    const TempDirectory root("package-set-provider-context");
+    root.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"packages/*\"]\n"
+        "default = [\"app\"]\n"
+        "\n"
+        "[providers.engine]\n"
+        "driver = \"path\"\n"
+        "default = true\n"
+        "path = \"repository\"\n"
+    );
+    root.write(
+        "packages/app/Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "engine = \"1\"\n"
+    );
+    root.write(
+        "repository/Kaixa.toml",
+        "[package]\n"
+        "name = \"engine\"\n"
+        "version = \"1.5.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const auto resolved = kaixa::resolve_workspace(
+        root.path() / "packages/app",
+        kaixa::ResolutionOptions{{}, &extensions, {}, {}}
+    );
+    context.check(resolved.has_value(), "ancestor provider resolves from a nested package");
+    if (!resolved) {
+        context.fail(kaixa::format_diagnostic(resolved.error()));
+        return;
+    }
+
+    const std::optional<kaixa::PackageId> engine_id = resolved->graph.find_by_name("engine");
+    context.check(engine_id.has_value(), "provider dependency enters the graph");
+    if (!engine_id)
+        return;
+
+    const kaixa::PackageNode& engine = resolved->graph[*engine_id];
+    context.check(engine.source && engine.source->provider == "engine", "ancestor provider is retained");
+}
+
+KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
+    const TempDirectory root("provider-layer-override");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "engine = \"1\"\n"
+        "\n"
+        "[providers.engine]\n"
+        "driver = \"path\"\n"
+        "default = true\n"
+        "path = \"missing\"\n"
+    );
+    root.write(
+        "repository/Kaixa.toml",
+        "[package]\n"
+        "name = \"engine\"\n"
+        "version = \"1.1.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    kaixa::ProviderLayer local{
+        {
+            {
+                "engine",
+                "path",
+                true,
+                kaixa::Value::table({
+                    {"path", "repository"}
+                }),
+                {}
+            }
+        },
+        {root.path()}
+    };
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const std::vector<kaixa::ProviderLayer> layers{local};
+    const auto resolved = kaixa::resolve_workspace(
+        root.path(),
+        kaixa::ResolutionOptions{{}, &extensions, {}, layers}
+    );
+    context.check(resolved.has_value(), "local provider replaces the published definition");
+    if (!resolved)
+        context.fail(kaixa::format_diagnostic(resolved.error()));
+}
+
+KAIXA_TEST(provider_layers_reject_multiple_defaults) {
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const std::vector<kaixa::ProviderLayer> layers{
+        {
+            {
+                {"first", "path", true, kaixa::Value::table({{"path", "first"}}), {}},
+                {"second", "path", true, kaixa::Value::table({{"path", "second"}}), {}}
+            },
+            {}
+        }
+    };
+
+    const auto configured = kaixa::configure_providers(extensions, layers);
+    context.check(!configured.has_value(), "multiple default providers are rejected");
+    if (configured)
+        return;
+
+    context.check_contains(
+        configured.error().message,
+        "more than one default package provider is configured",
+        "default provider diagnostic"
+    );
+}
+
 KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
     const TempDirectory root("default-package-provider");
     root.write(
@@ -255,7 +461,7 @@ KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
     ));
     const auto resolved = kaixa::resolve_workspace(
         root.path(),
-        kaixa::ResolutionOptions{{}, &extensions, {}}
+        kaixa::ResolutionOptions{{}, &extensions, {}, {}}
     );
     context.check(resolved.has_value(), "default provider resolves");
     if (!resolved) {
@@ -316,7 +522,7 @@ KAIXA_TEST(explicit_provider_overrides_the_default_route) {
 
     const auto resolved = kaixa::resolve_workspace(
         root.path(),
-        kaixa::ResolutionOptions{{}, &extensions, {}}
+        kaixa::ResolutionOptions{{}, &extensions, {}, {}}
     );
     context.check(resolved.has_value(), "explicit provider resolves");
     if (!resolved) {
