@@ -26,7 +26,7 @@ KAIXA_TEST(toml_errors_keep_the_source_position) {
     }
 }
 
-KAIXA_TEST(manifest_requires_a_resolver_and_local_dependency_table) {
+KAIXA_TEST(manifest_requires_a_resolver_and_reads_version_shorthand) {
     const auto missing_resolver = kaixa::parse_manifest_string(
         "[package]\nname = \"app\"\n",
         "missing-resolver.toml"
@@ -42,17 +42,12 @@ KAIXA_TEST(manifest_requires_a_resolver_and_local_dependency_table) {
 
     const auto shorthand = kaixa::parse_manifest_string(
         "[package]\nname = \"app\"\nresolver = \"cmake\"\n"
-        "\n[dependencies]\nmath = \"../math\"\n",
+        "\n[dependencies]\nmath = \"0.4\"\n",
         "dependency.toml"
     );
-    context.check(!shorthand.has_value(), "dependency shorthand is not accepted yet");
-    if (!shorthand) {
-        context.check_contains(
-            kaixa::format_diagnostic(shorthand.error()),
-            "local dependencies",
-            "diagnostic explains the local dependency syntax"
-        );
-    }
+    context.check(shorthand.has_value(), "version shorthand is accepted");
+    if (shorthand)
+        context.check_equal(shorthand->dependencies.front().request.version->text, std::string("0.4"), "version requirement");
 }
 
 KAIXA_TEST(find_manifest_walks_from_a_nested_file) {
@@ -135,7 +130,7 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
 
     const std::span<const kaixa::Action> actions = plan->actions();
     const std::vector<std::string>& command = actions.front().argv;
-    const std::filesystem::path source = (*graph)[graph->root()].directory / "project";
+    const std::filesystem::path source = (*graph)[graph->roots().front()].directory / "project";
     context.check(
         std::ranges::find(command, "Ninja") != command.end(),
         "requested generator is forwarded"

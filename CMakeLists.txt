@@ -29,10 +29,12 @@ add_library(kaixa_core STATIC
     [[src/model/graph.cpp]]
     [[src/model/manifest.cpp]]
     [[src/model/manifest_writer.cpp]]
+    [[src/model/version.cpp]]
     [[src/services/build.cpp]]
     [[src/services/clean.cpp]]
     [[src/services/run.cpp]]
     [[src/workspace/loader.cpp]]
+    [[src/workspace/package_index.cpp]]
 )
 
 target_include_directories(kaixa_core PUBLIC
@@ -94,6 +96,7 @@ add_executable(kaixa_tests
     [[tests/command_line.cpp]]
     [[tests/configurations.cpp]]
     [[tests/manifest.cpp]]
+    [[tests/package_sets.cpp]]
     [[tests/run_and_clean.cpp]]
     [[tests/smoke.cpp]]
     [[tests/support/test_main.cpp]]

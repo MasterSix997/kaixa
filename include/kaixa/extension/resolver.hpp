@@ -30,10 +30,17 @@ namespace kaixa {
         TestMode mode = TestMode::run;
     };
 
+    struct PackageBuildRequest {
+        PackageId package;
+        std::vector<std::string> targets;
+        bool build_default = false;
+    };
+
     struct BuildRequest {
         std::vector<std::string> targets;
         std::optional<std::size_t> jobs;
         bool build_default = true;
+        std::vector<PackageBuildRequest> packages;
     };
 
     struct RunTarget {

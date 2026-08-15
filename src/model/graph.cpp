@@ -8,9 +8,16 @@ namespace kaixa {
     PackageId Graph::add(PackageNode node) {
         node.id = PackageId{m_nodes.size()};
         m_nodes.push_back(std::move(node));
-        if (m_nodes.size() == 1)
-            m_root = m_nodes.front().id;
         return m_nodes.back().id;
+    }
+
+    bool Graph::is_root(const PackageId id) const noexcept {
+        return std::ranges::find(m_roots, id) != m_roots.end();
+    }
+
+    void Graph::add_root(const PackageId id) {
+        if (!is_root(id))
+            m_roots.push_back(id);
     }
 
     const PackageNode& Graph::operator[](const PackageId id) const {
@@ -36,6 +43,15 @@ namespace kaixa {
     }
 
     Result<std::vector<PackageId>> Graph::build_order() const {
+        std::vector<PackageId> packages;
+        packages.reserve(m_nodes.size());
+        for (const PackageNode& node: m_nodes)
+            packages.push_back(node.id);
+
+        return build_order(packages);
+    }
+
+    Result<std::vector<PackageId>> Graph::build_order(const std::span<const PackageId> roots) const {
         enum class State {
             unseen,
             visiting,
@@ -83,8 +99,8 @@ namespace kaixa {
             return {};
         };
 
-        for (const PackageNode& node: m_nodes) {
-            auto result = visit(node.id);
+        for (const PackageId root: roots) {
+            auto result = visit(root);
             if (!result)
                 return std::unexpected(result.error());
         }

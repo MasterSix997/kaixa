@@ -605,7 +605,7 @@ namespace kaixa::plugin::cmake {
                 cmake_build_root(environment, variant.directory) / package.name;
             const std::filesystem::path output =
                 environment.state_root / "build" / variant.directory;
-            const std::filesystem::path metadata = package.id == graph.root()
+            const std::filesystem::path metadata = graph.roots().size() == 1 && graph.is_root(package.id)
                 ? directory.parent_path() / "variant.toml"
                 : directory.parent_path() / ".variants" / (package.name + ".toml");
             return BuildContext{
@@ -750,7 +750,7 @@ namespace kaixa::plugin::cmake {
                 if (!install)
                     return std::unexpected(install.error());
 
-                if (package.id != graph.root() && !*install)
+                if (!graph.is_root(package.id) && !*install)
                     return {};
 
                 auto context = prepare_build_context(graph, package, environment);
@@ -765,7 +765,7 @@ namespace kaixa::plugin::cmake {
                     context->metadata,
                     variant_metadata(environment, *context)
                 });
-                if (package.id == graph.root()) {
+                if (graph.is_root(package.id)) {
                     plan.output({package.id, "cmake", context->output});
                 }
 
@@ -891,7 +891,7 @@ namespace kaixa::plugin::cmake {
                 configure.inputs.push_back(context->metadata);
                 configure.inputs.push_back(integration_file);
                 configure.argv.push_back("-DKAIXA_CMAKE_PREFIX_PATH=" + join_prefixes(prefixes));
-                if (package.id == graph.root()) {
+                if (graph.is_root(package.id)) {
                     const std::string output = context->output.generic_string();
                     if (context->project.runtime_output || context->project.library_output
                         || context->project.archive_output) {

@@ -33,7 +33,7 @@ KAIXA_TEST(manifest_reads_the_current_schema) {
     context.check_equal(manifest->dependencies.size(), std::size_t{1}, "dependency count");
     if (!manifest->dependencies.empty()) {
         context.check_equal(
-            manifest->dependencies.front().path.generic_string(),
+            manifest->dependencies.front().selection.path->generic_string(),
             std::string("../math"),
             "dependency path"
         );
@@ -125,7 +125,7 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
     context.check_equal(manifest->targets[0].dependencies.size(), std::size_t{1}, "target dependency count");
     context.check_equal(
-        manifest->targets[0].dependencies.front().name,
+        manifest->targets[0].dependencies.front().request.package,
         std::string("support"),
         "target dependency name"
     );
@@ -240,7 +240,7 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     }
     context.check_equal(parsed->name, authored.name, "package name round-trips");
     context.check_equal(
-        parsed->dependencies.front().name,
+        parsed->dependencies.front().request.package,
         std::string("math"),
         "dependency round-trips"
     );
@@ -324,10 +324,10 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
 KAIXA_TEST(graph_rejects_dependency_cycles) {
     kaixa::Graph graph;
     const kaixa::PackageId first = graph.add({
-        {}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}
+        {}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}
     });
     const kaixa::PackageId second = graph.add({
-        {}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}
+        {}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}
     });
     graph[first].dependencies.push_back(second);
     graph[second].dependencies.push_back(first);

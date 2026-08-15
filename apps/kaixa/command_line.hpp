@@ -17,6 +17,7 @@
 namespace kaixa::cli {
     struct WorkspaceOptions {
         std::filesystem::path path = ".";
+        std::vector<std::string> packages;
         std::optional<std::string> profile;
         std::vector<std::string> configurations;
         std::vector<ResolverArgumentOverride> resolver_arguments;

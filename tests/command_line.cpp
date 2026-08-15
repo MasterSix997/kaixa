@@ -12,6 +12,10 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
         std::string_view("build"),
         std::string_view("--path"),
         std::string_view("project"),
+        std::string_view("--package"),
+        std::string_view("editor"),
+        std::string_view("--package"),
+        std::string_view("game_runner"),
         std::string_view("--profile"),
         std::string_view("release"),
         std::string_view("--config"),
@@ -37,6 +41,8 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
         std::string("release"),
         "profile"
     );
+    context.check_equal(command->workspace.packages.size(), std::size_t{2}, "selected package count");
+    context.check_equal(command->workspace.packages.front(), std::string("editor"), "first selected package");
     context.check_equal(
         command->workspace.configurations.size(),
         std::size_t{1},

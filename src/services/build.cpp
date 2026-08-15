@@ -1,20 +1,37 @@
 #include <kaixa/services/build_service.hpp>
 
+#include <algorithm>
+#include <iterator>
+#include <utility>
+#include <vector>
+
 namespace kaixa {
     Result<std::vector<BuildProduct>> discover_products(
         const Graph& graph,
         const ResolverRegistry& registry,
         const BuildEnvironment& environment
     ) {
-        const PackageNode& root = graph[graph.root()];
-        Resolver* resolver = registry.find(root.resolver);
-        if (!resolver) {
-            return std::unexpected(error(
-                "resolver `" + root.resolver + "` is not installed"
-            ));
-        }
+        std::vector<BuildProduct> products;
+        for (const PackageId id: graph.roots()) {
+            const PackageNode& root = graph[id];
+            Resolver* resolver = registry.find(root.resolver);
+            if (!resolver) {
+                return std::unexpected(error(
+                    "resolver `" + root.resolver + "` is not installed"
+                ));
+            }
 
-        return resolver->products(graph, root, environment);
+            auto discovered = resolver->products(graph, root, environment);
+            if (!discovered)
+                return std::unexpected(discovered.error());
+
+            products.insert(
+                products.end(),
+                std::make_move_iterator(discovered->begin()),
+                std::make_move_iterator(discovered->end())
+            );
+        }
+        return products;
     }
 
     Result<BuildPlan> plan_build(
@@ -23,7 +40,39 @@ namespace kaixa {
         const BuildEnvironment& environment,
         const BuildRequest& request
     ) {
-        auto order = graph.build_order();
+        if (!request.targets.empty() && !request.packages.empty()) {
+            return std::unexpected(error(
+                "a build request cannot mix global and package-specific targets"
+            ));
+        }
+
+        std::vector<PackageId> selected_roots;
+        if (request.packages.empty()) {
+            selected_roots.assign(graph.roots().begin(), graph.roots().end());
+        } else {
+            selected_roots.reserve(request.packages.size());
+            for (const PackageBuildRequest& package: request.packages) {
+                if (!package.build_default && package.targets.empty()) {
+                    return std::unexpected(error(
+                        "package-specific build request selects neither default nor explicit targets"
+                    ));
+                }
+                if (!graph.is_root(package.package)) {
+                    return std::unexpected(error(
+                        "package-specific build request selects a package outside the roots"
+                    ));
+                }
+                if (std::ranges::find(selected_roots, package.package) != selected_roots.end()) {
+                    return std::unexpected(error(
+                        "package-specific build request selects the same package more than once"
+                    ));
+                }
+
+                selected_roots.push_back(package.package);
+            }
+        }
+
+        auto order = graph.build_order(selected_roots);
         if (!order)
             return std::unexpected(order.error());
 
@@ -45,7 +94,16 @@ namespace kaixa {
             }
 
             BuildRequest package_request = request;
-            if (id != graph.root()) {
+            package_request.packages.clear();
+            if (graph.is_root(id) && !request.packages.empty()) {
+                const auto selected = std::ranges::find(
+                    request.packages,
+                    id,
+                    &PackageBuildRequest::package
+                );
+                package_request.targets = selected->targets;
+                package_request.build_default = selected->build_default;
+            } else if (!graph.is_root(id)) {
                 package_request.targets.clear();
                 package_request.build_default = true;
             }
@@ -73,17 +131,19 @@ namespace kaixa {
         if (!plan)
             return std::unexpected(plan.error());
 
-        const PackageNode& root = graph[graph.root()];
-        Resolver* resolver = registry.find(root.resolver);
-        if (!resolver) {
-            return std::unexpected(error(
-                "resolver `" + root.resolver + "` is not installed"
-            ));
-        }
+        for (const PackageId id: graph.roots()) {
+            const PackageNode& root = graph[id];
+            Resolver* resolver = registry.find(root.resolver);
+            if (!resolver) {
+                return std::unexpected(error(
+                    "resolver `" + root.resolver + "` is not installed"
+                ));
+            }
 
-        auto planned = resolver->plan_tests(graph, root, environment, request, *plan);
-        if (!planned)
-            return std::unexpected(planned.error());
+            auto planned = resolver->plan_tests(graph, root, environment, request, *plan);
+            if (!planned)
+                return std::unexpected(planned.error());
+        }
 
         return plan;
     }

@@ -9,7 +9,7 @@
 
 namespace kaixa {
     namespace {
-        Result<DependencySpec> parse_dependency(const TableEntry& entry, const std::string& path);
+        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path);
 
         Result<std::string> read_identifier(TableReader& table, const std::string_view key) {
             auto value = table.string(key);
@@ -22,6 +22,20 @@ namespace kaixa {
                     "`" + *value + "` is not a valid name; use letters, digits, `_` and `-`"
                 ));
 
+            return *value;
+        }
+
+        Result<std::string> read_package_name(TableReader& table, const std::string_view key) {
+            auto value = table.string(key);
+            if (!value)
+                return std::unexpected(value.error());
+
+            if (!is_valid_package_name(*value)) {
+                return std::unexpected(error_at(
+                    table.location_of(key),
+                    "`" + *value + "` is not a valid package name"
+                ));
+            }
             return *value;
         }
 
@@ -70,12 +84,12 @@ namespace kaixa {
             return *boolean;
         }
 
-        Result<std::vector<DependencySpec>> read_dependencies(TableReader& table) {
+        Result<std::vector<DependencyBinding>> read_dependencies(TableReader& table) {
             auto dependencies_result = table.optional_table("dependencies");
             if (!dependencies_result)
                 return std::unexpected(dependencies_result.error());
 
-            std::vector<DependencySpec> result;
+            std::vector<DependencyBinding> result;
             if (!*dependencies_result)
                 return result;
 
@@ -325,36 +339,191 @@ namespace kaixa {
             return {};
         }
 
-        Result<DependencySpec> parse_dependency(const TableEntry& entry, const std::string& path) {
+        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path) {
             SourceLocation location = entry.value.location();
             location.config_path = path;
 
-            if (!is_valid_identifier(entry.key))
+            if (!is_valid_package_name(entry.key))
                 return std::unexpected(error_at(
                     location,
                     "`" + entry.key + "` is not a valid dependency name"
                 ));
 
+            DependencyBinding dependency;
+            dependency.request.package = entry.key;
+            dependency.location = location;
+
+            if (const std::string* shorthand = entry.value.as_string()) {
+                auto version = parse_version_requirement(*shorthand, location);
+                if (!version)
+                    return std::unexpected(version.error());
+
+                dependency.request.version = std::move(*version);
+                return dependency;
+            }
+
             auto table_result = TableReader::bind(entry.value, path);
             if (!table_result) {
                 return std::unexpected(std::move(table_result).error().add_note(
-                    "local dependencies must use `{ path = \"...\" }`"
+                    "dependencies use a version string or a dependency table"
                 ));
             }
             TableReader table = std::move(*table_result);
 
-            auto directory = table.string("path");
+            auto version = table.optional_string("version");
+            if (!version)
+                return std::unexpected(version.error());
+            if (*version) {
+                auto requirement = parse_version_requirement(**version, table.location_of("version"));
+                if (!requirement)
+                    return std::unexpected(requirement.error());
+
+                dependency.request.version = std::move(*requirement);
+            }
+
+            auto features = read_string_array(table, "features");
+            if (!features)
+                return std::unexpected(features.error());
+
+            dependency.request.features = std::move(*features);
+
+            auto optional = read_boolean(table, "optional");
+            if (!optional)
+                return std::unexpected(optional.error());
+
+            dependency.request.optional = *optional;
+
+            auto alias = table.optional_string("alias");
+            if (!alias)
+                return std::unexpected(alias.error());
+            if (*alias) {
+                if (!is_valid_identifier(**alias)) {
+                    return std::unexpected(error_at(
+                        table.location_of("alias"),
+                        "`" + **alias + "` is not a valid dependency alias"
+                    ));
+                }
+                dependency.alias = std::move(**alias);
+            }
+
+            auto provider = table.optional_string("from");
+            if (!provider)
+                return std::unexpected(provider.error());
+            if (*provider) {
+                if (!is_valid_identifier(**provider)) {
+                    return std::unexpected(error_at(
+                        table.location_of("from"),
+                        "`" + **provider + "` is not a valid provider name"
+                    ));
+                }
+                dependency.selection.provider = std::move(**provider);
+            }
+
+            auto directory = table.optional_string("path");
             if (!directory)
                 return std::unexpected(directory.error());
+            if (*directory) {
+                if ((*directory)->empty())
+                    return std::unexpected(error_at(table.location_of("path"), "path cannot be empty"));
 
-            if (directory->empty())
-                return std::unexpected(error_at(table.location_of("path"), "path cannot be empty"));
+                dependency.selection.path = std::filesystem::path(std::move(**directory));
+            }
+
+            constexpr std::array common_fields{
+                std::string_view{"version"},
+                std::string_view{"features"},
+                std::string_view{"optional"},
+                std::string_view{"alias"},
+                std::string_view{"from"},
+                std::string_view{"path"}
+            };
+            for (const TableEntry& field: table.entries()) {
+                if (std::ranges::find(common_fields, field.key) != common_fields.end())
+                    continue;
+
+                table.take(field.key);
+                if (!is_valid_identifier(field.key)) {
+                    return std::unexpected(error_at(
+                        field.value.location(),
+                        "`" + field.key + "` is not a valid source driver name"
+                    ));
+                }
+                if (!field.value.is_table()) {
+                    return std::unexpected(error_at(
+                        field.value.location(),
+                        "source driver `" + field.key + "` options must be a table"
+                    ));
+                }
+                if (dependency.selection.source) {
+                    return std::unexpected(error_at(
+                        field.value.location(),
+                        "dependency selects more than one direct source"
+                    ));
+                }
+                dependency.selection.source = SourceLocator{field.key, field.value};
+            }
+
+            if (dependency.selection.path && dependency.selection.source) {
+                return std::unexpected(error_at(
+                    location,
+                    "dependency cannot combine `path` with a source driver"
+                ));
+            }
+            if (dependency.selection.provider
+                && (dependency.selection.path || dependency.selection.source)) {
+                return std::unexpected(error_at(
+                    location,
+                    "dependency cannot combine `from` with a direct source"
+                ));
+            }
 
             auto finished = table.finish();
             if (!finished)
                 return std::unexpected(finished.error());
 
-            return DependencySpec{entry.key, std::filesystem::path(*directory), std::move(location)};
+            return dependency;
+        }
+
+        Result<PackageSet> parse_package_set(TableReader& table) {
+            PackageSet package_set;
+            package_set.location = table.location_of("members");
+
+            auto members = read_string_array(table, "members");
+            if (!members)
+                return std::unexpected(members.error());
+            if (members->empty()) {
+                return std::unexpected(error_at(
+                    table.location_of("members"),
+                    "a package set requires at least one member pattern"
+                ));
+            }
+            package_set.members = std::move(*members);
+
+            auto exclude = read_string_array(table, "exclude");
+            if (!exclude)
+                return std::unexpected(exclude.error());
+
+            package_set.exclude = std::move(*exclude);
+
+            auto defaults = read_string_array(table, "default");
+            if (!defaults)
+                return std::unexpected(defaults.error());
+
+            for (const std::string& name: *defaults) {
+                if (!is_valid_package_name(name)) {
+                    return std::unexpected(error_at(
+                        table.location_of("default"),
+                        "`" + name + "` is not a valid default package name"
+                    ));
+                }
+            }
+            package_set.defaults = std::move(*defaults);
+
+            auto finished = table.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+
+            return package_set;
         }
     }
 
@@ -368,6 +537,20 @@ namespace kaixa {
                 || (character >= '0' && character <= '9')
                 || character == '_'
                 || character == '-';
+        });
+    }
+
+    bool is_valid_package_name(const std::string_view name) noexcept {
+        if (name.empty() || name.front() == '-' || name.front() == '.')
+            return false;
+
+        return std::ranges::all_of(name, [](const char character) {
+            return (character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || character == '_'
+                || character == '-'
+                || character == '.';
         });
     }
 
@@ -385,140 +568,204 @@ namespace kaixa {
         });
     }
 
-    Result<Manifest> parse_manifest(const Value& document) {
+    Result<ManifestDocument> parse_manifest_document(const Value& document) {
         auto root_result = TableReader::bind(document);
         if (!root_result)
             return std::unexpected(root_result.error());
 
         TableReader root = std::move(*root_result);
 
-        auto package_result = root.table("package");
+        auto package_result = root.optional_table("package");
         if (!package_result)
             return std::unexpected(package_result.error());
 
-        TableReader package = std::move(*package_result);
+        ManifestDocument result;
+        if (*package_result) {
+            TableReader package = std::move(**package_result);
+            Manifest manifest;
 
-        Manifest manifest;
-        auto name = read_identifier(package, "name");
-        if (!name)
-            return std::unexpected(name.error());
+            auto name = read_package_name(package, "name");
+            if (!name)
+                return std::unexpected(name.error());
 
-        manifest.name = std::move(*name);
-        manifest.location = package.location_of("name");
+            manifest.name = std::move(*name);
+            manifest.location = package.location_of("name");
 
-        auto version = package.optional_string("version");
-        if (!version)
-            return std::unexpected(version.error());
+            auto version = package.optional_string("version");
+            if (!version)
+                return std::unexpected(version.error());
+            if (*version) {
+                auto parsed = parse_version(**version, package.location_of("version"));
+                if (!parsed)
+                    return std::unexpected(parsed.error());
 
-        if (*version) {
-            if ((*version)->empty())
-                return std::unexpected(error_at(
-                    package.location_of("version"),
-                    "version cannot be empty"
-                ));
-            manifest.version = Version{std::move(**version)};
+                manifest.version = std::move(*parsed);
+            }
+
+            auto resolver = read_identifier(package, "resolver");
+            if (!resolver)
+                return std::unexpected(resolver.error());
+
+            manifest.resolver = std::move(*resolver);
+
+            auto tests = read_target_references(
+                package,
+                "tests",
+                PackageTargetKind::test,
+                manifest.target_references
+            );
+            if (!tests)
+                return std::unexpected(tests.error());
+
+            auto examples = read_target_references(
+                package,
+                "examples",
+                PackageTargetKind::example,
+                manifest.target_references
+            );
+            if (!examples)
+                return std::unexpected(examples.error());
+
+            auto benchmarks = read_target_references(
+                package,
+                "benchmarks",
+                PackageTargetKind::benchmark,
+                manifest.target_references
+            );
+            if (!benchmarks)
+                return std::unexpected(benchmarks.error());
+
+            auto package_finished = package.finish();
+            if (!package_finished)
+                return std::unexpected(package_finished.error());
+
+            auto dependencies = read_dependencies(root);
+            if (!dependencies)
+                return std::unexpected(dependencies.error());
+
+            manifest.dependencies = std::move(*dependencies);
+
+            auto targets = parse_package_targets(root, manifest.resolver, manifest.targets);
+            if (!targets)
+                return std::unexpected(targets.error());
+
+            if (const Value* options = root.take(manifest.resolver)) {
+                if (!options->is_table()) {
+                    return std::unexpected(error_at(
+                        options->location(),
+                        "resolver options must be a table"
+                    ));
+                }
+                manifest.resolver_options = *options;
+            }
+            result.package = std::move(manifest);
         }
 
-        auto resolver = read_identifier(package, "resolver");
-        if (!resolver)
-            return std::unexpected(resolver.error());
+        auto package_set_result = root.optional_table("package-set");
+        if (!package_set_result)
+            return std::unexpected(package_set_result.error());
+        if (*package_set_result) {
+            TableReader package_set = std::move(**package_set_result);
+            auto parsed = parse_package_set(package_set);
+            if (!parsed)
+                return std::unexpected(parsed.error());
 
-        manifest.resolver = std::move(*resolver);
+            result.package_set = std::move(*parsed);
+        }
 
-        auto tests = read_target_references(
-            package,
-            "tests",
-            PackageTargetKind::test,
-            manifest.target_references
-        );
-        if (!tests)
-            return std::unexpected(tests.error());
-
-        auto examples = read_target_references(
-            package,
-            "examples",
-            PackageTargetKind::example,
-            manifest.target_references
-        );
-        if (!examples)
-            return std::unexpected(examples.error());
-
-        auto benchmarks = read_target_references(
-            package,
-            "benchmarks",
-            PackageTargetKind::benchmark,
-            manifest.target_references
-        );
-        if (!benchmarks)
-            return std::unexpected(benchmarks.error());
-
-        auto package_finished = package.finish();
-        if (!package_finished)
-            return std::unexpected(package_finished.error());
-
-        auto dependencies = read_dependencies(root);
-        if (!dependencies)
-            return std::unexpected(dependencies.error());
-
-        manifest.dependencies = std::move(*dependencies);
+        if (!result.package && !result.package_set) {
+            return std::unexpected(error_at(
+                document.location(),
+                "manifest requires a `[package]` or `[package-set]` table"
+            ));
+        }
 
         auto configurations = read_configuration_set(root);
         if (!configurations)
             return std::unexpected(configurations.error());
 
-        manifest.configurations = std::move(*configurations);
-
-        auto targets = parse_package_targets(root, manifest.resolver, manifest.targets);
-        if (!targets)
-            return std::unexpected(targets.error());
-
-        if (const Value* options = root.take(manifest.resolver)) {
-            if (!options->is_table()) {
-                return std::unexpected(error_at(
-                    options->location(),
-                    "resolver options must be a table"
-                ));
-            }
-            manifest.resolver_options = *options;
-        }
+        result.configurations = std::move(*configurations);
+        if (result.package)
+            result.package->configurations = result.configurations;
 
         auto root_finished = root.finish();
         if (!root_finished)
             return std::unexpected(root_finished.error());
 
-        return manifest;
+        return result;
     }
 
-    Result<Manifest> parse_manifest_file(const std::filesystem::path& path) {
+    Result<ManifestDocument> parse_manifest_document_file(const std::filesystem::path& path) {
         auto document = parse_file(path);
         if (!document)
             return std::unexpected(document.error());
 
-        auto manifest = parse_manifest(*document);
+        auto manifest = parse_manifest_document(*document);
         if (!manifest)
             return std::unexpected(manifest.error());
 
         manifest->source = path;
-        for (PackageTarget& target: manifest->targets)
-            target.source = path;
-
+        if (manifest->package) {
+            manifest->package->source = path;
+            for (PackageTarget& target: manifest->package->targets)
+                target.source = path;
+        }
         return manifest;
     }
 
-    Result<Manifest> parse_manifest_string(const std::string_view text, const std::string_view source_name) {
+    Result<ManifestDocument> parse_manifest_document_string(
+        const std::string_view text,
+        const std::string_view source_name
+    ) {
         auto document = parse_string(text, source_name);
         if (!document)
             return std::unexpected(document.error());
 
-        auto manifest = parse_manifest(*document);
+        auto manifest = parse_manifest_document(*document);
         if (!manifest)
             return std::unexpected(manifest.error());
 
         manifest->source = std::filesystem::path(source_name);
-        for (PackageTarget& target: manifest->targets)
-            target.source = manifest->source;
-
+        if (manifest->package) {
+            manifest->package->source = manifest->source;
+            for (PackageTarget& target: manifest->package->targets)
+                target.source = manifest->source;
+        }
         return manifest;
+    }
+
+    Result<Manifest> parse_manifest(const Value& document) {
+        auto parsed = parse_manifest_document(document);
+        if (!parsed)
+            return std::unexpected(parsed.error());
+        if (!parsed->package)
+            return std::unexpected(error_at(document.location(), "manifest does not declare a package"));
+
+        return std::move(*parsed->package);
+    }
+
+    Result<Manifest> parse_manifest_file(const std::filesystem::path& path) {
+        auto document = parse_manifest_document_file(path);
+        if (!document)
+            return std::unexpected(document.error());
+        if (!document->package)
+            return std::unexpected(error_at({}, "manifest `" + path.string() + "` does not declare a package"));
+
+        return std::move(*document->package);
+    }
+
+    Result<Manifest> parse_manifest_string(const std::string_view text, const std::string_view source_name) {
+        auto document = parse_manifest_document_string(text, source_name);
+        if (!document)
+            return std::unexpected(document.error());
+        if (!document->package) {
+            return std::unexpected(error_at(
+                {},
+                "manifest `" + std::string(source_name) + "` does not declare a package"
+            ));
+        }
+
+        return std::move(*document->package);
     }
 
     Result<std::vector<PackageTarget>> parse_package_targets_file(const std::filesystem::path& path, const PackageTargetKind kind, const std::string_view resolver) {

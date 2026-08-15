@@ -88,6 +88,16 @@ namespace kaixa::cli {
                 return true;
             }
 
+            if (option == "--package") {
+                parser.take();
+                auto value = parser.value(option);
+                if (!value)
+                    return std::unexpected(value.error());
+
+                options.packages.emplace_back(*value);
+                return true;
+            }
+
             if (option == "--profile") {
                 parser.take();
                 auto value = parser.value(option);
@@ -765,7 +775,8 @@ namespace kaixa::cli {
             << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
             << "        [--config name]... [--for resolver[.scope] <arguments...>]...\n"
             << "  kaixa config path [--path path]\n"
-            << "  Workspace builds accept --no-default-configs to replace configured defaults.\n"
+            << "  Build commands accept --no-default-configs to replace configured defaults.\n"
+            << "  Package-resolving commands accept --package name more than once.\n"
             << "  kaixa --version\n";
     }
 

@@ -52,6 +52,23 @@ KAIXA_TEST(run_target_selection_lists_available_targets_for_an_unknown_name) {
     }
 }
 
+KAIXA_TEST(run_target_selection_rejects_duplicate_names_across_packages) {
+    const std::array targets = {
+        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"first"}, {}}},
+        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"second"}, {}}}
+    };
+
+    const auto selected = kaixa::select_run_target(targets, std::string("app"), {});
+    context.check(!selected.has_value(), "duplicate runnable names are rejected");
+    if (!selected) {
+        context.check_contains(
+            kaixa::format_diagnostic(selected.error()),
+            "--package",
+            "diagnostic explains how to narrow the package"
+        );
+    }
+}
+
 KAIXA_TEST(clean_removes_only_planned_state) {
     const TempDirectory root("clean-plan");
     const std::filesystem::path state = root.path() / ".kaixa";

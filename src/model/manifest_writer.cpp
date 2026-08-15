@@ -175,6 +175,62 @@ namespace kaixa {
         void append_header(std::string& output, std::initializer_list<std::string_view> path);
         void append_array_header(std::string& output, std::initializer_list<std::string_view> path);
 
+        Result<void> append_dependency(std::string& output, const DependencyBinding& dependency) {
+            output += key(dependency.request.package) + " = ";
+            const bool shorthand = dependency.request.version
+                && dependency.request.features.empty()
+                && !dependency.request.optional
+                && !dependency.alias
+                && !dependency.selection.provider
+                && !dependency.selection.path
+                && !dependency.selection.source;
+            if (shorthand) {
+                output += toml_string(dependency.request.version->text) + '\n';
+                return {};
+            }
+
+            output += "{ ";
+            bool first = true;
+            const auto append_field = [&](const std::string_view name, const std::string& value) {
+                if (!first)
+                    output += ", ";
+
+                output += key(name) + " = " + value;
+                first = false;
+            };
+
+            if (dependency.request.version)
+                append_field("version", toml_string(dependency.request.version->text));
+            if (!dependency.request.features.empty()) {
+                std::string features = "[";
+                for (std::size_t index = 0; index < dependency.request.features.size(); ++index) {
+                    if (index != 0)
+                        features += ", ";
+
+                    features += toml_string(dependency.request.features[index]);
+                }
+                features += ']';
+                append_field("features", features);
+            }
+            if (dependency.request.optional)
+                append_field("optional", "true");
+            if (dependency.alias)
+                append_field("alias", toml_string(*dependency.alias));
+            if (dependency.selection.provider)
+                append_field("from", toml_string(*dependency.selection.provider));
+            if (dependency.selection.path)
+                append_field("path", toml_string(dependency.selection.path->generic_string()));
+            if (dependency.selection.source) {
+                auto options = format_value(dependency.selection.source->options);
+                if (!options)
+                    return std::unexpected(options.error());
+
+                append_field(dependency.selection.source->driver, *options);
+            }
+            output += " }\n";
+            return {};
+        }
+
         Result<void> append_package_target(
             std::string& output,
             const PackageTarget& target,
@@ -217,9 +273,10 @@ namespace kaixa {
 
             if (!target.dependencies.empty()) {
                 append_header(output, {section, "dependencies"});
-                for (const DependencySpec& dependency: target.dependencies) {
-                    output += key(dependency.name) + " = { path = "
-                        + toml_string(dependency.path.generic_string()) + " }\n";
+                for (const DependencyBinding& dependency: target.dependencies) {
+                    auto appended = append_dependency(output, dependency);
+                    if (!appended)
+                        return std::unexpected(appended.error());
                 }
             }
 
@@ -329,7 +386,7 @@ namespace kaixa {
         }
 
         Result<void> validate_manifest(const Manifest& manifest) {
-            if (!is_valid_identifier(manifest.name))
+            if (!is_valid_package_name(manifest.name))
                 return std::unexpected(error("invalid package name `" + manifest.name + "`"));
 
             if (!is_valid_identifier(manifest.resolver))
@@ -338,21 +395,63 @@ namespace kaixa {
             if (manifest.version && manifest.version->text.empty())
                 return std::unexpected(error("package version cannot be empty"));
 
-            for (std::size_t index = 0; index < manifest.dependencies.size(); ++index) {
-                const DependencySpec& dependency = manifest.dependencies[index];
-                if (!is_valid_identifier(dependency.name))
-                    return std::unexpected(error("invalid dependency name `" + dependency.name + "`"));
+            if (manifest.version) {
+                auto version = parse_version(manifest.version->text);
+                if (!version)
+                    return std::unexpected(version.error());
+            }
 
-                if (dependency.path.empty())
-                    return std::unexpected(error("dependency `" + dependency.name + "` has an empty path"));
+            for (std::size_t index = 0; index < manifest.dependencies.size(); ++index) {
+                const DependencyBinding& dependency = manifest.dependencies[index];
+                if (!is_valid_package_name(dependency.request.package)) {
+                    return std::unexpected(error(
+                        "invalid dependency name `" + dependency.request.package + "`"
+                    ));
+                }
+                if (dependency.request.version) {
+                    auto requirement = parse_version_requirement(dependency.request.version->text);
+                    if (!requirement)
+                        return std::unexpected(requirement.error());
+                }
+                if (dependency.alias && !is_valid_identifier(*dependency.alias))
+                    return std::unexpected(error("invalid dependency alias `" + *dependency.alias + "`"));
+                if (dependency.selection.path && dependency.selection.path->empty()) {
+                    return std::unexpected(error(
+                        "dependency `" + dependency.request.package + "` has an empty path"
+                    ));
+                }
+                if (dependency.selection.source
+                    && (!is_valid_identifier(dependency.selection.source->driver)
+                        || !dependency.selection.source->options.is_table())) {
+                    return std::unexpected(error(
+                        "dependency `" + dependency.request.package + "` has an invalid source"
+                    ));
+                }
+                if (dependency.selection.path && dependency.selection.source) {
+                    return std::unexpected(error(
+                        "dependency `" + dependency.request.package
+                            + "` combines a path with a source driver"
+                    ));
+                }
+                if (dependency.selection.provider
+                    && (dependency.selection.path || dependency.selection.source)) {
+                    return std::unexpected(error(
+                        "dependency `" + dependency.request.package
+                            + "` combines a provider with a direct source"
+                    ));
+                }
 
                 const auto duplicate = std::ranges::find_if(
                     manifest.dependencies.begin(),
                     manifest.dependencies.begin() + static_cast<std::ptrdiff_t>(index),
-                    [&](const DependencySpec& candidate) { return candidate.name == dependency.name; }
+                    [&](const DependencyBinding& candidate) {
+                        return candidate.request.package == dependency.request.package;
+                    }
                 );
                 if (duplicate != manifest.dependencies.begin() + static_cast<std::ptrdiff_t>(index))
-                    return std::unexpected(error("duplicate dependency `" + dependency.name + "`"));
+                    return std::unexpected(error(
+                        "duplicate dependency `" + dependency.request.package + "`"
+                    ));
             }
             if (manifest.resolver_options && !manifest.resolver_options->is_table())
                 return std::unexpected(error("manifest resolver options must be a table"));
@@ -368,15 +467,17 @@ namespace kaixa {
                 if (target.sources.include.empty())
                     return std::unexpected(error("package target requires source patterns"));
 
-                for (const DependencySpec& dependency: target.dependencies) {
-                    if (!is_valid_identifier(dependency.name)) {
+                for (const DependencyBinding& dependency: target.dependencies) {
+                    if (!is_valid_package_name(dependency.request.package)) {
                         return std::unexpected(error(
-                            "invalid package target dependency name `" + dependency.name + "`"
+                            "invalid package target dependency name `"
+                                + dependency.request.package + "`"
                         ));
                     }
-                    if (dependency.path.empty()) {
+                    if (dependency.selection.path && dependency.selection.path->empty()) {
                         return std::unexpected(error(
-                            "package target dependency `" + dependency.name + "` has an empty path"
+                            "package target dependency `" + dependency.request.package
+                                + "` has an empty path"
                         ));
                     }
                 }
@@ -471,9 +572,10 @@ namespace kaixa {
 
         if (!manifest.dependencies.empty()) {
             append_header(output, {"dependencies"});
-            for (const DependencySpec& dependency: manifest.dependencies) {
-                output += key(dependency.name) + " = { path = "
-                    + toml_string(dependency.path.generic_string()) + " }\n";
+            for (const DependencyBinding& dependency: manifest.dependencies) {
+                auto appended = append_dependency(output, dependency);
+                if (!appended)
+                    return std::unexpected(appended.error());
             }
         }
 

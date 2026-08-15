@@ -25,7 +25,7 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
     }
 
     context.check_equal(graph->size(), std::size_t{1}, "one package");
-    context.check_equal((*graph)[graph->root()].name, std::string("test_single"), "package name");
+    context.check_equal((*graph)[graph->roots().front()].name, std::string("test_single"), "package name");
 
     const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
@@ -41,6 +41,96 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
             plan->actions().front().description,
             std::string("configure test_single"),
             "configure action"
+        );
+    }
+}
+
+KAIXA_TEST(cmake_plans_each_selected_package_root) {
+    const kaixa::testing::TempDirectory workspace("multiple-cmake-roots");
+    workspace.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"packages/*\"]\n"
+        "default = [\"editor\", \"game_runner\"]\n"
+    );
+    workspace.write(
+        "packages/editor/Kaixa.toml",
+        "[package]\n"
+        "name = \"editor\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    workspace.write(
+        "packages/editor/CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(editor LANGUAGES NONE)\n"
+        "add_custom_target(editor)\n"
+    );
+    workspace.write(
+        "packages/game_runner/Kaixa.toml",
+        "[package]\n"
+        "name = \"game_runner\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    workspace.write(
+        "packages/game_runner/CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(game_runner LANGUAGES NONE)\n"
+        "add_custom_target(game_runner)\n"
+    );
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "multiple CMake roots load");
+    if (!graph)
+        return;
+
+    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{
+        workspace.path(),
+        workspace.path() / ".kaixa",
+        "debug"
+    };
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "multiple CMake roots plan");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    context.check_equal(plan->outputs().size(), std::size_t{2}, "one build output per root");
+    for (const kaixa::PackageId root: graph->roots()) {
+        const std::string description = "configure " + (*graph)[root].name;
+        context.check(
+            std::ranges::find(plan->actions(), description, &kaixa::Action::description)
+                != plan->actions().end(),
+            description
+        );
+    }
+
+    const kaixa::PackageId game_runner = graph->roots().back();
+    kaixa::BuildRequest request;
+    request.packages.push_back({game_runner, {"game_runner"}, false});
+    const auto selected = kaixa::plan_build(*graph, registry, environment, request);
+    context.check(selected.has_value(), "one package root can receive explicit targets");
+    if (!selected)
+        return;
+
+    context.check(
+        std::ranges::none_of(selected->actions(), [&](const kaixa::Action& action) {
+            return action.package == graph->roots().front();
+        }),
+        "unselected root receives no actions"
+    );
+    const auto selected_build = std::ranges::find_if(
+        selected->actions(),
+        [&](const kaixa::Action& action) {
+            return action.package == game_runner && action.stage == kaixa::ActionStage::build;
+        }
+    );
+    context.check(selected_build != selected->actions().end(), "selected root has a build action");
+    if (selected_build != selected->actions().end()) {
+        context.check(
+            std::ranges::find(selected_build->argv, "game_runner") != selected_build->argv.end(),
+            "explicit target reaches only its package"
         );
     }
 }
@@ -150,7 +240,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     context.check(order.has_value(), "workspace has an order");
     if (order && math) {
         const auto math_position = std::ranges::find(*order, *math);
-        const auto root_position = std::ranges::find(*order, graph->root());
+        const auto root_position = std::ranges::find(*order, graph->roots().front());
         context.check(math_position < root_position, "managed dependency precedes root");
     }
 
@@ -284,7 +374,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     const auto build_action = std::ranges::find_if(
         plan->actions(),
         [&](const kaixa::Action& action) {
-            return action.package == graph->root()
+            return action.package == graph->roots().front()
                 && action.stage == kaixa::ActionStage::build;
         }
     );
@@ -689,7 +779,7 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
     );
     context.check(plan.has_value(), "source generation clean plans");
     if (plan) {
-        const std::filesystem::path cmakelists = (*graph)[graph->root()].directory / "CMakeLists.txt";
+        const std::filesystem::path cmakelists = (*graph)[graph->roots().front()].directory / "CMakeLists.txt";
         context.check(
             std::ranges::any_of(
                 plan->generated_files(),
@@ -774,7 +864,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         return;
     }
 
-    const kaixa::Manifest& manifest = *(*graph)[graph->root()].manifest;
+    const kaixa::Manifest& manifest = *(*graph)[graph->roots().front()].manifest;
     context.check_equal(manifest.targets.size(), std::size_t{1}, "inline declaration is preserved");
     context.check_equal(manifest.resolved_targets.size(), std::size_t{5}, "targets are normalized");
     context.check(
@@ -783,7 +873,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         }),
         "resolver receives concrete named targets"
     );
-    const kaixa::PackageNode& root = (*graph)[graph->root()];
+    const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
     context.check_equal(root.target_dependencies.size(), std::size_t{4}, "target dependency group count");
     context.check_equal(
         (*graph)[root.target_dependencies.front().packages.front()].name,

@@ -147,7 +147,7 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
         context.fail(kaixa::format_diagnostic(graph.error()));
         return;
     }
-    const kaixa::PackageNode& package = (*graph)[graph->root()];
+    const kaixa::PackageNode& package = (*graph)[graph->roots().front()];
     const std::vector<kaixa::ConfigurationSet> layers{package.manifest->configurations};
     const std::vector<std::string> requested;
     const std::vector<kaixa::ResolverArgumentOverride> overrides;

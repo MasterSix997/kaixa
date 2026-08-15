@@ -52,6 +52,18 @@ namespace kaixa {
         const std::string_view package_name
     ) {
         if (requested) {
+            const std::size_t matches = static_cast<std::size_t>(std::ranges::count(
+                targets,
+                *requested,
+                &RunTarget::name
+            ));
+            if (matches > 1) {
+                return std::unexpected(error(
+                    "runnable target `" + *requested
+                        + "` is provided by multiple selected packages"
+                ).add_note("narrow the operation with `--package <name>`"));
+            }
+
             const auto selected = std::ranges::find_if(
                 targets,
                 [&](const RunTarget& target) { return target.name == *requested; }

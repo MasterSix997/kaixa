@@ -17,16 +17,19 @@ namespace kaixa {
         [[nodiscard]] PackageNode& operator[](PackageId id);
 
         [[nodiscard]] std::span<const PackageNode> nodes() const noexcept { return m_nodes; }
+        [[nodiscard]] std::span<const PackageId> roots() const noexcept { return m_roots; }
         [[nodiscard]] std::size_t size() const noexcept { return m_nodes.size(); }
         [[nodiscard]] bool empty() const noexcept { return m_nodes.empty(); }
-        [[nodiscard]] PackageId root() const noexcept { return m_root; }
+        [[nodiscard]] bool is_root(PackageId id) const noexcept;
+        void add_root(PackageId id);
 
         [[nodiscard]] std::optional<PackageId> find_by_directory(const std::filesystem::path& directory) const;
         [[nodiscard]] std::optional<PackageId> find_by_name(std::string_view name) const;
         [[nodiscard]] Result<std::vector<PackageId>> build_order() const;
+        [[nodiscard]] Result<std::vector<PackageId>> build_order(std::span<const PackageId> roots) const;
 
     private:
         std::vector<PackageNode> m_nodes;
-        PackageId m_root;
+        std::vector<PackageId> m_roots;
     };
 }

@@ -87,12 +87,12 @@ namespace kaixa::cli {
         }
 
         Result<Workspace> open_workspace(const WorkspaceOptions& options) {
-            auto graph = load_workspace(options.path);
-            if (!graph)
-                return std::unexpected(graph.error());
+            auto resolved = resolve_workspace(options.path, options.packages);
+            if (!resolved)
+                return std::unexpected(resolved.error());
 
             for (const ResolverArgumentOverride& override: options.resolver_arguments) {
-                if (!resolver_is_active(*graph, override.resolver)) {
+                if (!resolver_is_active(resolved->graph, override.resolver)) {
                     return std::unexpected(error(
                         "resolver `" + override.resolver
                             + "` does not participate in this build"
@@ -100,14 +100,11 @@ namespace kaixa::cli {
                 }
             }
 
-            const PackageNode& root = (*graph)[graph->root()];
-            const std::filesystem::path directory = root.directory;
+            const std::filesystem::path directory = resolved->manifest.parent_path();
             std::vector<ConfigurationSet> layers;
             std::vector<ConfigurationSource> sources;
-            if (root.manifest) {
-                sources.push_back({"package", root.manifest->configurations});
-                layers.push_back(root.manifest->configurations);
-            }
+            sources.push_back({"manifest", resolved->configurations});
+            layers.push_back(resolved->configurations);
 
             if (const auto user = user_configuration_path()) {
                 auto loaded = append_configuration_file(layers, sources, "user", *user);
@@ -135,7 +132,7 @@ namespace kaixa::cli {
                 return std::unexpected(configuration.error());
 
             return Workspace{
-                std::move(*graph),
+                std::move(resolved->graph),
                 BuildEnvironment{
                     directory,
                     directory / ".kaixa",
@@ -144,6 +141,15 @@ namespace kaixa::cli {
                 plugin::default_registry(),
                 std::move(sources)
             };
+        }
+
+        Result<PackageId> require_single_root(const Graph& graph, const std::string_view operation) {
+            if (graph.roots().size() == 1)
+                return graph.roots().front();
+
+            return std::unexpected(error(
+                std::string(operation) + " requires exactly one selected package"
+            ).add_note("select one package with `--package <name>`"));
         }
 
         Result<std::filesystem::path> find_workspace_directory(const std::filesystem::path& path) {
@@ -417,9 +423,12 @@ namespace kaixa::cli {
             const std::span<const std::string> requested
         ) {
             for (const std::string& name: requested) {
-                if (std::ranges::none_of(products, [&](const BuildProduct& product) {
-                        return product.name == name;
-                    })) {
+                const std::size_t matches = static_cast<std::size_t>(std::ranges::count(
+                    products,
+                    name,
+                    &BuildProduct::name
+                ));
+                if (matches == 0) {
                     std::string available;
                     for (const BuildProduct& product: products) {
                         if (!available.empty())
@@ -434,24 +443,53 @@ namespace kaixa::cli {
 
                     return std::unexpected(std::move(diagnostic));
                 }
+                if (matches > 1) {
+                    return std::unexpected(error(
+                        "build target `" + name + "` is provided by multiple selected packages"
+                    ).add_note("narrow the operation with `--package <name>`"));
+                }
             }
             return {};
         }
 
         struct ResolvedProductSelection {
-            std::vector<std::string> targets;
+            std::vector<PackageBuildRequest> packages;
             std::vector<std::string> displayed;
-            bool build_default = false;
         };
+
+        PackageBuildRequest& package_request(
+            std::vector<PackageBuildRequest>& requests,
+            const PackageId package
+        ) {
+            const auto existing = std::ranges::find(
+                requests,
+                package,
+                &PackageBuildRequest::package
+            );
+            if (existing != requests.end())
+                return *existing;
+
+            requests.push_back({package, {}, false});
+            return requests.back();
+        }
+
+        void append_product_target(
+            const BuildProduct& product,
+            std::vector<PackageBuildRequest>& requests
+        ) {
+            PackageBuildRequest& request = package_request(requests, product.package);
+            if (std::ranges::find(request.targets, product.name) == request.targets.end())
+                request.targets.push_back(product.name);
+        }
 
         void append_products(
             const std::span<const BuildProduct> products,
             const ProductPurpose purpose,
-            std::vector<std::string>& output
+            std::vector<PackageBuildRequest>& output
         ) {
             for (const BuildProduct& product: products) {
                 if (product.purpose == purpose)
-                    output.push_back(product.name);
+                    append_product_target(product, output);
             }
         }
 
@@ -460,11 +498,11 @@ namespace kaixa::cli {
             const std::span<const std::string> requested,
             const ProductPurpose purpose,
             const std::string_view option,
-            std::vector<std::string>& output
+            std::vector<PackageBuildRequest>& output
         ) {
             for (const std::string& name: requested) {
-                const auto product = std::ranges::find(products, name, &BuildProduct::name);
-                if (product == products.end()) {
+                const auto named = std::ranges::find(products, name, &BuildProduct::name);
+                if (named == products.end()) {
                     Diagnostic diagnostic = error(
                         std::string(option) + " selected unknown "
                             + std::string(product_purpose_name(purpose)) + " `" + name + "`"
@@ -488,15 +526,34 @@ namespace kaixa::cli {
 
                     return std::unexpected(std::move(diagnostic));
                 }
-                if (product->purpose != purpose) {
+                const auto product = std::ranges::find_if(
+                    products,
+                    [&](const BuildProduct& candidate) {
+                        return candidate.name == name && candidate.purpose == purpose;
+                    }
+                );
+                if (product == products.end()) {
                     return std::unexpected(error(
                         "`" + name + "` has purpose `"
-                            + std::string(product_purpose_name(product->purpose))
+                            + std::string(product_purpose_name(named->purpose))
                             + "`, not `" + std::string(product_purpose_name(purpose)) + "`"
                     ));
                 }
 
-                output.push_back(name);
+                const std::size_t matches = static_cast<std::size_t>(std::ranges::count_if(
+                    products,
+                    [&](const BuildProduct& candidate) {
+                        return candidate.name == name && candidate.purpose == purpose;
+                    }
+                ));
+                if (matches > 1) {
+                    return std::unexpected(error(
+                        std::string(option) + " selected `" + name
+                            + "`, which is provided by multiple selected packages"
+                    ).add_note("narrow the operation with `--package <name>`"));
+                }
+
+                append_product_target(*product, output);
             }
             return {};
         }
@@ -511,42 +568,52 @@ namespace kaixa::cli {
                 if (!valid)
                     return std::unexpected(valid.error());
 
-                result.targets = command.targets;
                 result.displayed = command.targets;
+                for (const std::string& name: command.targets) {
+                    const auto product = std::ranges::find(products, name, &BuildProduct::name);
+                    append_product_target(*product, result.packages);
+                }
                 return result;
             }
 
             if (command.selection.empty()) {
-                result.build_default = true;
-                append_products(products, ProductPurpose::primary, result.displayed);
+                for (const BuildProduct& product: products) {
+                    if (product.purpose == ProductPurpose::primary)
+                        result.displayed.push_back(product.name);
+                }
                 return result;
             }
 
             if (command.selection.all_targets) {
-                result.build_default = true;
                 for (const BuildProduct& product: products) {
                     result.displayed.push_back(product.name);
-                    if (product.purpose != ProductPurpose::primary)
-                        result.targets.push_back(product.name);
+                    PackageBuildRequest& request = package_request(
+                        result.packages,
+                        product.package
+                    );
+                    if (product.purpose == ProductPurpose::primary)
+                        request.build_default = true;
+                    else
+                        append_product_target(product, result.packages);
                 }
                 return result;
             }
 
             if (command.selection.all_examples)
-                append_products(products, ProductPurpose::example, result.targets);
+                append_products(products, ProductPurpose::example, result.packages);
 
             if (command.selection.all_tests)
-                append_products(products, ProductPurpose::test, result.targets);
+                append_products(products, ProductPurpose::test, result.packages);
 
             if (command.selection.all_benchmarks)
-                append_products(products, ProductPurpose::benchmark, result.targets);
+                append_products(products, ProductPurpose::benchmark, result.packages);
 
             auto examples = append_named_products(
                 products,
                 command.selection.examples,
                 ProductPurpose::example,
                 "--example",
-                result.targets
+                result.packages
             );
             if (!examples)
                 return std::unexpected(examples.error());
@@ -556,7 +623,7 @@ namespace kaixa::cli {
                 command.selection.tests,
                 ProductPurpose::test,
                 "--test",
-                result.targets
+                result.packages
             );
             if (!tests)
                 return std::unexpected(tests.error());
@@ -566,18 +633,24 @@ namespace kaixa::cli {
                 command.selection.benchmarks,
                 ProductPurpose::benchmark,
                 "--bench",
-                result.targets
+                result.packages
             );
             if (!benchmarks)
                 return std::unexpected(benchmarks.error());
 
-            if (result.targets.empty() && !command.list) {
+            if (result.packages.empty() && !command.list) {
                 return std::unexpected(error(
                     "the selected product categories contain no targets"
                 ));
             }
 
-            result.displayed = result.targets;
+            for (const PackageBuildRequest& package: result.packages) {
+                result.displayed.insert(
+                    result.displayed.end(),
+                    package.targets.begin(),
+                    package.targets.end()
+                );
+            }
             return result;
         }
 
@@ -662,11 +735,15 @@ namespace kaixa::cli {
 
         int run(const InspectCommand& command) {
             if (command.mode == InspectMode::packages) {
-                auto graph = load_workspace(command.workspace.path);
-                if (!graph)
-                    return fail(graph.error());
+                auto resolved = resolve_workspace(
+                    command.workspace.path,
+                    command.workspace.packages
+                );
+                if (!resolved)
+                    return fail(resolved.error());
 
-                print_package(*graph, graph->root(), 0, command.verbose);
+                for (const PackageId root: resolved->graph.roots())
+                    print_package(resolved->graph, root, 0, command.verbose);
                 return 0;
             }
 
@@ -675,7 +752,7 @@ namespace kaixa::cli {
                 return fail(workspace.error());
 
             if (command.mode == InspectMode::config) {
-                const PackageNode& root = workspace->graph[workspace->graph.root()];
+                const PackageNode& root = workspace->graph[workspace->graph.roots().front()];
                 print_effective_configuration(
                     workspace->environment.configuration,
                     workspace->configuration_sources,
@@ -844,9 +921,11 @@ namespace kaixa::cli {
             }
 
             BuildRequest request;
-            request.targets = selection.targets;
             request.jobs = command.jobs;
-            request.build_default = selection_resolved ? selection.build_default : true;
+            request.build_default = true;
+            if (selection_resolved)
+                request.packages = selection.packages;
+
             auto plan = plan_build(
                 workspace->graph,
                 workspace->registry,
@@ -965,8 +1044,18 @@ namespace kaixa::cli {
                 return 0;
             }
 
-            const PackageNode& root = workspace->graph[workspace->graph.root()];
-            auto selected = select_run_target(*benchmarks, command.target, root.name);
+            std::string package_name;
+            if (workspace->graph.roots().size() == 1) {
+                package_name = workspace->graph[workspace->graph.roots().front()].name;
+            } else if (!command.target) {
+                auto root = require_single_root(workspace->graph, "bench");
+                if (!root)
+                    return fail(root.error());
+
+                package_name = workspace->graph[*root].name;
+            }
+
+            auto selected = select_run_target(*benchmarks, command.target, package_name);
             if (!selected)
                 return fail(selected.error());
 
@@ -1031,8 +1120,18 @@ namespace kaixa::cli {
                 return 0;
             }
 
-            const PackageNode& root = workspace->graph[workspace->graph.root()];
-            auto selected = select_run_target(*category, requested, root.name);
+            std::string package_name;
+            if (workspace->graph.roots().size() == 1) {
+                package_name = workspace->graph[workspace->graph.roots().front()].name;
+            } else if (!requested) {
+                auto root = require_single_root(workspace->graph, "run");
+                if (!root)
+                    return fail(root.error());
+
+                package_name = workspace->graph[*root].name;
+            }
+
+            auto selected = select_run_target(*category, requested, package_name);
             if (!selected)
                 return fail(selected.error());
 
@@ -1142,7 +1241,7 @@ namespace kaixa::cli {
             if (!workspace)
                 return fail(workspace.error());
 
-            const PackageNode& root = workspace->graph[workspace->graph.root()];
+            const PackageNode& root = workspace->graph[workspace->graph.roots().front()];
             print_effective_configuration(
                 workspace->environment.configuration,
                 workspace->configuration_sources,

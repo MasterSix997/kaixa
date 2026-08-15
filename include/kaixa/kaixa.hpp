@@ -13,6 +13,7 @@
 #include <kaixa/services/clean_service.hpp>
 #include <kaixa/services/run_service.hpp>
 #include <kaixa/workspace/loader.hpp>
+#include <kaixa/workspace/package_index.hpp>
 
 #include <string_view>
 
