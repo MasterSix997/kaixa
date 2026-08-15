@@ -11,10 +11,7 @@
 
 namespace kaixa {
     namespace {
-        Result<std::filesystem::path> canonical_directory(
-            const std::filesystem::path& path,
-            const SourceLocation& location = {}
-        ) {
+        Result<std::filesystem::path> canonical_directory(const std::filesystem::path& path, const SourceLocation& location = {}) {
             std::error_code failure;
             const bool exists = std::filesystem::exists(path, failure);
             if (failure)
@@ -177,10 +174,13 @@ namespace kaixa {
 
         class WorkspaceLoader {
         public:
-            Result<PackageResolution> load(
-                const std::filesystem::path& manifest_path,
-                const std::span<const std::string> selected_packages
-            ) {
+            WorkspaceLoader(
+                const ExtensionRegistry* extensions,
+                std::filesystem::path source_cache
+            ) : m_extensions(extensions), m_source_cache(std::move(source_cache)) {
+            }
+
+            Result<PackageResolution> load(const std::filesystem::path& manifest_path, const std::span<const std::string> selected_packages) {
                 std::error_code failure;
                 const std::filesystem::path selected = std::filesystem::canonical(manifest_path, failure);
                 if (failure) {
@@ -222,10 +222,7 @@ namespace kaixa {
             }
 
         private:
-            Result<std::vector<PackageId>> load_default_packages(
-                const std::filesystem::path& manifest_path,
-                const ManifestDocument& document
-            ) {
+            Result<std::vector<PackageId>> load_default_packages(const std::filesystem::path& manifest_path, const ManifestDocument& document) {
                 if (document.package) {
                     auto root = load_managed(manifest_path, std::nullopt, {});
                     if (!root)
@@ -390,6 +387,7 @@ namespace kaixa {
                     manifest.resolver,
                     std::move(manifest),
                     {},
+                    {},
                     {}
                 });
 
@@ -434,6 +432,277 @@ namespace kaixa {
                 return id;
             }
 
+            Result<void> validate_resolved_version(
+                const PackageId id,
+                const PackageRequest& request,
+                const std::optional<Version>& expected,
+                const SourceLocation& location
+            ) const {
+                const std::optional<Manifest>& manifest = m_graph[id].manifest;
+                if (!manifest || !manifest->version) {
+                    if (request.version || expected) {
+                        return std::unexpected(error_at(
+                            location,
+                            "package `" + request.package + "` does not declare a version"
+                        ));
+                    }
+                    return {};
+                }
+
+                if (expected && manifest->version != expected) {
+                    return std::unexpected(error_at(
+                        location,
+                        "provider selected `" + request.package + "` version `"
+                            + expected->text + "`, but its manifest declares `"
+                            + manifest->version->text + "`"
+                    ));
+                }
+                if (request.version && !matches(*request.version, *manifest->version)) {
+                    return std::unexpected(error_at(
+                        location,
+                        "package `" + request.package + "` has version `"
+                            + manifest->version->text + "`, which does not satisfy `"
+                            + request.version->text + "`"
+                    ));
+                }
+                return {};
+            }
+
+            Result<PackageId> load_package_from_source(
+                const std::filesystem::path& directory,
+                const SourceLocator& source,
+                const DependencyBinding& dependency,
+                std::optional<std::string> provider,
+                std::string authority,
+                std::optional<std::string> identity,
+                const std::optional<Version>& expected_version = std::nullopt
+            ) {
+                const std::filesystem::path manifest_path = directory / "Kaixa.toml";
+                auto document = parse_manifest_document_file(manifest_path);
+                if (!document)
+                    return std::unexpected(document.error());
+
+                std::optional<std::filesystem::path> package_manifest;
+                if (document->package && document->package->name == dependency.request.package) {
+                    package_manifest = manifest_path;
+                } else if (document->package && !document->package_set) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "source points to package `" + document->package->name
+                            + "`, not `" + dependency.request.package + "`"
+                    ));
+                } else if (document->package_set) {
+                    auto included = m_packages.include(manifest_path);
+                    if (!included)
+                        return std::unexpected(included.error());
+
+                    const LocalPackageCandidate* candidate = m_packages.find_in_set(
+                        manifest_path,
+                        dependency.request.package
+                    );
+                    if (candidate)
+                        package_manifest = candidate->manifest;
+                }
+                if (!package_manifest) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "source does not provide package `" + dependency.request.package + "`"
+                    ));
+                }
+
+                auto loaded = load_managed(
+                    *package_manifest,
+                    dependency.request.package,
+                    dependency.location
+                );
+                if (!loaded)
+                    return std::unexpected(loaded.error());
+
+                auto version = validate_resolved_version(
+                    *loaded,
+                    dependency.request,
+                    expected_version,
+                    dependency.location
+                );
+                if (!version)
+                    return std::unexpected(version.error());
+
+                m_graph[*loaded].source = PackageSource{
+                    std::move(provider),
+                    std::move(authority),
+                    source,
+                    std::move(identity)
+                };
+                return *loaded;
+            }
+
+            Result<PackageId> load_source_dependency(
+                const SourceLocator& source,
+                const std::filesystem::path& requester,
+                const DependencyBinding& dependency,
+                std::optional<std::string> provider,
+                std::string authority,
+                std::optional<Version> expected_version = std::nullopt
+            ) {
+                SourceDriver* driver = m_extensions
+                    ? m_extensions->find_source_driver(source.driver)
+                    : nullptr;
+                if (!driver) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "source driver `" + source.driver + "` is not installed"
+                    ));
+                }
+
+                auto located = driver->locate(source, SourceContext{requester, m_source_cache});
+                if (!located)
+                    return std::unexpected(located.error());
+
+                if (!*located) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "source for package `" + dependency.request.package
+                            + "` is not available locally"
+                    ).add_note("source synchronization has not been implemented yet"));
+                }
+                if (!(**located).directory.is_absolute()) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "source driver `" + source.driver + "` returned a relative directory"
+                    ));
+                }
+
+                auto directory = canonical_directory((**located).directory, dependency.location);
+                if (!directory)
+                    return std::unexpected(directory.error());
+
+                return load_package_from_source(
+                    *directory,
+                    source,
+                    dependency,
+                    std::move(provider),
+                    std::move(authority),
+                    (**located).identity,
+                    expected_version
+                );
+            }
+
+            Result<PackageCandidate> select_provider_candidate(const PackageProvider& provider, const DependencyBinding& dependency) const {
+                auto candidates = provider.candidates(dependency.request);
+                if (!candidates)
+                    return std::unexpected(candidates.error());
+
+                std::optional<std::size_t> selected;
+                bool ambiguous = false;
+                for (std::size_t index = 0; index < candidates->size(); ++index) {
+                    const PackageCandidate& candidate = (*candidates)[index];
+                    if (candidate.package != dependency.request.package) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "provider `" + provider.info().name + "` returned package `"
+                                + candidate.package + "` while resolving `"
+                                + dependency.request.package + "`"
+                        ));
+                    }
+                    if (candidate.authority.empty()) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "provider `" + provider.info().name
+                                + "` returned a candidate without an authority"
+                        ));
+                    }
+                    if (candidate.source.driver.empty()) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "provider `" + provider.info().name
+                                + "` returned a candidate without a source driver"
+                        ));
+                    }
+
+                    auto parsed_version = parse_version(candidate.version.text, dependency.location);
+                    if (!parsed_version)
+                        return std::unexpected(parsed_version.error());
+
+                    if (dependency.request.version
+                        && !matches(*dependency.request.version, candidate.version)) {
+                        continue;
+                    }
+
+                    if (!selected) {
+                        selected = index;
+                        ambiguous = false;
+                        continue;
+                    }
+
+                    const int relation = compare_versions(
+                        candidate.version,
+                        (*candidates)[*selected].version
+                    );
+                    if (relation > 0) {
+                        selected = index;
+                        ambiguous = false;
+                    } else if (relation == 0) {
+                        ambiguous = true;
+                    }
+                }
+
+                if (!selected) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "provider `" + provider.info().name + "` has no compatible version of `"
+                            + dependency.request.package + "`"
+                    ));
+                }
+                if (ambiguous) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "provider `" + provider.info().name + "` returned multiple candidates for `"
+                            + dependency.request.package + "` version `"
+                            + (*candidates)[*selected].version.text + "`"
+                    ));
+                }
+                return std::move((*candidates)[*selected]);
+            }
+
+            Result<PackageId> load_provider_dependency(
+                const PackageProvider& provider,
+                const std::filesystem::path& requester,
+                const DependencyBinding& dependency
+            ) {
+                auto candidate = select_provider_candidate(provider, dependency);
+                if (!candidate)
+                    return std::unexpected(candidate.error());
+
+                const ProviderInfo info = provider.info();
+                return load_source_dependency(
+                    candidate->source,
+                    requester,
+                    dependency,
+                    info.name,
+                    candidate->authority,
+                    candidate->version
+                );
+            }
+
+            Result<const PackageProvider*> default_provider(const SourceLocation& location) const {
+                const PackageProvider* selected = nullptr;
+                if (m_extensions) {
+                    for (const auto& provider: m_extensions->providers()) {
+                        if (!provider->info().is_default)
+                            continue;
+
+                        if (selected) {
+                            return std::unexpected(error_at(
+                                location,
+                                "more than one default package provider is configured"
+                            ));
+                        }
+                        selected = provider.get();
+                    }
+                }
+                return selected;
+            }
+
             Result<PackageId> load_dependency(
                 const std::filesystem::path& source_directory,
                 const std::filesystem::path& requester_manifest,
@@ -453,16 +722,26 @@ namespace kaixa {
                     );
                 }
                 if (dependency.selection.source) {
-                    return std::unexpected(error_at(
-                        dependency.location,
-                        "source driver `" + dependency.selection.source->driver + "` is not installed"
-                    ));
+                    return load_source_dependency(
+                        *dependency.selection.source,
+                        source_directory,
+                        dependency,
+                        std::nullopt,
+                        "direct"
+                    );
                 }
                 if (dependency.selection.provider) {
-                    return std::unexpected(error_at(
-                        dependency.location,
-                        "provider `" + *dependency.selection.provider + "` is not installed"
-                    ));
+                    PackageProvider* provider = m_extensions
+                        ? m_extensions->find_provider(*dependency.selection.provider)
+                        : nullptr;
+                    if (!provider) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "provider `" + *dependency.selection.provider + "` is not installed"
+                        ));
+                    }
+
+                    return load_provider_dependency(*provider, source_directory, dependency);
                 }
 
                 const LocalPackageCandidate* candidate = m_packages.find_for(
@@ -495,6 +774,12 @@ namespace kaixa {
                     );
                 }
 
+                auto provider = default_provider(dependency.location);
+                if (!provider)
+                    return std::unexpected(provider.error());
+                if (*provider)
+                    return load_provider_dependency(**provider, source_directory, dependency);
+
                 return std::unexpected(error_at(
                     dependency.location,
                     "no local package or installed provider can resolve `"
@@ -502,10 +787,7 @@ namespace kaixa {
                 ));
             }
 
-            Result<PackageId> load_path_dependency(
-                const std::filesystem::path& requester,
-                const DependencyBinding& dependency
-            ) {
+            Result<PackageId> load_path_dependency(const std::filesystem::path& requester, const DependencyBinding& dependency) {
                 auto directory_result = canonical_directory(
                     requester / *dependency.selection.path,
                     dependency.location
@@ -514,36 +796,26 @@ namespace kaixa {
                     return std::unexpected(directory_result.error());
                 const std::filesystem::path directory = *directory_result;
 
+                Value path = Value::string(
+                    dependency.selection.path->generic_string(),
+                    dependency.location
+                );
+                SourceLocator source{
+                    "path",
+                    Value::table({{"path", std::move(path)}}, dependency.location)
+                };
+
                 const std::filesystem::path manifest = directory / "Kaixa.toml";
                 std::error_code failure;
                 if (std::filesystem::is_regular_file(manifest, failure)) {
-                    auto loaded = load_managed(
-                        manifest,
-                        dependency.request.package,
-                        dependency.location
+                    return load_package_from_source(
+                        directory,
+                        source,
+                        dependency,
+                        std::nullopt,
+                        "direct",
+                        directory.generic_string()
                     );
-                    if (!loaded)
-                        return std::unexpected(loaded.error());
-
-                    if (dependency.request.version) {
-                        const std::optional<Manifest>& package = m_graph[*loaded].manifest;
-                        if (!package || !package->version) {
-                            return std::unexpected(error_at(
-                                dependency.location,
-                                "path dependency `" + dependency.request.package
-                                    + "` does not declare a version"
-                            ));
-                        }
-                        if (!matches(*dependency.request.version, *package->version)) {
-                            return std::unexpected(error_at(
-                                dependency.location,
-                                "path dependency `" + dependency.request.package + "` has version `"
-                                    + package->version->text + "`, which does not satisfy `"
-                                    + dependency.request.version->text + "`"
-                            ));
-                        }
-                    }
-                    return *loaded;
                 }
 
                 if (const auto existing = m_graph.find_by_directory(directory)) {
@@ -581,12 +853,20 @@ namespace kaixa {
                     {},
                     std::nullopt,
                     {},
-                    {}
+                    {},
+                    PackageSource{
+                        std::nullopt,
+                        "direct",
+                        std::move(source),
+                        directory.generic_string()
+                    }
                 });
             }
 
             Graph m_graph;
             PackageIndex m_packages;
+            const ExtensionRegistry* m_extensions = nullptr;
+            std::filesystem::path m_source_cache;
         };
     }
 
@@ -625,14 +905,19 @@ namespace kaixa {
         return std::move(resolved->graph);
     }
 
-    Result<PackageResolution> resolve_workspace(
-        const std::filesystem::path& start,
-        const std::span<const std::string> selected_packages
-    ) {
+    Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const std::span<const std::string> selected_packages) {
+        return resolve_workspace(start, ResolutionOptions{selected_packages, nullptr, {}});
+    }
+
+    Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options) {
         auto manifest = find_manifest(start);
         if (!manifest)
             return std::unexpected(manifest.error());
-        WorkspaceLoader loader;
-        return loader.load(*manifest, selected_packages);
+
+        const std::filesystem::path source_cache = options.source_cache.empty()
+            ? manifest->parent_path() / ".kaixa" / "sources"
+            : options.source_cache;
+        WorkspaceLoader loader(options.extensions, source_cache);
+        return loader.load(*manifest, options.packages);
     }
 }

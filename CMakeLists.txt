@@ -59,11 +59,13 @@ add_library(kaixa_plugins STATIC
     [[plugins/cmake/src/file_api.cpp]]
     [[plugins/cmake/src/resolver.cpp]]
     [[plugins/cmake/src/testing.cpp]]
+    [[plugins/path/src/source.cpp]]
 )
 
 target_include_directories(kaixa_plugins PUBLIC
     [[plugins/bundle/include]]
     [[plugins/cmake/include]]
+    [[plugins/path/include]]
 )
 
 target_link_libraries(kaixa_plugins PUBLIC
@@ -97,6 +99,7 @@ add_executable(kaixa_tests
     [[tests/configurations.cpp]]
     [[tests/manifest.cpp]]
     [[tests/package_sets.cpp]]
+    [[tests/package_sources.cpp]]
     [[tests/run_and_clean.cpp]]
     [[tests/smoke.cpp]]
     [[tests/support/test_main.cpp]]

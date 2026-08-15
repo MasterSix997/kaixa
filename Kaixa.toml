@@ -28,6 +28,7 @@ sources = ["plugins/**/*.cpp"]
 public-include-directories = [
     "plugins/bundle/include",
     "plugins/cmake/include",
+    "plugins/path/include",
 ]
 public-link-libraries = ["kaixa_core"]
 

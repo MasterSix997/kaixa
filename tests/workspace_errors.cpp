@@ -114,7 +114,7 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     kaixa::EffectiveBuildConfiguration configuration;
     configuration.profile = "release";
     configuration.resolvers.push_back({"cmake", std::nullopt, {"-G", "Ninja"}, {}});
@@ -163,7 +163,7 @@ KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(!plan.has_value(), "unknown mode is rejected");
@@ -193,7 +193,7 @@ KAIXA_TEST(cmake_rejects_direct_and_repeated_target_forms_together) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(!plan.has_value(), "direct and repeated targets are rejected together");
@@ -219,7 +219,7 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     kaixa::EffectiveBuildConfiguration configuration;
     configuration.profile = "debug";
     configuration.resolvers.push_back({
@@ -291,7 +291,7 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
         workspace / ".test-phase-output",
         std::move(configuration)
     };
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     kaixa::BuildRequest request;
     request.jobs = 5;
     const auto plan = kaixa::plan_build(*graph, registry, environment, request);
@@ -389,7 +389,7 @@ KAIXA_TEST(cmake_rejects_machine_configuration_in_the_package) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", "debug"};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(!plan.has_value(), "package cannot select a local generator");

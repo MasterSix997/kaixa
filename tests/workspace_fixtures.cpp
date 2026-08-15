@@ -27,7 +27,7 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
     context.check_equal(graph->size(), std::size_t{1}, "one package");
     context.check_equal((*graph)[graph->roots().front()].name, std::string("test_single"), "package name");
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace,
         workspace / ".test-output",
@@ -83,7 +83,7 @@ KAIXA_TEST(cmake_plans_each_selected_package_root) {
     if (!graph)
         return;
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",
@@ -144,7 +144,7 @@ KAIXA_TEST(adopted_cmake_project_exposes_products_and_run_targets) {
     if (!graph)
         return;
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",
@@ -244,7 +244,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
         context.check(math_position < root_position, "managed dependency precedes root");
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace,
         workspace / ".test-output",
@@ -302,7 +302,7 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{workspace, workspace / ".test-output", "debug"};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "package dependency example plans");
@@ -358,7 +358,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",
@@ -730,7 +730,7 @@ KAIXA_TEST(generated_project_refuses_to_replace_a_manual_cmakelists) {
         return;
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",
@@ -765,7 +765,7 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
     if (!graph)
         return;
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",
@@ -881,7 +881,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         "test dependency resolves independently from package dependencies"
     );
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         workspace.path(),
         workspace.path() / ".kaixa",

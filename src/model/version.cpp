@@ -448,6 +448,15 @@ namespace kaixa {
         return VersionRequirement{std::string(text)};
     }
 
+    int compare_versions(const Version& left, const Version& right) {
+        auto parsed_left = parse_semantic_version(left.text, {});
+        auto parsed_right = parse_semantic_version(right.text, {});
+        if (!parsed_left || !parsed_right)
+            return left.text.compare(right.text);
+
+        return compare(*parsed_left, *parsed_right);
+    }
+
     bool matches(const VersionRequirement& requirement, const Version& version) {
         auto parsed_requirement = parse_requirement(requirement.text, {});
         auto parsed_version = parse_semantic_version(version.text, {});

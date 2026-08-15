@@ -113,8 +113,7 @@ default-configs = ["dev"]
 name = "dev"
 profile = "debug"
 
-[config.cmake]
-arguments = ["-DBUILD_TESTING=ON"]
+cmake.arguments = ["-DBUILD_TESTING=ON"]
 ```
 
 Machine-specific configurations can live in the user's config file
@@ -127,11 +126,10 @@ default-configs = ["clang"]
 [[config]]
 name = "clang"
 
-[config.cmake]
-generator = "Ninja"
-c-compiler = "clang"
-cxx-compiler = "clang++"
-toolchain = "C:/Toolchains/clang.cmake"
+cmake.generator = "Ninja"
+cmake.c-compiler = "clang"
+cmake.cxx-compiler = "clang++"
+cmake.toolchain = "C:/Toolchains/clang.cmake"
 ```
 
 The user config is `%APPDATA%/Kaixa/config.toml` on Windows 

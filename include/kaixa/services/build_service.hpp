@@ -9,20 +9,20 @@
 namespace kaixa {
     [[nodiscard]] Result<BuildPlan> plan_build(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const BuildRequest& request = {}
     );
 
     [[nodiscard]] Result<std::vector<BuildProduct>> discover_products(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     );
 
     [[nodiscard]] Result<BuildPlan> plan_tests(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const TestRequest& request
     );

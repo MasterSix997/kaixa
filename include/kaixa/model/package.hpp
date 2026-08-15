@@ -26,6 +26,13 @@ namespace kaixa {
         std::vector<PackageId> packages;
     };
 
+    struct PackageSource {
+        std::optional<std::string> provider;
+        std::string authority;
+        SourceLocator locator;
+        std::optional<std::string> identity;
+    };
+
     struct PackageNode {
         PackageId id;
         std::string name;
@@ -35,5 +42,6 @@ namespace kaixa {
         std::optional<Manifest> manifest;
         std::vector<PackageId> dependencies;
         std::vector<PackageTargetDependencies> target_dependencies;
+        std::optional<PackageSource> source;
     };
 }

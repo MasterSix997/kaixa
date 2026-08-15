@@ -227,6 +227,8 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
         return;
     }
     context.check_contains(*text, "[[config]]", "canonical configuration syntax");
+    context.check_contains(*text, "cmake.generator = \"Ninja\"", "resolver configuration uses dotted keys");
+    context.check(!text->contains("[config.cmake]"), "resolver configuration avoids repeated table headers");
     context.check_contains(*text, "[[cmake.target]]", "canonical target syntax");
     context.check_contains(*text, "tests = [\"tests\"]", "target manifest references format");
     context.check_contains(*text, "[examples]", "package targets format");
@@ -295,7 +297,7 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
         context.check_equal((*graph)[(*order)[1]].name, std::string("app"), "root last");
     }
 
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{
         root.path(),
         root.path() / "out",
@@ -324,10 +326,10 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
 KAIXA_TEST(graph_rejects_dependency_cycles) {
     kaixa::Graph graph;
     const kaixa::PackageId first = graph.add({
-        {}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}
+        {}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}
     });
     const kaixa::PackageId second = graph.add({
-        {}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}
+        {}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}
     });
     graph[first].dependencies.push_back(second);
     graph[second].dependencies.push_back(first);

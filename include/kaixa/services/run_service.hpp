@@ -15,13 +15,13 @@
 namespace kaixa {
     [[nodiscard]] Result<std::vector<RunTarget>> discover_executable_targets(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     );
 
     [[nodiscard]] Result<std::vector<RunTarget>> discover_run_targets(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     );
 
@@ -33,7 +33,7 @@ namespace kaixa {
 
     [[nodiscard]] Result<BuildPlan> plan_run(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         std::string target
     );

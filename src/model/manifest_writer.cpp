@@ -172,6 +172,46 @@ namespace kaixa {
             return {};
         }
 
+        Result<void> append_dotted_table(std::string& output, const std::string& prefix, const Value& value) {
+            const std::vector<TableEntry>* entries = value.as_table();
+            if (!entries)
+                return std::unexpected(error("manifest resolver settings must be a table"));
+            if (entries->empty()) {
+                output += prefix + " = {}\n";
+                return {};
+            }
+
+            for (std::size_t index = 0; index < entries->size(); ++index) {
+                const TableEntry& entry = (*entries)[index];
+                const auto duplicate = std::ranges::find_if(
+                    entries->begin(),
+                    entries->begin() + static_cast<std::ptrdiff_t>(index),
+                    [&](const TableEntry& candidate) { return candidate.key == entry.key; }
+                );
+                if (duplicate != entries->begin() + static_cast<std::ptrdiff_t>(index))
+                    return std::unexpected(error("duplicate manifest value key `" + entry.key + "`"));
+
+                const std::string path = prefix + '.' + key(entry.key);
+                if (const std::vector<TableEntry>* table = entry.value.as_table()) {
+                    if (table->empty()) {
+                        output += path + " = {}\n";
+                    } else {
+                        auto appended = append_dotted_table(output, path, entry.value);
+                        if (!appended)
+                            return std::unexpected(appended.error());
+                    }
+                    continue;
+                }
+
+                auto formatted = format_value(entry.value);
+                if (!formatted)
+                    return std::unexpected(formatted.error());
+
+                output += path + " = " + *formatted + '\n';
+            }
+            return {};
+        }
+
         void append_header(std::string& output, std::initializer_list<std::string_view> path);
         void append_array_header(std::string& output, std::initializer_list<std::string_view> path);
 
@@ -599,8 +639,7 @@ namespace kaixa {
                     output += "profile = " + toml_string(*configuration.profile) + '\n';
 
                 for (const ResolverConfigurationDefinition& resolver: configuration.resolvers) {
-                    append_header(output, {"config", resolver.resolver});
-                    auto appended = append_table(output, resolver.settings);
+                    auto appended = append_dotted_table(output, key(resolver.resolver), resolver.settings);
                     if (!appended)
                         return std::unexpected(appended.error());
                 }

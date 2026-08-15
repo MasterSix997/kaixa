@@ -16,7 +16,7 @@ namespace kaixa {
 
     [[nodiscard]] Result<CleanPlan> plan_clean(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const CleanRequest& request = {}
     );

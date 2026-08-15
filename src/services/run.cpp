@@ -9,7 +9,7 @@
 namespace kaixa {
     Result<std::vector<RunTarget>> discover_executable_targets(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     ) {
         auto products = discover_products(graph, registry, environment);
@@ -32,7 +32,7 @@ namespace kaixa {
 
     Result<std::vector<RunTarget>> discover_run_targets(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     ) {
         auto targets = discover_executable_targets(graph, registry, environment);
@@ -117,7 +117,7 @@ namespace kaixa {
 
     Result<BuildPlan> plan_run(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         std::string target
     ) {

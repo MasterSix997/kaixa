@@ -8,13 +8,13 @@
 namespace kaixa {
     Result<std::vector<BuildProduct>> discover_products(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     ) {
         std::vector<BuildProduct> products;
         for (const PackageId id: graph.roots()) {
             const PackageNode& root = graph[id];
-            Resolver* resolver = registry.find(root.resolver);
+            Resolver* resolver = registry.find_resolver(root.resolver);
             if (!resolver) {
                 return std::unexpected(error(
                     "resolver `" + root.resolver + "` is not installed"
@@ -36,7 +36,7 @@ namespace kaixa {
 
     Result<BuildPlan> plan_build(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const BuildRequest& request
     ) {
@@ -82,7 +82,7 @@ namespace kaixa {
             if (package.kind == PackageKind::opaque)
                 continue;
 
-            Resolver* resolver = registry.find(package.resolver);
+            Resolver* resolver = registry.find_resolver(package.resolver);
             if (!resolver) {
                 SourceLocation location;
                 if (package.manifest)
@@ -123,7 +123,7 @@ namespace kaixa {
 
     Result<BuildPlan> plan_tests(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const TestRequest& request
     ) {
@@ -133,7 +133,7 @@ namespace kaixa {
 
         for (const PackageId id: graph.roots()) {
             const PackageNode& root = graph[id];
-            Resolver* resolver = registry.find(root.resolver);
+            Resolver* resolver = registry.find_resolver(root.resolver);
             if (!resolver) {
                 return std::unexpected(error(
                     "resolver `" + root.resolver + "` is not installed"

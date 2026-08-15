@@ -167,7 +167,7 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
         root.path() / "out",
         std::move(*configuration)
     };
-    const kaixa::ResolverRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake project plans");
     if (!plan || plan->actions().empty())

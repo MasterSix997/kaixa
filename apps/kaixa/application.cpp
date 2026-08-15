@@ -21,7 +21,7 @@ namespace kaixa::cli {
         struct Workspace {
             Graph graph;
             BuildEnvironment environment;
-            ResolverRegistry registry;
+            ExtensionRegistry registry;
             std::vector<ConfigurationSource> configuration_sources;
         };
 
@@ -87,7 +87,11 @@ namespace kaixa::cli {
         }
 
         Result<Workspace> open_workspace(const WorkspaceOptions& options) {
-            auto resolved = resolve_workspace(options.path, options.packages);
+            ExtensionRegistry registry = plugin::default_registry();
+            auto resolved = resolve_workspace(
+                options.path,
+                ResolutionOptions{options.packages, &registry, {}}
+            );
             if (!resolved)
                 return std::unexpected(resolved.error());
 
@@ -138,7 +142,7 @@ namespace kaixa::cli {
                     directory / ".kaixa",
                     std::move(*configuration)
                 },
-                plugin::default_registry(),
+                std::move(registry),
                 std::move(sources)
             };
         }
@@ -240,6 +244,18 @@ namespace kaixa::cli {
                 std::cout << " -> " << package.directory.string();
 
             std::cout << '\n';
+            if (verbose && package.source) {
+                std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ')
+                    << "source: " << package.source->locator.driver
+                    << ", authority: " << package.source->authority;
+                if (package.source->provider)
+                    std::cout << ", provider: " << *package.source->provider;
+
+                if (package.source->identity)
+                    std::cout << ", identity: " << *package.source->identity;
+
+                std::cout << '\n';
+            }
             for (const PackageId dependency: package.dependencies)
                 print_package(graph, dependency, depth + 1, verbose);
         }
@@ -735,9 +751,10 @@ namespace kaixa::cli {
 
         int run(const InspectCommand& command) {
             if (command.mode == InspectMode::packages) {
+                ExtensionRegistry registry = plugin::default_registry();
                 auto resolved = resolve_workspace(
                     command.workspace.path,
-                    command.workspace.packages
+                    ResolutionOptions{command.workspace.packages, &registry, {}}
                 );
                 if (!resolved)
                     return fail(resolved.error());

@@ -57,7 +57,7 @@ namespace kaixa {
 
     Result<CleanPlan> plan_clean(
         const Graph& graph,
-        const ResolverRegistry& registry,
+        const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         const CleanRequest& request
     ) {
@@ -66,7 +66,7 @@ namespace kaixa {
             if (package.kind == PackageKind::opaque)
                 continue;
 
-            Resolver* resolver = registry.find(package.resolver);
+            Resolver* resolver = registry.find_resolver(package.resolver);
             if (!resolver) {
                 return std::unexpected(error(
                     "resolver `" + package.resolver + "` is not installed"

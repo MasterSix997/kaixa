@@ -4,7 +4,9 @@
 #include <kaixa/build/product.hpp>
 #include <kaixa/clean/plan.hpp>
 #include <kaixa/config/parser.hpp>
+#include <kaixa/extension/provider.hpp>
 #include <kaixa/extension/registry.hpp>
+#include <kaixa/extension/source.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/model/graph.hpp>
 #include <kaixa/model/file_set.hpp>
