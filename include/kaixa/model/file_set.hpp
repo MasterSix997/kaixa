@@ -19,6 +19,7 @@ namespace kaixa {
     [[nodiscard]] Result<std::vector<std::filesystem::path>> expand_file_set(
         const FileSet& files,
         const std::filesystem::path& root,
-        const std::filesystem::path& relative_to
+        const std::filesystem::path& relative_to,
+        bool allow_unmatched = false
     );
 }

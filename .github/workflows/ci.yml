@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+  pull_request:
   workflow_dispatch:
 
 permissions:
@@ -11,6 +13,78 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  quality:
+    name: Code quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install quality tools
+        run: |
+          python -m pip install -r tools/quality-requirements.txt
+          wget --quiet https://apt.llvm.org/llvm.sh --output-document=/tmp/llvm.sh
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 22
+          sudo apt-get install --yes clang-format-22 clang-tidy-22 ninja-build
+          mkdir --parents "$RUNNER_TEMP/llvm-22-bin"
+          ln --symbolic /usr/bin/clang++-22 "$RUNNER_TEMP/llvm-22-bin/clang++"
+          ln --symbolic /usr/bin/clang-format-22 "$RUNNER_TEMP/llvm-22-bin/clang-format"
+          ln --symbolic /usr/bin/clang-tidy-22 "$RUNNER_TEMP/llvm-22-bin/clang-tidy"
+          echo "$RUNNER_TEMP/llvm-22-bin" >> "$GITHUB_PATH"
+
+      - name: Verify LLVM toolchain
+        run: |
+          clang++ --version
+          clang-format --version
+          clang-tidy --version
+
+      - name: Select formatting comparison
+        shell: bash
+        env:
+          EVENT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if [[ -n "$EVENT_BASE" ]] && git rev-parse --verify --quiet "$EVENT_BASE^{commit}"; then
+            echo "KAIXA_FORMAT_BASE=$EVENT_BASE" >> "$GITHUB_ENV"
+          elif git rev-parse --verify --quiet "HEAD^"; then
+            echo "KAIXA_FORMAT_BASE=HEAD^" >> "$GITHUB_ENV"
+          else
+            echo "KAIXA_FORMAT_ALL=1" >> "$GITHUB_ENV"
+          fi
+
+      - name: Check repository rules and complexity
+        run: python tools/quality.py rules complexity
+
+      - name: Check formatting
+        shell: bash
+        run: |
+          if [[ "$KAIXA_FORMAT_ALL" == "1" ]]; then
+            python tools/quality.py format --all-files
+          else
+            python tools/quality.py format --changed-from "$KAIXA_FORMAT_BASE"
+          fi
+
+      - name: Configure analysis build
+        run: >-
+          cmake -S . -B build-quality -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+
+      - name: Run clang-tidy
+        run: python tools/quality.py tidy --compile-commands build-quality
+
   build:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

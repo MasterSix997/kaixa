@@ -1,0 +1,8 @@
+# Exact existing hotspots. Format: normalized path|Lizard function signature.
+src/model/manifest.cpp|kaixa::parse_package_target( TableReader & table , const PackageTargetKind kind , const bool each_source , const std :: string_view resolver , const bool allow_partial)
+src/model/manifest.cpp|kaixa::parse_manifest_document( const Value & document)
+src/model/manifest_writer.cpp|kaixa::validate_manifest( const Manifest & manifest)
+plugins/cmake/src/configuration.cpp|kaixa::plugin::cmake::detail::read_options( const Graph & graph , const PackageNode & package)
+apps/kaixa/command_line.cpp|kaixa::cli::parse_build( Parser & parser)
+plugins/cmake/src/resolver.cpp|kaixa::plugin::cmake::ResolverImpl::plan( const Graph & graph , const PackageNode & package , const BuildEnvironment & environment , const BuildRequest & request , BuildPlan & plan) const
+tests/workspace_fixtures.cpp|KAIXA_TEST( generated_project_workspace_builds_from_kaixa_toml)

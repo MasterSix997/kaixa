@@ -9,5 +9,7 @@ Kaixa.user.toml
 *.pdb
 *.ilk
 .cache/
+__pycache__/
+*.py[cod]
 compile_commands.json
 /examples/generated_cmake/CMakeLists.txt

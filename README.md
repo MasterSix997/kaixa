@@ -132,7 +132,7 @@ cmake.cxx-compiler = "clang++"
 cmake.toolchain = "C:/Toolchains/clang.cmake"
 ```
 
-The user config is `%APPDATA%/Kaixa/config.toml` on Windows 
+The user config is `%APPDATA%/Kaixa/config.toml` on Windows
 and `$XDG_CONFIG_HOME/kaixa/config.toml` (falling back to `~/.config/kaixa/config.toml`) elsewhere.
 
 ```sh
@@ -163,6 +163,10 @@ cmake -S . -B build -G Ninja
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```
+
+## Code quality
+
+Formatting, repository rules, cyclomatic complexity and clang-tidy analysis share one documented workflow. See [Code quality](docs/code_quality.md).
 
 ## License
 

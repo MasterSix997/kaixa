@@ -17,7 +17,9 @@ namespace kaixa {
                 const auto existing = std::ranges::find_if(selected, [&](const SelectedProvider& provider) {
                     return provider.definition.name == definition.name;
                 });
-                SelectedProvider provider{definition, layer.context};
+                SelectedProvider provider{
+                    definition, definition.directory.empty() ? layer.context : ProviderContext{definition.directory}
+                };
                 if (existing == selected.end())
                     selected.push_back(std::move(provider));
                 else

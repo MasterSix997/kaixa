@@ -10,6 +10,9 @@ namespace kaixa::plugin {
         registry.add(cmake::make_resolver());
         registry.add(path::make_source_driver());
         registry.add(path::make_provider_driver());
+        registry.add(path::make_package_map_provider_driver());
+        registry.add(path::make_system_packages_provider_driver());
+        registry.add(path::make_registry_provider_driver());
         return registry;
     }
 }

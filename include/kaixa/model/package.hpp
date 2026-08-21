@@ -15,10 +15,7 @@ namespace kaixa {
         [[nodiscard]] bool operator==(const PackageId&) const = default;
     };
 
-    enum class PackageKind {
-        managed,
-        opaque
-    };
+    enum class PackageKind { managed, opaque };
 
     struct PackageTargetDependencies {
         std::string target;
@@ -43,5 +40,15 @@ namespace kaixa {
         std::vector<PackageId> dependencies;
         std::vector<PackageTargetDependencies> target_dependencies;
         std::optional<PackageSource> source;
+        std::optional<Value> descriptor;
+        std::vector<std::string> active_features;
+        std::vector<Value> policy_layers;
+    };
+
+    struct ConfiguredPackageInstance {
+        PackageId package;
+        std::string artifact;
+        std::vector<std::string> features;
+        std::vector<Value> policy_layers;
     };
 }

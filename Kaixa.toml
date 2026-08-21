@@ -6,34 +6,62 @@ tests = ["tests"]
 examples = ["examples"]
 benchmarks = ["benchmarks"]
 
+[package-set]
+name = "kaixa"
+default = ["kaixa"]
+
+[package-set.policy]
+cxx = 23
+msvc-runtime = "static"
+
+[dependencies]
+kaixa_core = "0.2.0-dev"
+kaixa_plugins = "0.2.0-dev"
+
+[bin]
+sources = ["apps/kaixa/*.cpp"]
+
 [cmake]
 languages = ["CXX"]
-generation = "source"
-cxx-standard = 23
+generation = "state"
 msvc-runtime = "static"
 output = { runtime = "bin", library = "lib", archive = "lib" }
 
-[[cmake.target]]
-name = "kaixa_core"
-type = "static-library"
-sources = ["src/**/*.cpp"]
-public-include-directories = ["include"]
-system-include-directories = ["third_party"]
-compile-definitions = ["TOML_EXCEPTIONS=0"]
+[[config]]
+name = "quality"
 
-[[cmake.target]]
-name = "kaixa_plugins"
-type = "static-library"
+[config.cmake]
+configure-arguments = ["-DCMAKE_EXPORT_COMPILE_COMMANDS=ON"]
+
+[members.kaixa_core]
+version = "0.2.0-dev"
+resolver = "cmake"
+
+[members.kaixa_core.lib]
+type = "static"
+sources = ["src/**/*.cpp"]
+public-include = ["include"]
+system-include = ["third_party"]
+defines = { TOML_EXCEPTIONS = 0 }
+
+[members.kaixa_core.cmake]
+generation = "state"
+
+[members.kaixa_plugins]
+version = "0.2.0-dev"
+resolver = "cmake"
+
+[members.kaixa_plugins.dependencies]
+kaixa_core = "0.2.0-dev"
+
+[members.kaixa_plugins.lib]
+type = "static"
 sources = ["plugins/**/*.cpp"]
-public-include-directories = [
+public-include = [
     "plugins/bundle/include",
     "plugins/cmake/include",
     "plugins/path/include",
 ]
-public-link-libraries = ["kaixa_core"]
 
-[[cmake.target]]
-name = "kaixa"
-type = "executable"
-sources = ["apps/kaixa/*.cpp"]
-link-libraries = ["kaixa_core", "kaixa_plugins"]
+[members.kaixa_plugins.cmake]
+generation = "state"

@@ -55,8 +55,7 @@ KAIXA_TEST(dependencies_normalize_versions_aliases_and_source_drivers) {
     context.check_equal(manifest->dependencies[1].local_name(), std::string_view("physics"), "local binding name");
     context.check_equal(manifest->dependencies[2].selection.source->driver, std::string("git"), "source driver");
     context.check(
-        manifest->dependencies[2].selection.source->options.find("url") != nullptr,
-        "source options remain opaque"
+        manifest->dependencies[2].selection.source->options.find("url") != nullptr, "source options remain opaque"
     );
 
     const auto formatted = kaixa::format_manifest(*manifest);
@@ -175,9 +174,7 @@ KAIXA_TEST(package_set_supports_multiple_defaults_and_explicit_roots) {
 
     context.check_equal(defaults->graph.roots().size(), std::size_t{2}, "default root count");
     context.check_equal(
-        defaults->graph[defaults->graph.roots().front()].name,
-        std::string("editor"),
-        "default order is preserved"
+        defaults->graph[defaults->graph.roots().front()].name, std::string("editor"), "default order is preserved"
     );
     context.check_equal(defaults->available.candidates().size(), std::size_t{3}, "all candidates remain observable");
 
@@ -216,9 +213,7 @@ KAIXA_TEST(package_selection_reports_duplicates_and_available_names) {
     context.check(!duplicate.has_value(), "duplicate package selection is rejected");
     if (!duplicate) {
         context.check_contains(
-            kaixa::format_diagnostic(duplicate.error()),
-            "selected more than once",
-            "duplicate diagnostic"
+            kaixa::format_diagnostic(duplicate.error()), "selected more than once", "duplicate diagnostic"
         );
     }
 
@@ -258,9 +253,7 @@ KAIXA_TEST(package_set_reports_an_incompatible_nearest_candidate) {
     context.check(!graph.has_value(), "incompatible local candidate is rejected");
     if (!graph) {
         context.check_contains(
-            kaixa::format_diagnostic(graph.error()),
-            "does not satisfy `^2`",
-            "diagnostic reports the candidate version"
+            kaixa::format_diagnostic(graph.error()), "does not satisfy `^2`", "diagnostic reports the candidate version"
         );
     }
 }
@@ -313,4 +306,92 @@ KAIXA_TEST(package_index_exposes_nested_candidates_without_loading_the_graph) {
     context.check(math != nullptr, "nested package resolves within its own set");
     if (math)
         context.check_equal(math->version->text, std::string("0.4.1"), "candidate metadata is retained");
+}
+
+KAIXA_TEST(target_policy_creates_a_separate_configured_package_instance) {
+    const TempDirectory root("configured-instances");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "default = [\"app\"]\n"
+        "\n"
+        "[package-set.policy]\n"
+        "cxx = 23\n"
+        "\n"
+        "[lib]\n"
+        "type = \"static\"\n"
+        "sources = [\"app.cpp\"]\n"
+        "\n"
+        "[[test]]\n"
+        "name = \"app.tests.noexcept\"\n"
+        "sources = [\"test.cpp\"]\n"
+        "policy = { exceptions = false }\n"
+    );
+    root.write("app.cpp", "int answer() { return 42; }\n");
+    root.write("test.cpp", "int main() { return 0; }\n");
+
+    const auto resolution = kaixa::resolve_workspace(root.path());
+    context.check(resolution.has_value(), "configured workspace resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+    context.check_equal(resolution->instances.size(), std::size_t{2}, "default and target instances");
+    context.check_equal(resolution->instances[0].artifact, std::string("default"), "default artifact");
+    context.check_equal(
+        resolution->instances[1].artifact, std::string("app.tests.noexcept"), "policy-specific artifact"
+    );
+    context.check_equal(
+        resolution->instances[1].policy_layers.size(), std::size_t{2}, "package-set and target policies compose"
+    );
+}
+
+KAIXA_TEST(configured_features_activate_optional_dependencies) {
+    const TempDirectory root("configured-features");
+    root.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"app\", \"tool\"]\n"
+        "default = [\"app\"]\n"
+    );
+    root.write(
+        "app/Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[features]\n"
+        "tools = { dependencies = [\"tool\"] }\n"
+        "\n"
+        "[dependencies]\n"
+        "tool = { version = \"1\", optional = true }\n"
+    );
+    root.write(
+        "tool/Kaixa.toml",
+        "[package]\n"
+        "name = \"tool\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    const kaixa::Value feature_settings = kaixa::Value::table({{"app", kaixa::Value::array({kaixa::Value("tools")})}});
+    const auto resolution =
+        kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, nullptr, {}, {}, &feature_settings});
+    context.check(resolution.has_value(), "configured feature graph resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+    context.check_equal(resolution->graph.size(), std::size_t{2}, "optional dependency is loaded");
+    const auto app = resolution->graph.find_by_name("app");
+    context.check(app.has_value(), "configured package exists");
+    if (app) {
+        context.check_equal(
+            resolution->graph[*app].active_features.front(), std::string("tools"), "configured feature is active"
+        );
+    }
 }

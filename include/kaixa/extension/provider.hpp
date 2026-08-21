@@ -18,9 +18,11 @@ namespace kaixa {
 
     struct PackageCandidate {
         std::string package;
-        Version version;
+        std::optional<Version> version;
         std::string authority;
-        SourceLocator source;
+        std::optional<SourceLocator> source;
+        std::optional<std::string> resolver;
+        std::optional<Value> descriptor;
     };
 
     struct ProviderContext {
@@ -33,7 +35,7 @@ namespace kaixa {
     };
 
     class PackageProvider {
-    public:
+      public:
         virtual ~PackageProvider() = default;
 
         [[nodiscard]] virtual ProviderInfo info() const = 0;
@@ -46,16 +48,15 @@ namespace kaixa {
     };
 
     class ProviderDriver {
-    public:
+      public:
         virtual ~ProviderDriver() = default;
 
         [[nodiscard]] virtual ProviderDriverInfo info() const = 0;
-        [[nodiscard]] virtual Result<std::unique_ptr<PackageProvider>> create(
-            const ProviderDefinition& definition,
-            const ProviderContext& context
-        ) const = 0;
+        [[nodiscard]] virtual Result<std::unique_ptr<PackageProvider>>
+        create(const ProviderDefinition& definition, const ProviderContext& context) const = 0;
     };
 
     class ExtensionRegistry;
-    [[nodiscard]] Result<void> configure_providers(ExtensionRegistry& registry, const std::vector<ProviderLayer>& layers);
+    [[nodiscard]] Result<void>
+    configure_providers(ExtensionRegistry& registry, const std::vector<ProviderLayer>& layers);
 }

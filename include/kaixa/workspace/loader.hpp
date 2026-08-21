@@ -15,6 +15,8 @@ namespace kaixa {
         PackageIndex available;
         ConfigurationSet configurations;
         std::filesystem::path manifest;
+        ManifestTree model;
+        std::vector<ConfiguredPackageInstance> instances;
     };
 
     struct ResolutionOptions {
@@ -22,10 +24,13 @@ namespace kaixa {
         ExtensionRegistry* extensions = nullptr;
         std::filesystem::path source_cache;
         std::span<const ProviderLayer> provider_layers;
+        const Value* feature_settings = nullptr;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);
-    [[nodiscard]] Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options);
-    [[nodiscard]] Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, std::span<const std::string> selected_packages = {});
+    [[nodiscard]] Result<PackageResolution>
+    resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options);
+    [[nodiscard]] Result<PackageResolution>
+    resolve_workspace(const std::filesystem::path& start, std::span<const std::string> selected_packages = {});
     [[nodiscard]] Result<Graph> load_workspace(const std::filesystem::path& start);
 }

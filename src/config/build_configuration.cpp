@@ -10,8 +10,7 @@ namespace kaixa {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
             return error_at(
                 std::move(location),
-                "expected " + std::string(expected) + ", found "
-                    + std::string(value_kind_name(found))
+                "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found))
             );
         }
 
@@ -37,10 +36,8 @@ namespace kaixa {
             return result;
         }
 
-        Result<ConfigurationDefinition> read_definition(
-            TableReader definition,
-            std::optional<std::string> external_name = std::nullopt
-        ) {
+        Result<ConfigurationDefinition>
+        read_definition(TableReader definition, std::optional<std::string> external_name = std::nullopt) {
             ConfigurationDefinition result;
             if (external_name) {
                 result.name = std::move(*external_name);
@@ -65,17 +62,13 @@ namespace kaixa {
                 if (!entry.value.is_table()) {
                     SourceLocation location = entry.value.location();
                     location.config_path = path;
-                    return std::unexpected(wrong_kind(
-                        std::move(location),
-                        "a resolver settings table",
-                        entry.value.kind()
-                    ));
+                    return std::unexpected(
+                        wrong_kind(std::move(location), "a resolver settings table", entry.value.kind())
+                    );
                 }
-                if (std::ranges::any_of(result.resolvers,
-                        [&](const ResolverConfigurationDefinition& resolver) {
-                            return resolver.resolver == entry.key;
-                        }
-                    )) {
+                if (std::ranges::any_of(result.resolvers, [&](const ResolverConfigurationDefinition& resolver) {
+                        return resolver.resolver == entry.key;
+                    })) {
                     return std::unexpected(error_at(
                         entry.value.location(),
                         "duplicate resolver `" + entry.key + "` in configuration `" + result.name + "`"
@@ -91,10 +84,7 @@ namespace kaixa {
             if (*legacy_resolvers) {
                 TableReader resolvers = std::move(**legacy_resolvers);
                 for (const TableEntry& resolver: resolvers.entries()) {
-                    auto appended = append_resolver(
-                        resolver,
-                        join_config_path(resolvers.path(), resolver.key)
-                    );
+                    auto appended = append_resolver(resolver, join_config_path(resolvers.path(), resolver.key));
                     if (!appended)
                         return std::unexpected(appended.error());
                 }
@@ -105,10 +95,7 @@ namespace kaixa {
                 if (entry.key == "name" || entry.key == "profile" || entry.key == "resolvers")
                     continue;
                 definition.take(entry.key);
-                auto appended = append_resolver(
-                    entry,
-                    join_config_path(definition.path(), entry.key)
-                );
+                auto appended = append_resolver(entry, join_config_path(definition.path(), entry.key));
                 if (!appended)
                     return std::unexpected(appended.error());
             }
@@ -127,10 +114,8 @@ namespace kaixa {
 
             std::vector<TableEntry> merged = *base_table;
             for (const TableEntry& incoming: *overlay_table) {
-                const auto existing = std::ranges::find_if(
-                    merged,
-                    [&](const TableEntry& entry) { return entry.key == incoming.key; }
-                );
+                const auto existing =
+                    std::ranges::find_if(merged, [&](const TableEntry& entry) { return entry.key == incoming.key; });
                 if (existing == merged.end()) {
                     merged.push_back(incoming);
                 } else {
@@ -140,23 +125,53 @@ namespace kaixa {
             return Value::table(std::move(merged), overlay.location());
         }
 
-        ResolverBuildConfiguration& resolver_configuration(
-            EffectiveBuildConfiguration& configuration,
-            const std::string_view resolver
-        ) {
-            const auto existing = std::ranges::find_if(
-                configuration.resolvers,
-                [&](const ResolverBuildConfiguration& candidate) {
-                    return candidate.resolver == resolver;
+        Value merge_feature_settings(const Value& base, const Value& overlay) {
+            const std::vector<TableEntry>* base_table = base.as_table();
+            const std::vector<TableEntry>* overlay_table = overlay.as_table();
+            if (!base_table || !overlay_table)
+                return overlay;
+
+            std::vector<TableEntry> merged = *base_table;
+            for (const TableEntry& incoming: *overlay_table) {
+                const auto existing =
+                    std::ranges::find_if(merged, [&](const TableEntry& entry) { return entry.key == incoming.key; });
+                if (existing == merged.end()) {
+                    merged.push_back(incoming);
+                    continue;
                 }
-            );
+
+                const std::vector<Value>* base_features = existing->value.as_array();
+                const std::vector<Value>* overlay_features = incoming.value.as_array();
+                if (!base_features || !overlay_features) {
+                    existing->value = incoming.value;
+                    continue;
+                }
+
+                std::vector<Value> features = *base_features;
+                for (const Value& feature: *overlay_features) {
+                    const std::string* name = feature.as_string();
+                    const bool duplicate = name && std::ranges::any_of(features, [&](const Value& candidate) {
+                                               const std::string* existing_name = candidate.as_string();
+                                               return existing_name && *existing_name == *name;
+                                           });
+                    if (!duplicate)
+                        features.push_back(feature);
+                }
+                existing->value = Value::array(std::move(features), incoming.value.location());
+            }
+            return Value::table(std::move(merged), overlay.location());
+        }
+
+        ResolverBuildConfiguration&
+        resolver_configuration(EffectiveBuildConfiguration& configuration, const std::string_view resolver) {
+            const auto existing =
+                std::ranges::find_if(configuration.resolvers, [&](const ResolverBuildConfiguration& candidate) {
+                    return candidate.resolver == resolver;
+                });
             if (existing != configuration.resolvers.end())
                 return *existing;
             return configuration.resolvers.emplace_back(
-                std::string(resolver),
-                std::nullopt,
-                std::vector<std::string>{},
-                std::vector<ResolverArgumentGroup>{}
+                std::string(resolver), std::nullopt, std::vector<std::string>{}, std::vector<ResolverArgumentGroup>{}
             );
         }
 
@@ -168,15 +183,11 @@ namespace kaixa {
         }
     }
 
-    const ResolverBuildConfiguration* EffectiveBuildConfiguration::find(
-        const std::string_view resolver
-    ) const noexcept {
-        const auto result = std::ranges::find_if(
-            resolvers,
-            [&](const ResolverBuildConfiguration& candidate) {
-                return candidate.resolver == resolver;
-            }
-        );
+    const ResolverBuildConfiguration*
+    EffectiveBuildConfiguration::find(const std::string_view resolver) const noexcept {
+        const auto result = std::ranges::find_if(resolvers, [&](const ResolverBuildConfiguration& candidate) {
+            return candidate.resolver == resolver;
+        });
         return result == resolvers.end() ? nullptr : &*result;
     }
 
@@ -200,10 +211,8 @@ namespace kaixa {
             if (*configurations_result) {
                 TableReader configurations = std::move(**configurations_result);
                 for (const TableEntry& entry: configurations.entries()) {
-                    auto definition_result = TableReader::bind(
-                        entry.value,
-                        join_config_path(configurations.path(), entry.key)
-                    );
+                    auto definition_result =
+                        TableReader::bind(entry.value, join_config_path(configurations.path(), entry.key));
                     if (!definition_result)
                         return std::unexpected(definition_result.error());
 
@@ -225,16 +234,11 @@ namespace kaixa {
             const std::vector<Value>* configurations = configurations_value->as_array();
             if (!configurations) {
                 return std::unexpected(wrong_kind(
-                    root.location_of("config"),
-                    "an array of configuration tables",
-                    configurations_value->kind()
+                    root.location_of("config"), "an array of configuration tables", configurations_value->kind()
                 ));
             }
             for (std::size_t index = 0; index < configurations->size(); ++index) {
-                auto definition_result = TableReader::bind(
-                    (*configurations)[index],
-                    "config." + std::to_string(index)
-                );
+                auto definition_result = TableReader::bind((*configurations)[index], "config." + std::to_string(index));
                 if (!definition_result)
                     return std::unexpected(definition_result.error());
 
@@ -242,15 +246,12 @@ namespace kaixa {
                 if (!parsed)
                     return std::unexpected(parsed.error());
 
-                if (std::ranges::any_of(result.definitions,
-                        [&](const ConfigurationDefinition& definition) {
-                            return definition.name == parsed->name;
-                        }
-                    )) {
-                    return std::unexpected(error_at(
-                        parsed->location,
-                        "duplicate configuration `" + parsed->name + "`"
-                    ));
+                if (std::ranges::any_of(result.definitions, [&](const ConfigurationDefinition& definition) {
+                        return definition.name == parsed->name;
+                    })) {
+                    return std::unexpected(
+                        error_at(parsed->location, "duplicate configuration `" + parsed->name + "`")
+                    );
                 }
                 result.definitions.push_back(std::move(*parsed));
             }
@@ -318,13 +319,14 @@ namespace kaixa {
                     }
 
                     for (const ResolverConfigurationDefinition& resolver: definition.resolvers) {
-                        ResolverBuildConfiguration& target = resolver_configuration(
-                            result,
-                            resolver.resolver
-                        );
-                        target.settings = target.settings
-                            ? std::optional<Value>(merge_values(*target.settings, resolver.settings))
-                            : std::optional<Value>(resolver.settings);
+                        ResolverBuildConfiguration& target = resolver_configuration(result, resolver.resolver);
+                        if (!target.settings) {
+                            target.settings = resolver.settings;
+                        } else if (resolver.resolver == "features") {
+                            target.settings = merge_feature_settings(*target.settings, resolver.settings);
+                        } else {
+                            target.settings = merge_values(*target.settings, resolver.settings);
+                        }
                     }
                 }
             }
@@ -339,30 +341,20 @@ namespace kaixa {
         for (const ResolverArgumentOverride& override: argument_overrides) {
             ResolverBuildConfiguration& target = resolver_configuration(result, override.resolver);
             if (override.scope.empty()) {
-                target.arguments.insert(
-                    target.arguments.end(),
-                    override.arguments.begin(),
-                    override.arguments.end()
-                );
+                target.arguments.insert(target.arguments.end(), override.arguments.begin(), override.arguments.end());
                 continue;
             }
 
-            const auto scoped = std::ranges::find_if(
-                target.scoped_arguments,
-                [&](const ResolverArgumentGroup& arguments) {
+            const auto scoped =
+                std::ranges::find_if(target.scoped_arguments, [&](const ResolverArgumentGroup& arguments) {
                     return arguments.scope == override.scope;
-                }
-            );
+                });
             if (scoped == target.scoped_arguments.end()) {
                 target.scoped_arguments.push_back({override.scope, override.arguments});
                 continue;
             }
 
-            scoped->arguments.insert(
-                scoped->arguments.end(),
-                override.arguments.begin(),
-                override.arguments.end()
-            );
+            scoped->arguments.insert(scoped->arguments.end(), override.arguments.begin(), override.arguments.end());
         }
         return result;
     }

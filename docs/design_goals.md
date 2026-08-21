@@ -8,6 +8,7 @@
   Don't know about c++, cmake, lua, or asset pipeline. The entire specification lives in resolvers/plugins.
 - **Hierarchical:** The dependency tree is declared statically in the manifests and known before any pass runs.
 - **Partial adoption:** Folders without manifest (opaque), git submodules without manifest, and managed packages share the same tree.
+- **Resolver authority:** Adopting an existing project does not require reproducing its build graph in the manifest. The resolver remains authoritative for its internal units and maps observable products back to packages.
 
 ## Nodes
 
@@ -27,6 +28,8 @@ Node
 2. **Namespaced commands:** `target:commands` (e.g., `cmake:generate`, `engine:bake_shaders`)
 
 ## Reference manifests
+
+One package per `Kaixa.toml` is the primary layout. Inline members remain available when multiple small packages genuinely benefit from sharing one manifest, but they are not the default organization.
 
 ### Leaf minimum
 ```toml
@@ -64,36 +67,23 @@ outputs = "generated/shaders"
 before = "cmake:build"
 ```
 
-### Workspace
+### Package set
 ```toml
-[package]
+[package-set]
 name = "engine"
-version = "0.1.0"
-resolver = "workspace"
-
-[members]
-core = "core"
-render = "render"
-physics = "physics"
-
-[dev-members]
-reflection_prepass = "dev/reflection_prepass"
-
-[commands]
-bake_shaders = { script = "scripts/bake_shaders.sh" }
-run = { script = "scripts/run_dev", api = true }
+members = ["core", "render", "physics"]
+development-members = ["dev/reflection_prepass"]
 ```
 
 ### Multilingual with subfolders
 ```toml
-[package]
+[package-set]
 name = "render_2d"
-resolver = "workspace"
-
-[members]
-core = "core"           # core/kaixa.toml -> resolver = "cmake"
-scripting = "scripting" # scripting/kaixa.toml -> resolver = "lua"
-fastpath = "fastpath"   # fastpath/kaixa.toml -> resolver = "zig"
+members = [
+    "core",      # core/Kaixa.toml -> resolver = "cmake"
+    "scripting", # scripting/Kaixa.toml -> resolver = "lua"
+    "fastpath",  # fastpath/Kaixa.toml -> resolver = "zig"
+]
 ```
 
 ### Multilingual inline
@@ -101,10 +91,8 @@ fastpath = "fastpath"   # fastpath/kaixa.toml -> resolver = "zig"
 > A single folder may hold multiple languages: nodes are partitioned by file set,
 > not by folder. See *Source partitioning* below.
 ```toml
-[package]
+[package-set]
 name = "render_2d"
-version = "0.1.0"
-resolver = "workspace"
 
 [members.core]
 resolver = "cmake"

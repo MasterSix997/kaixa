@@ -9,10 +9,8 @@
 
 namespace kaixa {
     namespace {
-        Result<std::vector<std::filesystem::path>> expand_members(
-            const PackageSet& package_set,
-            const std::filesystem::path& directory
-        ) {
+        Result<std::vector<std::filesystem::path>>
+        expand_members(const PackageSet& package_set, const std::filesystem::path& directory) {
             FileSet manifests;
             manifests.location = package_set.location;
             manifests.include.reserve(package_set.members.size());
@@ -35,10 +33,8 @@ namespace kaixa {
                 if (!std::filesystem::is_regular_file(declared, failure)) {
                     return std::unexpected(error_at(
                         package_set.location,
-                        failure
-                            ? "cannot inspect package set member `" + declared.string() + "`: "
-                                + failure.message()
-                            : "package set member has no Kaixa.toml: " + declared.string()
+                        failure ? "cannot inspect package set member `" + declared.string() + "`: " + failure.message()
+                                : "package set member has no Kaixa.toml: " + declared.string()
                     ));
                 }
 
@@ -46,35 +42,26 @@ namespace kaixa {
                 if (failure) {
                     return std::unexpected(error_at(
                         package_set.location,
-                        "cannot canonicalize package set member `" + declared.string() + "`: "
-                            + failure.message()
+                        "cannot canonicalize package set member `" + declared.string() + "`: " + failure.message()
                     ));
                 }
                 result.push_back(std::move(canonical));
             }
 
-            std::ranges::sort(result, {}, [](const std::filesystem::path& path) {
-                return path.generic_string();
-            });
+            std::ranges::sort(result, {}, [](const std::filesystem::path& path) { return path.generic_string(); });
             result.erase(std::ranges::unique(result).begin(), result.end());
             return result;
         }
     }
 
-    Result<PackageIndex> PackageIndex::discover(
-        const std::filesystem::path& selected_manifest,
-        const ManifestDocument& selected_document
-    ) {
+    Result<PackageIndex>
+    PackageIndex::discover(const std::filesystem::path& selected_manifest, const ManifestDocument& selected_document) {
         PackageIndex result;
         std::error_code canonical_failure;
-        const std::filesystem::path selected = std::filesystem::canonical(
-            selected_manifest,
-            canonical_failure
-        );
+        const std::filesystem::path selected = std::filesystem::canonical(selected_manifest, canonical_failure);
         if (canonical_failure) {
             return std::unexpected(error(
-                "cannot canonicalize manifest `" + selected_manifest.string() + "`: "
-                    + canonical_failure.message()
+                "cannot canonicalize manifest `" + selected_manifest.string() + "`: " + canonical_failure.message()
             ));
         }
 
@@ -86,17 +73,16 @@ namespace kaixa {
             std::error_code failure;
             const bool exists = std::filesystem::exists(candidate, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect manifest `" + candidate.string() + "`: " + failure.message()
-                ));
+                return std::unexpected(
+                    error("cannot inspect manifest `" + candidate.string() + "`: " + failure.message())
+                );
             }
             if (exists && std::filesystem::is_regular_file(candidate, failure)) {
                 std::filesystem::path canonical = std::filesystem::canonical(candidate, failure);
                 if (failure) {
-                    return std::unexpected(error(
-                        "cannot canonicalize manifest `" + candidate.string() + "`: "
-                            + failure.message()
-                    ));
+                    return std::unexpected(
+                        error("cannot canonicalize manifest `" + candidate.string() + "`: " + failure.message())
+                    );
                 }
 
                 auto raw_document = parse_file(canonical);
@@ -117,9 +103,9 @@ namespace kaixa {
                     }
                 }
             } else if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect manifest `" + candidate.string() + "`: " + failure.message()
-                ));
+                return std::unexpected(
+                    error("cannot inspect manifest `" + candidate.string() + "`: " + failure.message())
+                );
             }
 
             const std::filesystem::path parent = directory.parent_path();
@@ -156,14 +142,11 @@ namespace kaixa {
     }
 
     Result<void> PackageIndex::add_candidate(
-        const std::size_t scope,
-        const Manifest& package,
-        const std::filesystem::path& manifest
+        const std::size_t scope, const Manifest& package, const std::filesystem::path& manifest
     ) {
-        const auto existing = std::ranges::find_if(
-            m_candidates,
-            [&](const LocalPackageCandidate& candidate) { return candidate.manifest == manifest; }
-        );
+        const auto existing = std::ranges::find_if(m_candidates, [&](const LocalPackageCandidate& candidate) {
+            return candidate.manifest == manifest && candidate.name == package.name;
+        });
         std::size_t candidate = 0;
         if (existing == m_candidates.end()) {
             candidate = m_candidates.size();
@@ -176,19 +159,17 @@ namespace kaixa {
 
     Result<void> PackageIndex::add_candidate(const std::size_t scope, const std::size_t candidate) {
         const LocalPackageCandidate& package = m_candidates[candidate];
-        const auto existing = std::ranges::find_if(
-            m_scopes[scope].candidates,
-            [&](const std::size_t id) { return m_candidates[id].name == package.name; }
-        );
+        const auto existing = std::ranges::find_if(m_scopes[scope].candidates, [&](const std::size_t id) {
+            return m_candidates[id].name == package.name;
+        });
         if (existing != m_scopes[scope].candidates.end()) {
             if (*existing == candidate)
                 return {};
 
             return std::unexpected(error_at(
                 package.location,
-                "package set provides `" + package.name + "` from both `"
-                    + m_candidates[*existing].manifest.string() + "` and `"
-                    + package.manifest.string() + "`"
+                "package set provides `" + package.name + "` from both `" + m_candidates[*existing].manifest.string()
+                    + "` and `" + package.manifest.string() + "`"
             ));
         }
 
@@ -196,20 +177,16 @@ namespace kaixa {
         return {};
     }
 
-    Result<std::size_t> PackageIndex::index_scope(
-        const std::filesystem::path& manifest_path,
-        const std::optional<std::size_t> parent
-    ) {
+    Result<std::size_t>
+    PackageIndex::index_scope(const std::filesystem::path& manifest_path, const std::optional<std::size_t> parent) {
         if (m_indexing.contains(manifest_path)) {
-            return std::unexpected(error(
-                "package set inclusion cycle reaches `" + manifest_path.string() + "`"
-            ));
+            return std::unexpected(error("package set inclusion cycle reaches `" + manifest_path.string() + "`"));
         }
         if (const auto existing = m_set_scopes.find(manifest_path); existing != m_set_scopes.end()) {
             if (m_scopes[existing->second].parent != parent) {
-                return std::unexpected(error(
-                    "package set `" + manifest_path.string() + "` is included through more than one scope"
-                ));
+                return std::unexpected(
+                    error("package set `" + manifest_path.string() + "` is included through more than one scope")
+                );
             }
             return existing->second;
         }
@@ -218,13 +195,11 @@ namespace kaixa {
         if (!document)
             return std::unexpected(document.error());
         if (!document->package_set) {
-            return std::unexpected(error(
-                "manifest `" + manifest_path.string() + "` does not declare a package set"
-            ));
+            return std::unexpected(error("manifest `" + manifest_path.string() + "` does not declare a package set"));
         }
 
         const std::size_t id = m_scopes.size();
-        m_scopes.push_back({manifest_path, parent, {}});
+        m_scopes.push_back({manifest_path, parent, {}, document->package_set->policy});
         m_set_scopes.emplace(manifest_path, id);
         m_indexing.insert(manifest_path);
 
@@ -235,6 +210,12 @@ namespace kaixa {
 
             m_package_scopes[manifest_path] = id;
         }
+        for (const Manifest& member: document->inline_members) {
+            auto added = add_candidate(id, member, manifest_path);
+            if (!added)
+                return std::unexpected(added.error());
+            m_package_scopes[manifest_path] = id;
+        }
 
         auto members = expand_members(*document->package_set, manifest_path.parent_path());
         if (!members)
@@ -242,10 +223,9 @@ namespace kaixa {
 
         for (const std::filesystem::path& member: *members) {
             if (member == manifest_path) {
-                return std::unexpected(error_at(
-                    document->package_set->location,
-                    "package set cannot include its own manifest"
-                ));
+                return std::unexpected(
+                    error_at(document->package_set->location, "package set cannot include its own manifest")
+                );
             }
 
             auto child = parse_manifest_document_file(member);
@@ -263,11 +243,17 @@ namespace kaixa {
                     if (!added)
                         return std::unexpected(added.error());
                 }
-            } else if (child->package) {
-                auto added = add_candidate(id, *child->package, member);
-                if (!added)
-                    return std::unexpected(added.error());
-
+            } else if (child->package || !child->inline_members.empty()) {
+                if (child->package) {
+                    auto added = add_candidate(id, *child->package, member);
+                    if (!added)
+                        return std::unexpected(added.error());
+                }
+                for (const Manifest& inline_member: child->inline_members) {
+                    auto added = add_candidate(id, inline_member, member);
+                    if (!added)
+                        return std::unexpected(added.error());
+                }
                 m_package_scopes[member] = id;
             }
         }
@@ -276,19 +262,15 @@ namespace kaixa {
         return id;
     }
 
-    const LocalPackageCandidate* PackageIndex::find_for(
-        const std::filesystem::path& requester_manifest,
-        const std::string_view name
-    ) const {
+    const LocalPackageCandidate*
+    PackageIndex::find_for(const std::filesystem::path& requester_manifest, const std::string_view name) const {
         const auto nearest = m_package_scopes.find(requester_manifest);
-        std::optional<std::size_t> scope = nearest == m_package_scopes.end()
-            ? std::nullopt
-            : std::optional(nearest->second);
+        std::optional<std::size_t> scope =
+            nearest == m_package_scopes.end() ? std::nullopt : std::optional(nearest->second);
         while (scope) {
-            const auto candidate = std::ranges::find_if(
-                m_scopes[*scope].candidates,
-                [&](const std::size_t id) { return m_candidates[id].name == name; }
-            );
+            const auto candidate = std::ranges::find_if(m_scopes[*scope].candidates, [&](const std::size_t id) {
+                return m_candidates[id].name == name;
+            });
             if (candidate != m_scopes[*scope].candidates.end())
                 return &m_candidates[*candidate];
 
@@ -297,20 +279,35 @@ namespace kaixa {
         return nullptr;
     }
 
-    const LocalPackageCandidate* PackageIndex::find_in_set(
-        const std::filesystem::path& package_set_manifest,
-        const std::string_view name
-    ) const {
+    const LocalPackageCandidate*
+    PackageIndex::find_in_set(const std::filesystem::path& package_set_manifest, const std::string_view name) const {
         const auto scope = m_set_scopes.find(package_set_manifest);
         if (scope == m_set_scopes.end())
             return nullptr;
 
-        const auto candidate = std::ranges::find_if(
-            m_scopes[scope->second].candidates,
-            [&](const std::size_t id) { return m_candidates[id].name == name; }
-        );
-        return candidate == m_scopes[scope->second].candidates.end()
-            ? nullptr
-            : &m_candidates[*candidate];
+        const auto candidate = std::ranges::find_if(m_scopes[scope->second].candidates, [&](const std::size_t id) {
+            return m_candidates[id].name == name;
+        });
+        return candidate == m_scopes[scope->second].candidates.end() ? nullptr : &m_candidates[*candidate];
+    }
+
+    std::vector<Value> PackageIndex::policies_for(const std::filesystem::path& requester_manifest) const {
+        const auto nearest = m_package_scopes.find(requester_manifest);
+        if (nearest == m_package_scopes.end())
+            return {};
+
+        std::vector<const Value*> reversed;
+        std::optional<std::size_t> scope = nearest->second;
+        while (scope) {
+            if (m_scopes[*scope].policy)
+                reversed.push_back(&*m_scopes[*scope].policy);
+            scope = m_scopes[*scope].parent;
+        }
+
+        std::vector<Value> result;
+        result.reserve(reversed.size());
+        for (auto layer = reversed.rbegin(); layer != reversed.rend(); ++layer)
+            result.push_back(**layer);
+        return result;
     }
 }

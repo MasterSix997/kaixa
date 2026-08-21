@@ -77,7 +77,8 @@ namespace kaixa {
     Result<std::vector<std::filesystem::path>> expand_file_set(
         const FileSet& files,
         const std::filesystem::path& root,
-        const std::filesystem::path& relative_to
+        const std::filesystem::path& relative_to,
+        const bool allow_unmatched
     ) {
         std::vector<std::regex> exclusions;
         exclusions.reserve(files.exclude.size());
@@ -85,10 +86,9 @@ namespace kaixa {
             for (const std::string& pattern: files.exclude)
                 exclusions.emplace_back(regex_pattern(normalized_pattern(pattern)));
         } catch (const std::regex_error& failure) {
-            return std::unexpected(error_at(
-                files.location,
-                "invalid file exclusion pattern: " + std::string(failure.what())
-            ));
+            return std::unexpected(
+                error_at(files.location, "invalid file exclusion pattern: " + std::string(failure.what()))
+            );
         }
 
         std::vector<std::filesystem::path> result;
@@ -96,8 +96,8 @@ namespace kaixa {
             const std::string pattern = normalized_pattern(declared);
             if (!is_glob_pattern(pattern)) {
                 const std::filesystem::path path = std::filesystem::path(pattern).is_absolute()
-                    ? std::filesystem::path(pattern)
-                    : root / std::filesystem::path(pattern);
+                                                       ? std::filesystem::path(pattern)
+                                                       : root / std::filesystem::path(pattern);
                 if (!matches_any(relative_pattern_path(path, root), exclusions))
                     result.push_back(output_path(path, relative_to));
 
@@ -108,10 +108,9 @@ namespace kaixa {
             try {
                 matcher = std::regex(regex_pattern(pattern));
             } catch (const std::regex_error& failure) {
-                return std::unexpected(error_at(
-                    files.location,
-                    "invalid file pattern `" + declared + "`: " + failure.what()
-                ));
+                return std::unexpected(
+                    error_at(files.location, "invalid file pattern `" + declared + "`: " + failure.what())
+                );
             }
 
             const std::filesystem::path directory = search_root(root, pattern);
@@ -119,10 +118,9 @@ namespace kaixa {
             std::filesystem::recursive_directory_iterator iterator(directory, failure);
             const std::filesystem::recursive_directory_iterator end;
             if (failure) {
-                return std::unexpected(error_at(
-                    files.location,
-                    "cannot inspect file pattern `" + declared + "`: " + failure.message()
-                ));
+                return std::unexpected(
+                    error_at(files.location, "cannot inspect file pattern `" + declared + "`: " + failure.message())
+                );
             }
 
             bool matched = false;
@@ -130,10 +128,9 @@ namespace kaixa {
                 const std::filesystem::directory_entry& entry = *iterator;
                 const bool regular = entry.is_regular_file(failure);
                 if (failure) {
-                    return std::unexpected(error_at(
-                        files.location,
-                        "cannot inspect `" + entry.path().string() + "`: " + failure.message()
-                    ));
+                    return std::unexpected(
+                        error_at(files.location, "cannot inspect `" + entry.path().string() + "`: " + failure.message())
+                    );
                 }
 
                 if (regular) {
@@ -146,24 +143,18 @@ namespace kaixa {
                 }
                 iterator.increment(failure);
                 if (failure) {
-                    return std::unexpected(error_at(
-                        files.location,
-                        "cannot inspect file pattern `" + declared + "`: " + failure.message()
-                    ));
+                    return std::unexpected(
+                        error_at(files.location, "cannot inspect file pattern `" + declared + "`: " + failure.message())
+                    );
                 }
             }
 
-            if (!matched) {
-                return std::unexpected(error_at(
-                    files.location,
-                    "file pattern `" + declared + "` matched no files"
-                ));
+            if (!matched && !allow_unmatched) {
+                return std::unexpected(error_at(files.location, "file pattern `" + declared + "` matched no files"));
             }
         }
 
-        std::ranges::sort(result, {}, [](const std::filesystem::path& path) {
-            return path.generic_string();
-        });
+        std::ranges::sort(result, {}, [](const std::filesystem::path& path) { return path.generic_string(); });
         result.erase(std::ranges::unique(result).begin(), result.end());
         return result;
     }
