@@ -83,9 +83,11 @@ endforeach()
             output += " \"${" + variable + "}.cmake\")\n";
         }
 
-        Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package) {
+        Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package, const std::string_view configured_artifact) {
             const auto action = std::ranges::find_if(plan.actions(), [&](const Action& candidate) {
-                return candidate.package == package.id && candidate.stage == ActionStage::build;
+                return candidate.package == package.id
+                    && candidate.configured_artifact == configured_artifact
+                    && candidate.stage == ActionStage::build;
             });
             if (action == plan.actions().end()) {
                 return std::unexpected(error("CMake test plan has no build action for package `" + package.name + "`"));
@@ -126,10 +128,19 @@ endforeach()
         const std::filesystem::path& build_directory,
         const std::string_view configuration,
         const TestRequest& request,
+        const std::span<const std::string> selected_targets,
+        const std::string_view configured_artifact,
         BuildPlan& plan
     ) {
         std::vector<std::string> build_targets;
-        if (request.target) {
+        if (!selected_targets.empty()) {
+            build_targets.assign(selected_targets.begin(), selected_targets.end());
+            for (const std::string& selected: build_targets) {
+                if (std::ranges::none_of(options.tests, [&](const TestOptions& test) { return test.target == selected; })) {
+                    return std::unexpected(error("CMake target `" + selected + "` does not declare tests"));
+                }
+            }
+        } else if (request.target) {
             const auto target = std::ranges::find_if(options.targets, [&](const TargetOptions& candidate) {
                 return candidate.name == *request.target;
             });
@@ -149,7 +160,7 @@ endforeach()
         }
 
         if (!build_targets.empty()) {
-            auto build = find_build_action(plan, package);
+            auto build = find_build_action(plan, package, configured_artifact);
             if (!build)
                 return std::unexpected(build.error());
 
@@ -166,12 +177,27 @@ endforeach()
             action.argv.push_back("--tests-regex");
             action.argv.push_back(regex_escape(*request.filter));
         }
-        if (request.target) {
+        if (!build_targets.empty()) {
+            std::string labels = "^";
+            if (build_targets.size() == 1) {
+                labels += regex_escape(test_target_label_prefix) + regex_escape(build_targets.front());
+            } else {
+                labels += '(';
+                for (std::size_t index = 0; index < build_targets.size(); ++index) {
+                    if (index != 0)
+                        labels += '|';
+
+                    labels += regex_escape(test_target_label_prefix) + regex_escape(build_targets[index]);
+                }
+                labels += ')';
+            }
+            labels += '$';
             action.argv.push_back("--label-regex");
-            action.argv.push_back("^" + regex_escape(test_target_label_prefix) + regex_escape(*request.target) + "$");
+            action.argv.push_back(std::move(labels));
         }
         action.working_directory = package.directory;
         action.package = package.id;
+        action.configured_artifact = std::string(configured_artifact);
         action.stage = ActionStage::test;
         plan.add(std::move(action));
         return {};

@@ -331,9 +331,17 @@ KAIXA_TEST(target_policy_creates_a_separate_configured_package_instance) {
         return;
     }
     context.check_equal(resolution->instances.size(), std::size_t{2}, "default and target instances");
-    context.check_equal(resolution->instances[0].artifact, std::string("default"), "default artifact");
-    context.check_equal(resolution->instances[1].artifact, std::string("app.tests.noexcept"), "policy-specific artifact");
+    context.check(resolution->instances[0].artifact.starts_with("app-"), "default artifact has a stable package prefix");
+    context.check(resolution->instances[1].artifact.starts_with("app-"), "policy-specific artifact has a stable package prefix");
+    context.check(
+        resolution->instances[0].artifact != resolution->instances[1].artifact,
+        "different effective policies have different artifacts"
+    );
+    context.check_equal(resolution->instances[0].contexts.front(), std::string("app:default"), "default context is retained");
+    context.check_equal(resolution->instances[1].contexts.front(), std::string("app.tests.noexcept"), "target context is retained");
     context.check_equal(resolution->instances[1].policy_layers.size(), std::size_t{2}, "package-set and target policies compose");
+    const kaixa::PolicySetting* exceptions = resolution->instances[1].policy.find("exceptions");
+    context.check(exceptions && !*exceptions->value.as_boolean(), "target ABI policy is effective");
 }
 
 KAIXA_TEST(configured_features_activate_optional_dependencies) {

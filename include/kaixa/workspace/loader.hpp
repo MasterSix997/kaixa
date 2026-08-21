@@ -25,6 +25,7 @@ namespace kaixa {
         std::filesystem::path source_cache;
         std::span<const ProviderLayer> provider_layers;
         const Value* feature_settings = nullptr;
+        PolicyContext policy_context;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

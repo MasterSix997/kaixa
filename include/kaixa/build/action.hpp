@@ -48,6 +48,7 @@ namespace kaixa {
         std::vector<std::filesystem::path> outputs;
         std::optional<ActionState> checked_state;
         std::optional<PackageId> package;
+        std::optional<std::string> configured_artifact;
         ActionStage stage = ActionStage::build;
     };
 }

@@ -4,9 +4,11 @@
 #include <kaixa/config/table_reader.hpp>
 #include <kaixa/model/effective_product.hpp>
 #include <kaixa/model/file_set.hpp>
+#include <kaixa/model/policy.hpp>
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <string_view>
 #include <utility>
 
@@ -285,7 +287,7 @@ namespace kaixa::plugin::cmake::detail {
             result.reserve(values.size());
             for (const std::string& value: values) {
                 const std::filesystem::path path = value;
-                if (path.is_absolute() || value.starts_with("$<"))
+                if (path.is_absolute() || value.starts_with("$<") || value.starts_with('<'))
                     result.push_back(value);
                 else
                     result.push_back((options.source / path).lexically_normal().generic_string());
@@ -318,6 +320,94 @@ namespace kaixa::plugin::cmake::detail {
                 }
             }
             return result;
+        }
+
+        Result<void> apply_policy(TargetOptions& target, const EffectivePolicy& policy, const std::filesystem::path& source_root) {
+            if (const PolicySetting* cxx = policy.find("cxx")) {
+                const std::int64_t floor = *cxx->value.as_integer();
+                if (!target.cxx_standard || *target.cxx_standard < floor)
+                    target.cxx_standard = floor;
+            }
+
+            if (const PolicySetting* runtime = policy.find("msvc-runtime")) {
+                const std::string& value = *runtime->value.as_string();
+                target.msvc_runtime = value == "static" ? MsvcRuntime::static_runtime : MsvcRuntime::dynamic_runtime;
+            }
+
+            if (const PolicySetting* warnings = policy.find("warnings")) {
+                const std::string& level = *warnings->value.as_string();
+                if (level != "off" && level != "default") {
+                    target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/W4>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wall>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wextra>");
+                }
+                if (level == "pedantic") {
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wpedantic>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wconversion>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Wshadow>");
+                } else if (level != "off" && level != "default" && level != "strict") {
+                    return std::unexpected(error_at(warnings->location, "unknown warning policy `" + level + "`"));
+                }
+            }
+
+            if (const PolicySetting* errors = policy.find("warnings-as-errors"); errors && *errors->value.as_boolean()) {
+                target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/WX>");
+                target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-Werror>");
+            }
+
+            if (const PolicySetting* exceptions = policy.find("exceptions")) {
+                if (*exceptions->value.as_boolean()) {
+                    target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/EHsc>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fexceptions>");
+                } else {
+                    target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/EHs-c->");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-exceptions>");
+                    target.compile_definitions.push_back("$<$<CXX_COMPILER_ID:MSVC>:_HAS_EXCEPTIONS=0>");
+                }
+            }
+
+            if (const PolicySetting* rtti = policy.find("rtti")) {
+                if (*rtti->value.as_boolean()) {
+                    target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/GR>");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-frtti>");
+                } else {
+                    target.compile_options.push_back("$<$<CXX_COMPILER_ID:MSVC>:/GR->");
+                    target.compile_options.push_back("$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fno-rtti>");
+                }
+            }
+
+            if (const PolicySetting* sanitizers = policy.find("sanitizers")) {
+                std::string value;
+                for (const Value& sanitizer: *sanitizers->value.as_array()) {
+                    if (!value.empty())
+                        value += ',';
+
+                    value += *sanitizer.as_string();
+                }
+                if (!value.empty()) {
+                    const std::string option = "$<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-fsanitize=" + value + ">";
+                    target.compile_options.push_back(option);
+                    target.link_options.push_back(option);
+                }
+            }
+
+            if (const PolicySetting* headers = policy.find("precompiled-headers")) {
+                for (const Value& header: *headers->value.as_array())
+                    target.precompiled_headers.push_back(*header.as_string());
+            }
+
+            if (const PolicySetting* defines = policy.find("defines")) {
+                auto values = product_definitions(defines->value, source_root);
+                if (!values)
+                    return std::unexpected(values.error());
+
+                target.compile_definitions.insert(
+                    target.compile_definitions.end(),
+                    std::make_move_iterator(values->begin()),
+                    std::make_move_iterator(values->end())
+                );
+            }
+            return {};
         }
 
         Result<TargetOptions> read_effective_product(
@@ -461,12 +551,32 @@ namespace kaixa::plugin::cmake::detail {
         }
     }
 
-    Result<Options> read_options(const Graph& graph, const PackageNode& package, const ProductRealizationContext& realization) {
+    Result<Options> read_options(
+        const Graph& graph,
+        const PackageNode& package,
+        const ProductRealizationContext& realization,
+        const EffectivePolicy* policy_override,
+        const std::string_view configured_context
+    ) {
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
         if (!package.manifest)
             return result;
+
+        const PolicyContext policy_context{realization.profile, realization.target_os};
+        EffectivePolicy resolved_package_policy;
+        if (policy_override) {
+            resolved_package_policy = *policy_override;
+        } else {
+            auto package_policy = resolve_policy_layers(package.policy_layers, package.active_features, policy_context);
+            if (!package_policy)
+                return std::unexpected(package_policy.error());
+
+            resolved_package_policy = std::move(*package_policy);
+        }
+        const EffectivePolicy& package_policy = resolved_package_policy;
+        result.policy_fingerprint = policy_fingerprint(package_policy);
 
         const Value empty_options = Value::table({});
         const Value& resolver_options = package.manifest->resolver_options ? *package.manifest->resolver_options : empty_options;
@@ -516,24 +626,12 @@ namespace kaixa::plugin::cmake::detail {
                 ));
             }
         } else {
-            for (const Value& policy: package.policy_layers) {
-                const Value* declared = policy.find("msvc-runtime");
-                if (!declared)
-                    continue;
-
-                const std::string* name = declared->as_string();
-                if (!name) {
-                    return std::unexpected(wrong_kind(declared->location(), "an MSVC runtime name", declared->kind()));
-                }
-                if (*name == "static")
+            if (const PolicySetting* declared = package_policy.find("msvc-runtime")) {
+                const std::string& name = *declared->value.as_string();
+                if (name == "static")
                     result.msvc_runtime = MsvcRuntime::static_runtime;
-                else if (*name == "dynamic")
+                else if (name == "dynamic")
                     result.msvc_runtime = MsvcRuntime::dynamic_runtime;
-                else {
-                    return std::unexpected(
-                        error_at(declared->location(), "unknown MSVC runtime `" + *name + "`; expected `static` or `dynamic`")
-                    );
-                }
             }
         }
 
@@ -597,17 +695,8 @@ namespace kaixa::plugin::cmake::detail {
             return std::unexpected(default_standard.error());
 
         if (!*default_standard) {
-            for (const Value& policy: package.policy_layers) {
-                const Value* cxx = policy.find("cxx");
-                if (!cxx)
-                    continue;
-
-                const std::int64_t* standard = cxx->as_integer();
-                if (!standard) {
-                    return std::unexpected(wrong_kind(cxx->location(), "an integer C++ language floor", cxx->kind()));
-                }
-                default_standard = *standard;
-            }
+            if (const PolicySetting* cxx = package_policy.find("cxx"))
+                default_standard = *cxx->value.as_integer();
         }
         if (*default_standard && **default_standard <= 0) {
             return std::unexpected(error_at(options.location_of("cxx-standard"), "C++ standard must be positive"));
@@ -642,6 +731,10 @@ namespace kaixa::plugin::cmake::detail {
             if (!target)
                 return std::unexpected(target.error());
 
+            auto applied_policy = apply_policy(*target, package_policy, result.source);
+            if (!applied_policy)
+                return std::unexpected(applied_policy.error());
+
             auto finished = table.finish();
             if (!finished)
                 return std::unexpected(finished.error());
@@ -654,6 +747,10 @@ namespace kaixa::plugin::cmake::detail {
             auto target = read_target(package.name, options, *default_standard, result.source, result.source);
             if (!target)
                 return std::unexpected(target.error());
+
+            auto applied_policy = apply_policy(*target, package_policy, result.source);
+            if (!applied_policy)
+                return std::unexpected(applied_policy.error());
 
             result.targets.push_back(std::move(*target));
         } else if (target_value) {
@@ -717,6 +814,10 @@ namespace kaixa::plugin::cmake::detail {
             auto product = read_effective_product(effective_package->products.front(), *default_standard, result.source);
             if (!product)
                 return std::unexpected(product.error());
+
+            auto applied_policy = apply_policy(*product, package_policy, result.source);
+            if (!applied_policy)
+                return std::unexpected(applied_policy.error());
 
             for (const PackageId dependency: package.dependencies) {
                 const PackageNode& target = graph[dependency];
@@ -805,6 +906,27 @@ namespace kaixa::plugin::cmake::detail {
             auto target = read_package_target(declared, *default_standard, result.source);
             if (!target)
                 return std::unexpected(target.error());
+
+            EffectivePolicy resolved_target_policy;
+            if (policy_override && configured_context == *declared.name) {
+                resolved_target_policy = *policy_override;
+            } else {
+                std::vector<Value> target_policy_layers = package.policy_layers;
+                if (declared.policy)
+                    target_policy_layers.push_back(*declared.policy);
+
+                auto target_policy = resolve_policy_layers(target_policy_layers, package.active_features, policy_context);
+                if (!target_policy)
+                    return std::unexpected(target_policy.error());
+
+                resolved_target_policy = std::move(*target_policy);
+            }
+
+            auto applied_policy = apply_policy(*target, resolved_target_policy, result.source);
+            if (!applied_policy)
+                return std::unexpected(applied_policy.error());
+
+            result.policy_fingerprint += ':' + policy_fingerprint(resolved_target_policy);
 
             target->default_build = false;
             if (std::ranges::any_of(effective_package->products, [](const EffectiveProduct& product) {
@@ -1070,6 +1192,23 @@ namespace kaixa::plugin::cmake::detail {
                 interface_target ? "INTERFACE" : "PUBLIC",
                 target.public_compile_options
             );
+            emit_values(output, "target_link_options", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.link_options);
+            emit_values(
+                output,
+                "target_precompile_headers",
+                target.name,
+                interface_target ? "INTERFACE" : "PRIVATE",
+                project_paths(options, target.precompiled_headers)
+            );
+
+            if (target.msvc_runtime != MsvcRuntime::default_runtime) {
+                const std::string runtime = target.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
+                output += "set_property(TARGET "
+                    + target.name
+                    + " PROPERTY MSVC_RUNTIME_LIBRARY \""
+                    + runtime
+                    + "$<$<CONFIG:Debug>:Debug>\")\n\n";
+            }
 
             if (target.cxx_standard) {
                 const std::string scope = interface_target ? "INTERFACE" : (executable ? "PRIVATE" : "PUBLIC");

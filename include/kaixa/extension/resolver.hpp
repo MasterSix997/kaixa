@@ -10,6 +10,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -62,6 +63,7 @@ namespace kaixa {
             const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment,
+            std::span<const ConfiguredPackageInstance> instances,
             const BuildRequest& request,
             BuildPlan& plan
         ) const = 0;
@@ -70,6 +72,7 @@ namespace kaixa {
             const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment,
+            std::span<const ConfiguredPackageInstance> instances,
             const TestRequest& request,
             BuildPlan& plan
         ) const = 0;
@@ -77,13 +80,15 @@ namespace kaixa {
         [[nodiscard]] virtual Result<std::vector<BuildProduct>> products(
             const Graph& graph,
             const PackageNode& package,
-            const BuildEnvironment& environment
+            const BuildEnvironment& environment,
+            std::span<const ConfiguredPackageInstance> instances
         ) const = 0;
 
         [[nodiscard]] virtual Result<void> plan_clean(
             const Graph& graph,
             const PackageNode& package,
             const BuildEnvironment& environment,
+            std::span<const ConfiguredPackageInstance> instances,
             const CleanRequest& request,
             CleanPlan& plan
         ) const = 0;

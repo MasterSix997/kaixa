@@ -426,6 +426,11 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
     context.check(plan->actions()[4].stage == kaixa::ActionStage::build, "consumer compilation stays in the build stage");
 
     const std::string artifact_root = (environment.state_root / "cache" / "cmake").string();
+    const std::optional<std::string>& provider_artifact = plan->actions()[2].configured_artifact;
+    context.check(provider_artifact.has_value(), "provider install identifies its configured artifact");
+    if (!provider_artifact)
+        return;
+
     const std::vector<std::string> configure = plan->actions()[3].argv;
     context.check(
         std::ranges::find_if(
@@ -433,7 +438,7 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
             [&](const std::string& argument) {
                 return argument.starts_with("-DKAIXA_CMAKE_PREFIX_PATH=")
                     && argument.contains(artifact_root)
-                    && argument.ends_with("test_package_math");
+                    && argument.ends_with(*provider_artifact);
             }
         ) != configure.end(),
         "consumer receives the package prefix"

@@ -1,5 +1,7 @@
 #include <kaixa/services/clean_service.hpp>
 
+#include <kaixa/model/effective_product.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <system_error>
@@ -57,6 +59,10 @@ namespace kaixa {
         const CleanRequest& request
     ) {
         CleanPlan plan;
+        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+        if (!instances)
+            return std::unexpected(instances.error());
+
         for (const PackageNode& package: graph.nodes()) {
             if (package.kind == PackageKind::opaque)
                 continue;
@@ -66,7 +72,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + package.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_clean(graph, package, environment, request, plan);
+            auto planned = resolver->plan_clean(graph, package, environment, *instances, request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }

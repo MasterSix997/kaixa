@@ -1,5 +1,7 @@
 #include <kaixa/services/build_service.hpp>
 
+#include <kaixa/model/effective_product.hpp>
+
 #include <algorithm>
 #include <iterator>
 #include <utility>
@@ -11,6 +13,10 @@ namespace kaixa {
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment
     ) {
+        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+        if (!instances)
+            return std::unexpected(instances.error());
+
         std::vector<BuildProduct> products;
         for (const PackageId id: graph.roots()) {
             const PackageNode& root = graph[id];
@@ -19,7 +25,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
-            auto discovered = resolver->products(graph, root, environment);
+            auto discovered = resolver->products(graph, root, environment, *instances);
             if (!discovered)
                 return std::unexpected(discovered.error());
 
@@ -62,6 +68,10 @@ namespace kaixa {
         if (!order)
             return std::unexpected(order.error());
 
+        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+        if (!instances)
+            return std::unexpected(instances.error());
+
         BuildPlan plan;
         for (const PackageId id: *order) {
             const PackageNode& package = graph[id];
@@ -88,7 +98,7 @@ namespace kaixa {
                 package_request.build_default = true;
             }
 
-            auto planned = resolver->plan(graph, package, environment, package_request, plan);
+            auto planned = resolver->plan(graph, package, environment, *instances, package_request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }
@@ -105,6 +115,10 @@ namespace kaixa {
         if (!plan)
             return std::unexpected(plan.error());
 
+        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+        if (!instances)
+            return std::unexpected(instances.error());
+
         for (const PackageId id: graph.roots()) {
             const PackageNode& root = graph[id];
             Resolver* resolver = registry.find_resolver(root.resolver);
@@ -112,7 +126,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_tests(graph, root, environment, request, *plan);
+            auto planned = resolver->plan_tests(graph, root, environment, *instances, request, *plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }

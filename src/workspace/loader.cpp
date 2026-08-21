@@ -67,78 +67,6 @@ namespace kaixa {
             return result;
         }
 
-        std::optional<Value> propagated_target_policy(const Value& policy) {
-            const std::vector<TableEntry>* table = policy.as_table();
-            if (!table)
-                return std::nullopt;
-
-            constexpr std::array propagated_keys{std::string_view{"cxx"},
-                std::string_view{"exceptions"},
-                std::string_view{"msvc-runtime"},
-                std::string_view{"rtti"},
-                std::string_view{"sanitizers"}};
-            std::vector<TableEntry> entries;
-            for (const TableEntry& entry: *table) {
-                if (std::ranges::find(propagated_keys, entry.key) != propagated_keys.end())
-                    entries.push_back(entry);
-            }
-            if (entries.empty())
-                return std::nullopt;
-
-            return Value::table(std::move(entries), policy.location());
-        }
-
-        std::vector<ConfiguredPackageInstance> configure_instances(const Graph& graph) {
-            std::vector<ConfiguredPackageInstance> instances;
-            for (const PackageNode& package: graph.nodes()) {
-                instances.push_back({package.id, "default", package.active_features, package.policy_layers});
-            }
-
-            for (const PackageNode& owner: graph.nodes()) {
-                if (!owner.manifest)
-                    continue;
-
-                for (const PackageTarget& target: owner.manifest->resolved_targets) {
-                    if (!target.policy || !target.name)
-                        continue;
-
-                    std::vector<PackageId> pending{owner.id};
-                    const auto target_dependencies = std::ranges::find(
-                        owner.target_dependencies,
-                        *target.name,
-                        &PackageTargetDependencies::target
-                    );
-                    if (target_dependencies != owner.target_dependencies.end()) {
-                        pending.insert(pending.end(), target_dependencies->packages.begin(), target_dependencies->packages.end());
-                    }
-
-                    std::vector<PackageId> closure;
-                    while (!pending.empty()) {
-                        const PackageId package = pending.back();
-                        pending.pop_back();
-                        if (std::ranges::find(closure, package) != closure.end())
-                            continue;
-
-                        closure.push_back(package);
-                        const PackageNode& node = graph[package];
-                        pending.insert(pending.end(), node.dependencies.begin(), node.dependencies.end());
-                    }
-
-                    const std::optional<Value> propagated = propagated_target_policy(*target.policy);
-                    for (const PackageId package: closure) {
-                        const PackageNode& node = graph[package];
-                        std::vector<Value> policies = node.policy_layers;
-                        if (package == owner.id)
-                            policies.push_back(*target.policy);
-                        else if (propagated)
-                            policies.push_back(*propagated);
-                        instances.push_back({package, *target.name, node.active_features, std::move(policies)});
-                    }
-                }
-            }
-            return instances;
-        }
-
         Value merge_layer_values(const Value& base, const Value& overlay) {
             const std::vector<TableEntry>* base_table = base.as_table();
             const std::vector<TableEntry>* overlay_table = overlay.as_table();
@@ -514,12 +442,14 @@ namespace kaixa {
                 ExtensionRegistry* extensions,
                 std::filesystem::path source_cache,
                 const std::span<const ProviderLayer> provider_layers,
-                const Value* feature_settings
+                const Value* feature_settings,
+                PolicyContext policy_context
             )
                 : m_extensions(extensions)
                 , m_source_cache(std::move(source_cache))
                 , m_provider_layers(provider_layers)
-                , m_feature_settings(feature_settings) {}
+                , m_feature_settings(feature_settings)
+                , m_policy_context(std::move(policy_context)) {}
 
             Result<PackageResolution> load(
                 const std::filesystem::path& manifest_path,
@@ -567,14 +497,16 @@ namespace kaixa {
                 if (!order)
                     return std::unexpected(order.error());
 
-                auto instances = configure_instances(m_graph);
+                auto instances = configure_package_instances(m_graph, m_policy_context);
+                if (!instances)
+                    return std::unexpected(instances.error());
 
                 return PackageResolution{std::move(m_graph),
                     std::move(m_packages),
                     std::move(document->configurations),
                     selected,
                     std::move(*manifest_tree),
-                    std::move(instances)};
+                    std::move(*instances)};
             }
 
         private:
@@ -1429,6 +1361,7 @@ namespace kaixa {
             std::filesystem::path m_source_cache;
             std::span<const ProviderLayer> m_provider_layers;
             const Value* m_feature_settings = nullptr;
+            PolicyContext m_policy_context;
             std::map<std::string, std::string> m_routing;
         };
     }
@@ -1483,7 +1416,7 @@ namespace kaixa {
         if (!options.source_cache.empty())
             source_cache = options.source_cache;
 
-        WorkspaceLoader loader(options.extensions, source_cache, options.provider_layers, options.feature_settings);
+        WorkspaceLoader loader(options.extensions, source_cache, options.provider_layers, options.feature_settings, options.policy_context);
         return loader.load(*manifest, options.packages);
     }
 }

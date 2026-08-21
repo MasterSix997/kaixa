@@ -21,6 +21,8 @@ namespace kaixa::plugin::cmake::detail {
         const std::filesystem::path& build_directory,
         std::string_view configuration,
         const TestRequest& request,
+        std::span<const std::string> selected_targets,
+        std::string_view configured_artifact,
         BuildPlan& plan
     );
 }

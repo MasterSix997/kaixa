@@ -22,6 +22,7 @@ namespace kaixa::cli {
         struct Workspace {
             Graph graph;
             ManifestTreeSummary manifest_tree;
+            std::vector<ConfiguredPackageInstance> instances;
             BuildEnvironment environment;
             ExtensionRegistry registry;
             std::vector<ConfigurationSource> configuration_sources;
@@ -146,7 +147,8 @@ namespace kaixa::cli {
                     &registry,
                     {},
                     provider_layers,
-                    features && features->settings ? &*features->settings : nullptr}
+                    features && features->settings ? &*features->settings : nullptr,
+                    PolicyContext{configuration->profile, host_target_os()}}
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
@@ -159,6 +161,7 @@ namespace kaixa::cli {
 
             return Workspace{std::move(resolved->graph),
                 resolved->model.summary,
+                std::move(resolved->instances),
                 BuildEnvironment{directory, directory / ".kaixa", std::move(*configuration)},
                 std::move(registry),
                 std::move(sources)};
@@ -392,6 +395,9 @@ namespace kaixa::cli {
 
                 std::cout << "  command: " << format_command(action.argv) << '\n';
                 std::cout << "  working directory: " << display_path(action.working_directory, workspace) << '\n';
+                if (action.configured_artifact)
+                    std::cout << "  configured artifact: " << *action.configured_artifact << '\n';
+
                 for (const std::filesystem::path& input: action.inputs)
                     std::cout << "  input: " << display_path(input, workspace) << '\n';
 
@@ -832,6 +838,24 @@ namespace kaixa::cli {
 
                 for (const PackageId root: workspace->graph.roots())
                     print_package(workspace->graph, root, 0, command.verbose);
+
+                if (command.verbose && !workspace->instances.empty()) {
+                    std::cout << "configured instances:\n";
+                    for (const ConfiguredPackageInstance& instance: workspace->instances) {
+                        std::cout << "  " << workspace->graph[instance.package].name << " -> " << instance.artifact;
+                        if (!instance.contexts.empty()) {
+                            std::cout << " [";
+                            for (std::size_t index = 0; index < instance.contexts.size(); ++index) {
+                                if (index != 0)
+                                    std::cout << ", ";
+
+                                std::cout << instance.contexts[index];
+                            }
+                            std::cout << ']';
+                        }
+                        std::cout << '\n';
+                    }
+                }
 
                 return 0;
             }

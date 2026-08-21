@@ -56,7 +56,10 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<std::string> public_compile_definitions;
         std::vector<std::string> compile_options;
         std::vector<std::string> public_compile_options;
+        std::vector<std::string> link_options;
+        std::vector<std::string> precompiled_headers;
         std::optional<std::int64_t> cxx_standard;
+        MsvcRuntime msvc_runtime = MsvcRuntime::default_runtime;
         bool default_build = true;
     };
 
@@ -78,6 +81,7 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<TargetOptions> targets;
         std::vector<TestOptions> tests;
         std::vector<DependencyOption> dependencies;
+        std::string policy_fingerprint;
     };
 
     struct BuildOptions {
@@ -95,7 +99,9 @@ namespace kaixa::plugin::cmake::detail {
     [[nodiscard]] Result<Options> read_options(
         const Graph& graph,
         const PackageNode& package,
-        const ProductRealizationContext& realization = {}
+        const ProductRealizationContext& realization = {},
+        const EffectivePolicy* policy_override = nullptr,
+        std::string_view configured_context = {}
     );
     [[nodiscard]] Result<BuildOptions> read_build_options(const Value* settings);
     [[nodiscard]] DependencyMode dependency_mode(const Options& options, PackageId dependency);
