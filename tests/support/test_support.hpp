@@ -17,7 +17,7 @@ namespace kaixa::testing {
 
         void check(bool condition, std::string_view what);
 
-        template<typename Actual, typename Expected>
+        template <typename Actual, typename Expected>
         void check_equal(const Actual& actual, const Expected& expected, std::string_view what) {
             if (actual == expected)
                 return;
@@ -84,8 +84,7 @@ namespace kaixa::testing {
     };
 }
 
-#define KAIXA_TEST(name)                                           \
-    static void name(kaixa::testing::TestContext& context);        \
-    static const bool kaixa_registered_##name =                    \
-        kaixa::testing::TestRegistry::instance().add(#name, name); \
+#define KAIXA_TEST(name)                                                                                                                   \
+    static void name(kaixa::testing::TestContext& context);                                                                                \
+    static const bool kaixa_registered_##name = kaixa::testing::TestRegistry::instance().add(#name, name);                                 \
     static void name(kaixa::testing::TestContext& context)

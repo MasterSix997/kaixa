@@ -2,6 +2,7 @@
 #include "testing.hpp"
 
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/model/effective_product.hpp>
 #include <kaixa/model/file_set.hpp>
 
 #include <algorithm>
@@ -12,10 +13,7 @@
 namespace kaixa::plugin::cmake::detail {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(
-                std::move(location),
-                "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found))
-            );
+            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
         }
 
         Result<std::vector<std::string>> string_array(TableReader& table, const std::string_view key) {
@@ -38,6 +36,7 @@ namespace kaixa::plugin::cmake::detail {
                 }
                 if (text->empty())
                     return std::unexpected(error_at(item.location(), "array values cannot be empty"));
+
                 result.push_back(*text);
             }
             return result;
@@ -47,9 +46,11 @@ namespace kaixa::plugin::cmake::detail {
             const Value* value = table.take(key);
             if (!value)
                 return std::nullopt;
+
             const std::int64_t* integer = value->as_integer();
             if (!integer)
                 return std::unexpected(wrong_kind(table.location_of(key), "an integer", value->kind()));
+
             return *integer;
         }
 
@@ -67,6 +68,7 @@ namespace kaixa::plugin::cmake::detail {
             auto type = target.string("type");
             if (!type)
                 return std::unexpected(type.error());
+
             if (*type == "executable") {
                 result.type = TargetType::executable;
             } else if (*type == "static-library") {
@@ -76,10 +78,8 @@ namespace kaixa::plugin::cmake::detail {
             } else if (*type == "interface-library") {
                 result.type = TargetType::interface_library;
             } else {
-                return std::unexpected(
-                    error_at(target.location_of("type"), "unknown target type `" + *type + "`")
-                        .add_note("expected `executable`, `static-library`, `shared-library` or `interface-library`")
-                );
+                return std::unexpected(error_at(target.location_of("type"), "unknown target type `" + *type + "`")
+                        .add_note("expected `executable`, `static-library`, `shared-library` or `interface-library`"));
             }
 
             auto sources = string_array(target, "sources");
@@ -101,71 +101,81 @@ namespace kaixa::plugin::cmake::detail {
             auto includes = string_array(target, "include-directories");
             if (!includes)
                 return std::unexpected(includes.error());
+
             result.include_directories = std::move(*includes);
 
             auto public_includes = string_array(target, "public-include-directories");
             if (!public_includes)
                 return std::unexpected(public_includes.error());
+
             result.public_include_directories = std::move(*public_includes);
 
             auto system_includes = string_array(target, "system-include-directories");
             if (!system_includes)
                 return std::unexpected(system_includes.error());
+
             result.system_include_directories = std::move(*system_includes);
 
             auto public_system_includes = string_array(target, "public-system-include-directories");
             if (!public_system_includes)
                 return std::unexpected(public_system_includes.error());
+
             result.public_system_include_directories = std::move(*public_system_includes);
 
             auto links = string_array(target, "link-libraries");
             if (!links)
                 return std::unexpected(links.error());
+
             result.link_libraries = std::move(*links);
 
             auto public_links = string_array(target, "public-link-libraries");
             if (!public_links)
                 return std::unexpected(public_links.error());
+
             result.public_link_libraries = std::move(*public_links);
 
             auto definitions = string_array(target, "compile-definitions");
             if (!definitions)
                 return std::unexpected(definitions.error());
+
             result.compile_definitions = std::move(*definitions);
 
             auto public_definitions = string_array(target, "public-compile-definitions");
             if (!public_definitions)
                 return std::unexpected(public_definitions.error());
+
             result.public_compile_definitions = std::move(*public_definitions);
 
             auto compile_options = string_array(target, "compile-options");
             if (!compile_options)
                 return std::unexpected(compile_options.error());
+
             result.compile_options = std::move(*compile_options);
 
             auto public_compile_options = string_array(target, "public-compile-options");
             if (!public_compile_options)
                 return std::unexpected(public_compile_options.error());
+
             result.public_compile_options = std::move(*public_compile_options);
 
             auto standard = optional_integer(target, "cxx-standard");
             if (!standard)
                 return std::unexpected(standard.error());
+
             if (*standard)
                 result.cxx_standard = *standard;
 
             if (result.type != TargetType::interface_library && result.sources.empty()) {
-                return std::unexpected(
-                    error_at(target.location_of("sources"), "a compiled target requires at least one source")
-                );
+                return std::unexpected(error_at(target.location_of("sources"), "a compiled target requires at least one source"));
             }
             if (result.type == TargetType::interface_library
-                && (!result.sources.empty() || !result.include_directories.empty()
-                    || !result.system_include_directories.empty() || !result.link_libraries.empty()
-                    || !result.compile_definitions.empty() || !result.compile_options.empty())) {
-                return std::unexpected(
-                    error_at(target.location_of("type"), "an interface library cannot have private target properties")
-                );
+                && (!result.sources.empty()
+                    || !result.include_directories.empty()
+                    || !result.system_include_directories.empty()
+                    || !result.link_libraries.empty()
+                    || !result.compile_definitions.empty()
+                    || !result.compile_options.empty())) {
+                return std::unexpected(error_at(target.location_of("type"), "an interface library cannot have private target properties"));
             }
             if (result.cxx_standard && *result.cxx_standard <= 0) {
                 return std::unexpected(error_at(target.location_of("cxx-standard"), "C++ standard must be positive"));
@@ -181,11 +191,13 @@ namespace kaixa::plugin::cmake::detail {
             auto target = test.string("target");
             if (!target)
                 return std::unexpected(target.error());
+
             result.target = std::move(*target);
 
             auto arguments = string_array(test, "arguments");
             if (!arguments)
                 return std::unexpected(arguments.error());
+
             result.arguments = std::move(*arguments);
 
             if (const Value* discover = test.take("discover")) {
@@ -199,8 +211,7 @@ namespace kaixa::plugin::cmake::detail {
             return result;
         }
 
-        Result<TableReader>
-        indexed_table(const Value& value, const std::string_view collection, const std::size_t index) {
+        Result<TableReader> indexed_table(const Value& value, const std::string_view collection, const std::size_t index) {
             return TableReader::bind(value, std::string(collection) + "." + std::to_string(index));
         }
 
@@ -208,6 +219,7 @@ namespace kaixa::plugin::cmake::detail {
             std::string equals;
             while (value.contains("]" + equals + "]"))
                 equals += '=';
+
             return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
         }
 
@@ -216,6 +228,7 @@ namespace kaixa::plugin::cmake::detail {
             for (const char character: value) {
                 if (character == '\\' || character == '"')
                     result.push_back('\\');
+
                 result.push_back(character);
             }
             result.push_back('"');
@@ -224,8 +237,7 @@ namespace kaixa::plugin::cmake::detail {
 
         std::string output_directory(const std::filesystem::path& path) {
             const std::string value = path.generic_string();
-            return path.is_absolute() ? quoted_string(value)
-                                      : quoted_string("${_kaixa_output_root}/" + value + "/$<0:>");
+            return path.is_absolute() ? quoted_string(value) : quoted_string("${_kaixa_output_root}/" + value + "/$<0:>");
         }
 
         std::string project_version(const PackageNode& package) {
@@ -236,8 +248,10 @@ namespace kaixa::plugin::cmake::detail {
             const std::size_t suffix = value.find_first_of("-+");
             if (suffix != std::string::npos)
                 value.resize(suffix);
+
             if (value.empty() || value.front() == '.' || value.back() == '.')
                 return {};
+
             if (!std::ranges::all_of(value, [](const char character) {
                     return (character >= '0' && character <= '9') || character == '.';
                 })) {
@@ -255,9 +269,11 @@ namespace kaixa::plugin::cmake::detail {
         ) {
             if (values.empty())
                 return;
+
             output += std::string(command) + "(" + target + " " + std::string(scope) + "\n";
             for (const std::string& value: values)
                 output += "    " + quote(value) + "\n";
+
             output += ")\n\n";
         }
 
@@ -277,8 +293,7 @@ namespace kaixa::plugin::cmake::detail {
             return result;
         }
 
-        Result<std::vector<std::string>>
-        product_definitions(const Value& value, const std::filesystem::path& source_root) {
+        Result<std::vector<std::string>> product_definitions(const Value& value, const std::filesystem::path& source_root) {
             const std::vector<TableEntry>* table = value.as_table();
             if (!table)
                 return std::unexpected(wrong_kind(value.location(), "a definitions table", value.kind()));
@@ -297,102 +312,75 @@ namespace kaixa::plugin::cmake::detail {
                     if (!text) {
                         return std::unexpected(wrong_kind(path->location(), "a path string", path->kind()));
                     }
-                    result.push_back(
-                        entry.key + "="
-                        + (source_root / std::filesystem::path(*text)).lexically_normal().generic_string()
-                    );
+                    result.push_back(entry.key + "=" + (source_root / std::filesystem::path(*text)).lexically_normal().generic_string());
                 } else {
-                    return std::unexpected(
-                        error_at(entry.value.location(), "definition `" + entry.key + "` has an unsupported value")
-                    );
+                    return std::unexpected(error_at(entry.value.location(), "definition `" + entry.key + "` has an unsupported value"));
                 }
             }
             return result;
         }
 
-        Result<TargetOptions> read_product(
-            const ProductDeclaration& product,
-            const std::string& package_name,
+        Result<TargetOptions> read_effective_product(
+            const EffectiveProduct& product,
             const std::optional<std::int64_t> default_standard,
             const std::filesystem::path& source_root
         ) {
-            auto product_result =
-                TableReader::bind(product.options, product.kind == ProductDeclarationKind::library ? "lib" : "bin");
-            if (!product_result)
-                return std::unexpected(product_result.error());
-            TableReader table = std::move(*product_result);
-
-            std::string type = product.kind == ProductDeclarationKind::executable ? "executable" : "static-library";
-            auto declared_type = table.optional_string("type");
-            if (!declared_type)
-                return std::unexpected(declared_type.error());
-            if (*declared_type) {
-                if (**declared_type == "static")
-                    type = "static-library";
-                else if (**declared_type == "shared")
-                    type = "shared-library";
-                else if (**declared_type == "interface")
-                    type = "interface-library";
-                else {
-                    return std::unexpected(
-                        error_at(table.location_of("type"), "unknown product type `" + **declared_type + "`")
-                            .add_note("expected `static`, `shared` or `interface`")
-                    );
-                }
+            TargetOptions result;
+            result.name = product.name;
+            result.cxx_standard = default_standard;
+            switch (product.type) {
+            case EffectiveProductType::executable: result.type = TargetType::executable; break;
+            case EffectiveProductType::static_library: result.type = TargetType::static_library; break;
+            case EffectiveProductType::shared_library: result.type = TargetType::shared_library; break;
+            case EffectiveProductType::interface_library: result.type = TargetType::interface_library; break;
             }
 
-            std::vector<TableEntry> translated;
-            translated.push_back({"type", Value(type)});
-            for (const auto [product_key, cmake_key]:
-                 {std::pair{std::string_view{"sources"}, std::string_view{"sources"}},
-                  std::pair{std::string_view{"include"}, std::string_view{"include-directories"}},
-                  std::pair{std::string_view{"public-include"}, std::string_view{"public-include-directories"}},
-                  std::pair{std::string_view{"system-include"}, std::string_view{"system-include-directories"}},
-                  std::pair{
-                      std::string_view{"public-system-include"}, std::string_view{"public-system-include-directories"}
-                  }}) {
-                if (const Value* value = table.take(product_key))
-                    translated.push_back({std::string(cmake_key), *value});
+            result.sources.reserve(product.sources.files.size());
+            for (const std::filesystem::path& source: product.sources.files)
+                result.sources.push_back(source.generic_string());
+
+            for (const std::filesystem::path& source: product.dependency_source_files)
+                result.sources.push_back(source.generic_string());
+
+            if (product.type != EffectiveProductType::interface_library) {
+                for (const std::filesystem::path& header: product.headers.files)
+                    result.sources.push_back(header.generic_string());
+
+                for (const std::filesystem::path& header: product.public_headers.files)
+                    result.sources.push_back(header.generic_string());
             }
+            std::ranges::sort(result.sources);
+            result.sources.erase(std::ranges::unique(result.sources).begin(), result.sources.end());
+            result.include_directories = product.include_directories;
+            result.public_include_directories = product.public_include_directories;
+            result.system_include_directories = product.system_include_directories;
+            result.public_system_include_directories = product.public_system_include_directories;
 
-            for (const auto [product_key, cmake_key]:
-                 {std::pair{std::string_view{"defines"}, std::string_view{"compile-definitions"}},
-                  std::pair{std::string_view{"public-defines"}, std::string_view{"public-compile-definitions"}}}) {
-                const Value* value = table.take(product_key);
-                if (!value)
-                    continue;
-                auto definitions = product_definitions(*value, source_root);
-                if (!definitions)
-                    return std::unexpected(definitions.error());
-                std::vector<Value> values;
-                values.reserve(definitions->size());
-                for (std::string& definition: *definitions)
-                    values.emplace_back(std::move(definition));
-                translated.push_back({std::string(cmake_key), Value::array(std::move(values), value->location())});
+            Value private_definitions = Value::table(product.definitions, product.location);
+            auto definitions = product_definitions(private_definitions, source_root);
+            if (!definitions)
+                return std::unexpected(definitions.error());
+
+            result.compile_definitions = std::move(*definitions);
+
+            Value public_definitions = Value::table(product.public_definitions, product.location);
+            auto exported_definitions = product_definitions(public_definitions, source_root);
+            if (!exported_definitions)
+                return std::unexpected(exported_definitions.error());
+
+            result.public_compile_definitions = std::move(*exported_definitions);
+
+            if (result.type != TargetType::interface_library && result.sources.empty()) {
+                return std::unexpected(error_at(product.location, "a compiled product requires at least one source"));
             }
-
-            table.take("headers");
-            table.take("public-headers");
-            table.take("modules");
-            table.take("dependency-sources");
-            table.take("when");
-
-            auto finished = table.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
-
-            Value value = Value::table(std::move(translated), product.location);
-            auto translated_result = TableReader::bind(value, "cmake.product");
-            if (!translated_result)
-                return std::unexpected(translated_result.error());
-            TableReader translated_table = std::move(*translated_result);
-            auto target = read_target(package_name, translated_table, default_standard, source_root, source_root);
-            if (!target)
-                return std::unexpected(target.error());
-            auto translated_finished = translated_table.finish();
-            if (!translated_finished)
-                return std::unexpected(translated_finished.error());
-            return target;
+            if (result.type == TargetType::interface_library
+                && (!result.sources.empty()
+                    || !result.include_directories.empty()
+                    || !result.system_include_directories.empty()
+                    || !result.compile_definitions.empty())) {
+                return std::unexpected(error_at(product.location, "an interface product cannot have private product properties"));
+            }
+            return result;
         }
 
         Result<TargetOptions> read_package_target(
@@ -409,12 +397,10 @@ namespace kaixa::plugin::cmake::detail {
                 entries = *options;
             }
 
-            constexpr std::array path_fields{
-                std::string_view("include-directories"),
+            constexpr std::array path_fields{std::string_view("include-directories"),
                 std::string_view("public-include-directories"),
                 std::string_view("system-include-directories"),
-                std::string_view("public-system-include-directories")
-            };
+                std::string_view("public-system-include-directories")};
             for (TableEntry& entry: entries) {
                 if (std::ranges::find(path_fields, entry.key) == path_fields.end())
                     continue;
@@ -434,10 +420,7 @@ namespace kaixa::plugin::cmake::detail {
 
                     const std::filesystem::path absolute = declared.source.parent_path() / std::filesystem::path(*text);
                     normalized.push_back(
-                        Value::string(
-                            absolute.lexically_relative(project_root).lexically_normal().generic_string(),
-                            value.location()
-                        )
+                        Value::string(absolute.lexically_relative(project_root).lexically_normal().generic_string(), value.location())
                     );
                 }
                 entry.value = Value::array(std::move(normalized), entry.value.location());
@@ -447,8 +430,7 @@ namespace kaixa::plugin::cmake::detail {
                 if (std::ranges::any_of(entries, [&](const TableEntry& entry) { return entry.key == reserved; })) {
                     return std::unexpected(error_at(
                         declared.location,
-                        "`" + std::string(reserved)
-                            + "` is defined by the package target and cannot appear in its CMake options"
+                        "`" + std::string(reserved) + "` is defined by the package target and cannot appear in its CMake options"
                     ));
                 }
             }
@@ -479,7 +461,7 @@ namespace kaixa::plugin::cmake::detail {
         }
     }
 
-    Result<Options> read_options(const Graph& graph, const PackageNode& package) {
+    Result<Options> read_options(const Graph& graph, const PackageNode& package, const ProductRealizationContext& realization) {
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
@@ -487,22 +469,24 @@ namespace kaixa::plugin::cmake::detail {
             return result;
 
         const Value empty_options = Value::table({});
-        const Value& resolver_options =
-            package.manifest->resolver_options ? *package.manifest->resolver_options : empty_options;
+        const Value& resolver_options = package.manifest->resolver_options ? *package.manifest->resolver_options : empty_options;
         auto options_result = TableReader::bind(resolver_options, "cmake");
         if (!options_result)
             return std::unexpected(options_result.error());
+
         TableReader options = std::move(*options_result);
 
         auto source = options.optional_string("source");
         if (!source)
             return std::unexpected(source.error());
+
         if (*source)
             result.source /= **source;
 
         auto generation = options.optional_string("generation");
         if (!generation)
             return std::unexpected(generation.error());
+
         if (*generation) {
             if (**generation == "source") {
                 result.generation = GenerationMode::source;
@@ -536,6 +520,7 @@ namespace kaixa::plugin::cmake::detail {
                 const Value* declared = policy.find("msvc-runtime");
                 if (!declared)
                     continue;
+
                 const std::string* name = declared->as_string();
                 if (!name) {
                     return std::unexpected(wrong_kind(declared->location(), "an MSVC runtime name", declared->kind()));
@@ -545,9 +530,9 @@ namespace kaixa::plugin::cmake::detail {
                 else if (*name == "dynamic")
                     result.msvc_runtime = MsvcRuntime::dynamic_runtime;
                 else {
-                    return std::unexpected(error_at(
-                        declared->location(), "unknown MSVC runtime `" + *name + "`; expected `static` or `dynamic`"
-                    ));
+                    return std::unexpected(
+                        error_at(declared->location(), "unknown MSVC runtime `" + *name + "`; expected `static` or `dynamic`")
+                    );
                 }
             }
         }
@@ -555,23 +540,27 @@ namespace kaixa::plugin::cmake::detail {
         auto output_result = options.optional_table("output");
         if (!output_result)
             return std::unexpected(output_result.error());
+
         if (*output_result) {
             TableReader output = std::move(**output_result);
             auto runtime_output = output.optional_string("runtime");
             if (!runtime_output)
                 return std::unexpected(runtime_output.error());
+
             if (*runtime_output)
                 result.runtime_output = **runtime_output;
 
             auto library_output = output.optional_string("library");
             if (!library_output)
                 return std::unexpected(library_output.error());
+
             if (*library_output)
                 result.library_output = **library_output;
 
             auto archive_output = output.optional_string("archive");
             if (!archive_output)
                 return std::unexpected(archive_output.error());
+
             if (*archive_output)
                 result.archive_output = **archive_output;
 
@@ -584,38 +573,35 @@ namespace kaixa::plugin::cmake::detail {
         if (languages_value) {
             const std::vector<Value>* languages = languages_value->as_array();
             if (!languages) {
-                return std::unexpected(
-                    wrong_kind(options.location_of("languages"), "an array", languages_value->kind())
-                );
+                return std::unexpected(wrong_kind(options.location_of("languages"), "an array", languages_value->kind()));
             }
             result.languages.clear();
             for (const Value& item: *languages) {
                 const std::string* language = item.as_string();
                 if (!language)
                     return std::unexpected(wrong_kind(item.location(), "a string", item.kind()));
+
                 if (*language != "C" && *language != "CXX") {
-                    return std::unexpected(
-                        error_at(item.location(), "unsupported generated project language `" + *language + "`")
-                    );
+                    return std::unexpected(error_at(item.location(), "unsupported generated project language `" + *language + "`"));
                 }
                 if (std::ranges::find(result.languages, *language) == result.languages.end())
                     result.languages.push_back(*language);
             }
             if (result.languages.empty()) {
-                return std::unexpected(
-                    error_at(options.location_of("languages"), "generated project languages cannot be empty")
-                );
+                return std::unexpected(error_at(options.location_of("languages"), "generated project languages cannot be empty"));
             }
         }
 
         auto default_standard = optional_integer(options, "cxx-standard");
         if (!default_standard)
             return std::unexpected(default_standard.error());
+
         if (!*default_standard) {
             for (const Value& policy: package.policy_layers) {
                 const Value* cxx = policy.find("cxx");
                 if (!cxx)
                     continue;
+
                 const std::int64_t* standard = cxx->as_integer();
                 if (!standard) {
                     return std::unexpected(wrong_kind(cxx->location(), "an integer C++ language floor", cxx->kind()));
@@ -627,8 +613,7 @@ namespace kaixa::plugin::cmake::detail {
             return std::unexpected(error_at(options.location_of("cxx-standard"), "C++ standard must be positive"));
         }
 
-        const bool direct_target =
-            std::ranges::any_of(options.entries(), [](const TableEntry& entry) { return entry.key == "type"; });
+        const bool direct_target = std::ranges::any_of(options.entries(), [](const TableEntry& entry) { return entry.key == "type"; });
         const Value* target_value = options.take("target");
         const Value* legacy_targets_value = options.take("targets");
         if (direct_target && (target_value || legacy_targets_value)) {
@@ -637,22 +622,17 @@ namespace kaixa::plugin::cmake::detail {
             );
         }
         if (target_value && legacy_targets_value) {
-            return std::unexpected(
-                error_at(options.location_of("targets"), "`cmake.target` and `cmake.targets` cannot be used together")
-            );
+            return std::unexpected(error_at(options.location_of("targets"), "`cmake.target` and `cmake.targets` cannot be used together"));
         }
         if (!package.manifest->products.empty() && (direct_target || target_value || legacy_targets_value)) {
-            return std::unexpected(error_at(
-                package.manifest->products.front().location,
-                "product declarations cannot be combined with legacy CMake targets"
-            ));
+            return std::unexpected(
+                error_at(package.manifest->products.front().location, "product declarations cannot be combined with legacy CMake targets")
+            );
         }
 
         auto append_target = [&](std::string name, TableReader& table) -> Result<void> {
             if (!is_valid_identifier(name)) {
-                return std::unexpected(
-                    error_at(table.location_of("name"), "`" + name + "` is not a valid CMake target name")
-                );
+                return std::unexpected(error_at(table.location_of("name"), "`" + name + "` is not a valid CMake target name"));
             }
             if (std::ranges::any_of(result.targets, [&](const TargetOptions& target) { return target.name == name; })) {
                 return std::unexpected(error_at(table.location_of("name"), "duplicate CMake target `" + name + "`"));
@@ -701,20 +681,21 @@ namespace kaixa::plugin::cmake::detail {
                 auto appended = append_target(package.name, table);
                 if (!appended)
                     return std::unexpected(appended.error());
+
             } else {
-                return std::unexpected(
-                    wrong_kind(options.location_of("target"), "an array of target tables", target_value->kind())
-                );
+                return std::unexpected(wrong_kind(options.location_of("target"), "an array of target tables", target_value->kind()));
             }
         } else if (legacy_targets_value) {
             auto targets_result = TableReader::bind(*legacy_targets_value, "cmake.targets");
             if (!targets_result)
                 return std::unexpected(targets_result.error());
+
             TableReader targets = std::move(*targets_result);
             for (const TableEntry& entry: targets.entries()) {
                 auto table_result = TableReader::bind(entry.value, join_config_path(targets.path(), entry.key));
                 if (!table_result)
                     return std::unexpected(table_result.error());
+
                 TableReader table = std::move(*table_result);
                 auto appended = append_target(entry.key, table);
                 if (!appended)
@@ -723,25 +704,26 @@ namespace kaixa::plugin::cmake::detail {
             targets.take_all();
         }
 
-        if (package.manifest->products.size() > 1) {
-            return std::unexpected(error_at(
-                package.manifest->products[1].location, "the CMake resolver currently requires one product per package"
-            ));
+        auto effective_package = realize_package(graph, package.id, realization);
+        if (!effective_package)
+            return std::unexpected(effective_package.error());
+
+        if (effective_package->products.size() > 1) {
+            return std::unexpected(
+                error_at(effective_package->products[1].location, "the CMake resolver currently requires one product per package")
+            );
         }
-        if (!package.manifest->products.empty()) {
-            auto product =
-                read_product(package.manifest->products.front(), package.name, *default_standard, result.source);
+        if (!effective_package->products.empty()) {
+            auto product = read_effective_product(effective_package->products.front(), *default_standard, result.source);
             if (!product)
                 return std::unexpected(product.error());
 
             for (const PackageId dependency: package.dependencies) {
                 const PackageNode& target = graph[dependency];
-                const auto binding =
-                    std::ranges::find_if(package.manifest->dependencies, [&](const DependencyBinding& candidate) {
-                        return candidate.request.package == target.name;
-                    });
-                if (binding != package.manifest->dependencies.end()
-                    && binding->visibility == DependencyVisibility::public_dependency) {
+                const auto binding = std::ranges::find_if(package.manifest->dependencies, [&](const DependencyBinding& candidate) {
+                    return candidate.request.package == target.name;
+                });
+                if (binding != package.manifest->dependencies.end() && binding->visibility == DependencyVisibility::public_dependency) {
                     product->public_link_libraries.push_back(target.name);
                 } else {
                     product->link_libraries.push_back(target.name);
@@ -758,13 +740,11 @@ namespace kaixa::plugin::cmake::detail {
             auto finished = table.finish();
             if (!finished)
                 return std::unexpected(finished.error());
-            if (std::ranges::none_of(result.targets, [&](const TargetOptions& target) {
-                    return target.name == test->target;
-                })) {
-                return std::unexpected(error_at(
-                    table.location_of("target"),
-                    "test `" + test->name + "` references unknown target `" + test->target + "`"
-                ));
+
+            if (std::ranges::none_of(result.targets, [&](const TargetOptions& target) { return target.name == test->target; })) {
+                return std::unexpected(
+                    error_at(table.location_of("target"), "test `" + test->name + "` references unknown target `" + test->target + "`")
+                );
             }
             result.tests.push_back(std::move(*test));
             return {};
@@ -773,9 +753,7 @@ namespace kaixa::plugin::cmake::detail {
         if (const Value* tests_value = options.take("test")) {
             const std::vector<Value>* tests = tests_value->as_array();
             if (!tests) {
-                return std::unexpected(
-                    wrong_kind(options.location_of("test"), "an array of test tables", tests_value->kind())
-                );
+                return std::unexpected(wrong_kind(options.location_of("test"), "an array of test tables", tests_value->kind()));
             }
             for (std::size_t index = 0; index < tests->size(); ++index) {
                 auto table_result = indexed_table((*tests)[index], "cmake.test", index);
@@ -812,15 +790,15 @@ namespace kaixa::plugin::cmake::detail {
             tests.take_all();
         }
 
-        for (const PackageTarget& declared: package.manifest->resolved_targets) {
+        for (const EffectiveTarget& effective_target: effective_package->targets) {
+            if (effective_target.availability == TargetAvailability::skipped)
+                continue;
+
+            const PackageTarget& declared = effective_target.target;
             if (!declared.name) {
-                return std::unexpected(
-                    error_at(declared.location, "package target was not normalized before CMake interpretation")
-                );
+                return std::unexpected(error_at(declared.location, "package target was not normalized before CMake interpretation"));
             }
-            if (std::ranges::any_of(result.targets, [&](const TargetOptions& target) {
-                    return target.name == *declared.name;
-                })) {
+            if (std::ranges::any_of(result.targets, [&](const TargetOptions& target) { return target.name == *declared.name; })) {
                 return std::unexpected(error_at(declared.location, "duplicate CMake target `" + *declared.name + "`"));
             }
 
@@ -829,13 +807,12 @@ namespace kaixa::plugin::cmake::detail {
                 return std::unexpected(target.error());
 
             target->default_build = false;
-            if (std::ranges::any_of(package.manifest->products, [](const ProductDeclaration& product) {
-                    return product.kind == ProductDeclarationKind::library;
+            if (std::ranges::any_of(effective_package->products, [](const EffectiveProduct& product) {
+                    return product.type != EffectiveProductType::executable;
                 })) {
                 target->link_libraries.push_back(package.name);
             }
-            const auto dependencies =
-                std::ranges::find(package.target_dependencies, *declared.name, &PackageTargetDependencies::target);
+            const auto dependencies = std::ranges::find(package.target_dependencies, *declared.name, &PackageTargetDependencies::target);
             if (dependencies != package.target_dependencies.end()) {
                 for (const PackageId dependency: dependencies->packages)
                     target->link_libraries.push_back(graph[dependency].name);
@@ -844,10 +821,7 @@ namespace kaixa::plugin::cmake::detail {
 
             if (declared.kind == PackageTargetKind::test) {
                 result.tests.push_back(
-                    {declared.display_name.value_or(*declared.name),
-                     *declared.name,
-                     declared.arguments,
-                     declared.discover}
+                    {declared.display_name.value_or(*declared.name), *declared.name, declared.arguments, declared.discover}
                 );
             }
         }
@@ -855,6 +829,7 @@ namespace kaixa::plugin::cmake::detail {
         auto dependencies_result = options.optional_table("dependencies");
         if (!dependencies_result)
             return std::unexpected(dependencies_result.error());
+
         if (*dependencies_result) {
             TableReader dependencies = std::move(**dependencies_result);
             for (const TableEntry& entry: dependencies.entries()) {
@@ -868,14 +843,14 @@ namespace kaixa::plugin::cmake::detail {
                     return graph[id].name == entry.key;
                 });
                 if (dependency == package.dependencies.end()) {
-                    return std::unexpected(error_at(
-                        std::move(location), "`" + entry.key + "` is not a dependency of `" + package.name + "`"
-                    ));
+                    return std::unexpected(
+                        error_at(std::move(location), "`" + entry.key + "` is not a dependency of `" + package.name + "`")
+                    );
                 }
                 if (graph[*dependency].kind != PackageKind::managed || graph[*dependency].resolver != "cmake") {
-                    return std::unexpected(error_at(
-                        std::move(location), "CMake integration can only be selected for a managed CMake dependency"
-                    ));
+                    return std::unexpected(
+                        error_at(std::move(location), "CMake integration can only be selected for a managed CMake dependency")
+                    );
                 }
 
                 DependencyMode mode;
@@ -886,8 +861,7 @@ namespace kaixa::plugin::cmake::detail {
                 } else {
                     return std::unexpected(error_at(
                         std::move(location),
-                        "unknown CMake dependency mode `" + *mode_name
-                            + "`; expected `add-subdirectory` or `find-package`"
+                        "unknown CMake dependency mode `" + *mode_name + "`; expected `add-subdirectory` or `find-package`"
                     ));
                 }
                 result.dependencies.push_back({*dependency, mode});
@@ -898,6 +872,7 @@ namespace kaixa::plugin::cmake::detail {
         auto finished = options.finish();
         if (!finished)
             return std::unexpected(finished.error());
+
         return result;
     }
 
@@ -909,59 +884,68 @@ namespace kaixa::plugin::cmake::detail {
         auto options_result = TableReader::bind(*settings);
         if (!options_result)
             return std::unexpected(options_result.error());
+
         TableReader options = std::move(*options_result);
 
         auto generator = options.optional_string("generator");
         if (!generator)
             return std::unexpected(generator.error());
+
         result.generator = std::move(*generator);
 
         auto c_compiler = options.optional_string("c-compiler");
         if (!c_compiler)
             return std::unexpected(c_compiler.error());
+
         result.c_compiler = std::move(*c_compiler);
 
         auto cxx_compiler = options.optional_string("cxx-compiler");
         if (!cxx_compiler)
             return std::unexpected(cxx_compiler.error());
+
         result.cxx_compiler = std::move(*cxx_compiler);
 
         const SourceLocation toolchain_location = options.location_of("toolchain");
         auto toolchain = options.optional_string("toolchain");
         if (!toolchain)
             return std::unexpected(toolchain.error());
+
         if (*toolchain) {
             std::filesystem::path path = **toolchain;
             if (path.is_relative() && !toolchain_location.source.empty())
                 path = std::filesystem::path(toolchain_location.source).parent_path() / path;
+
             result.toolchain = std::move(path);
         }
 
         auto arguments = string_array(options, "arguments");
         if (!arguments)
             return std::unexpected(arguments.error());
+
         result.configure_arguments = std::move(*arguments);
 
         auto configure_arguments = string_array(options, "configure-arguments");
         if (!configure_arguments)
             return std::unexpected(configure_arguments.error());
-        result.configure_arguments.insert(
-            result.configure_arguments.end(), configure_arguments->begin(), configure_arguments->end()
-        );
+
+        result.configure_arguments.insert(result.configure_arguments.end(), configure_arguments->begin(), configure_arguments->end());
 
         auto build_arguments = string_array(options, "build-arguments");
         if (!build_arguments)
             return std::unexpected(build_arguments.error());
+
         result.build_arguments = std::move(*build_arguments);
 
         auto install_arguments = string_array(options, "install-arguments");
         if (!install_arguments)
             return std::unexpected(install_arguments.error());
+
         result.install_arguments = std::move(*install_arguments);
 
         auto finished = options.finish();
         if (!finished)
             return std::unexpected(finished.error());
+
         return result;
     }
 
@@ -974,13 +958,14 @@ namespace kaixa::plugin::cmake::detail {
 
     std::string generate_project(const PackageNode& package, const Options& options) {
         const std::string version = project_version(package);
-        std::string output =
-            std::string(generated_marker) + "\n" + "cmake_minimum_required(VERSION 3.20)\n" + "project(" + package.name;
+        std::string output = std::string(generated_marker) + "\n" + "cmake_minimum_required(VERSION 3.20)\n" + "project(" + package.name;
         if (!version.empty())
             output += " VERSION " + version;
+
         output += " LANGUAGES";
         for (const std::string& language: options.languages)
             output += " " + language;
+
         output += ")\n\n";
 
         if (options.runtime_output || options.library_output || options.archive_output) {
@@ -1003,8 +988,7 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         if (options.msvc_runtime != MsvcRuntime::default_runtime) {
-            const std::string runtime =
-                options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
+            const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
             output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n\n";
         }
 
@@ -1022,6 +1006,7 @@ namespace kaixa::plugin::cmake::detail {
                 output += "\n";
                 for (const std::string& source: sources)
                     output += "    " + quote(source) + "\n";
+
                 output += ")\n\n";
             }
 
@@ -1055,13 +1040,7 @@ namespace kaixa::plugin::cmake::detail {
                 interface_target ? "SYSTEM INTERFACE" : "SYSTEM PUBLIC",
                 project_paths(options, target.public_system_include_directories)
             );
-            emit_values(
-                output,
-                "target_link_libraries",
-                target.name,
-                interface_target ? "INTERFACE" : "PRIVATE",
-                target.link_libraries
-            );
+            emit_values(output, "target_link_libraries", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.link_libraries);
             emit_values(
                 output,
                 "target_link_libraries",
@@ -1083,13 +1062,7 @@ namespace kaixa::plugin::cmake::detail {
                 interface_target ? "INTERFACE" : "PUBLIC",
                 target.public_compile_definitions
             );
-            emit_values(
-                output,
-                "target_compile_options",
-                target.name,
-                interface_target ? "INTERFACE" : "PRIVATE",
-                target.compile_options
-            );
+            emit_values(output, "target_compile_options", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.compile_options);
             emit_values(
                 output,
                 "target_compile_options",
@@ -1100,8 +1073,13 @@ namespace kaixa::plugin::cmake::detail {
 
             if (target.cxx_standard) {
                 const std::string scope = interface_target ? "INTERFACE" : (executable ? "PRIVATE" : "PUBLIC");
-                output += "target_compile_features(" + target.name + " " + scope + " cxx_std_"
-                          + std::to_string(*target.cxx_standard) + ")\n\n";
+                output += "target_compile_features("
+                    + target.name
+                    + " "
+                    + scope
+                    + " cxx_std_"
+                    + std::to_string(*target.cxx_standard)
+                    + ")\n\n";
                 output += "set_target_properties(" + target.name + " PROPERTIES CXX_EXTENSIONS OFF)\n\n";
             }
             if (!target.default_build) {

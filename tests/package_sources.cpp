@@ -13,13 +13,13 @@ using kaixa::testing::TempDirectory;
 
 namespace {
     class TestSourceDriver final : public kaixa::SourceDriver {
-      public:
-        [[nodiscard]] kaixa::SourceDriverInfo info() const override {
-            return {"test_source", "opens source trees declared by tests"};
-        }
+    public:
+        [[nodiscard]] kaixa::SourceDriverInfo info() const override { return {"test_source", "opens source trees declared by tests"}; }
 
-        [[nodiscard]] kaixa::Result<std::optional<kaixa::SourceTree>>
-        locate(const kaixa::SourceLocator& source, const kaixa::SourceContext& context) const override {
+        [[nodiscard]] kaixa::Result<std::optional<kaixa::SourceTree>> locate(
+            const kaixa::SourceLocator& source,
+            const kaixa::SourceContext& context
+        ) const override {
             const kaixa::Value* path = source.options.find("path");
             if (!path || !path->as_string())
                 return std::unexpected(kaixa::error("test source requires a string `path`"));
@@ -37,16 +37,14 @@ namespace {
     };
 
     class TestProvider final : public kaixa::PackageProvider {
-      public:
+    public:
         TestProvider(kaixa::ProviderInfo info, std::vector<kaixa::PackageCandidate> candidates)
-            : m_info(std::move(info)), m_candidates(std::move(candidates)) {}
+            : m_info(std::move(info))
+            , m_candidates(std::move(candidates)) {}
 
-        [[nodiscard]] kaixa::ProviderInfo info() const override {
-            return m_info;
-        }
+        [[nodiscard]] kaixa::ProviderInfo info() const override { return m_info; }
 
-        [[nodiscard]] kaixa::Result<std::vector<kaixa::PackageCandidate>>
-        candidates(const kaixa::PackageRequest& request) const override {
+        [[nodiscard]] kaixa::Result<std::vector<kaixa::PackageCandidate>> candidates(const kaixa::PackageRequest& request) const override {
             std::vector<kaixa::PackageCandidate> result;
             for (const kaixa::PackageCandidate& candidate: m_candidates) {
                 if (candidate.package == request.package)
@@ -55,7 +53,7 @@ namespace {
             return result;
         }
 
-      private:
+    private:
         kaixa::ProviderInfo m_info;
         std::vector<kaixa::PackageCandidate> m_candidates;
     };
@@ -65,19 +63,19 @@ namespace {
     }
 
     kaixa::PackageCandidate candidate(
-        std::string package, std::string version, const std::filesystem::path& path, std::string authority = "tests"
+        std::string package,
+        std::string version,
+        const std::filesystem::path& path,
+        std::string authority = "tests"
     ) {
         return {std::move(package), kaixa::Version{std::move(version)}, std::move(authority), test_source(path)};
     }
 
-    kaixa::PackageCandidate
-    path_candidate(std::string package, std::string version, const std::filesystem::path& path) {
-        return {
-            std::move(package),
+    kaixa::PackageCandidate path_candidate(std::string package, std::string version, const std::filesystem::path& path) {
+        return {std::move(package),
             kaixa::Version{std::move(version)},
             "tests",
-            kaixa::SourceLocator{"path", kaixa::Value::table({{"path", path.generic_string()}})}
-        };
+            kaixa::SourceLocator{"path", kaixa::Value::table({{"path", path.generic_string()}})}};
     }
 }
 
@@ -92,7 +90,8 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
         "\n"
         "[dependencies]\n"
         "engine = { test_source = { path = \""
-            + source.generic_string() + "\" } }\n"
+            + source.generic_string()
+            + "\" } }\n"
     );
     root.write(
         "engine-source/Kaixa.toml",
@@ -248,9 +247,7 @@ KAIXA_TEST(provider_configuration_rejects_an_unknown_driver) {
     if (configured)
         return;
 
-    context.check_contains(
-        configured.error().message, "provider driver `missing` is not installed", "driver diagnostic"
-    );
+    context.check_contains(configured.error().message, "provider driver `missing` is not installed", "driver diagnostic");
 }
 
 KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
@@ -284,8 +281,7 @@ KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
     );
 
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
-    const auto resolved =
-        kaixa::resolve_workspace(root.path() / "packages/app", kaixa::ResolutionOptions{{}, &extensions, {}, {}});
+    const auto resolved = kaixa::resolve_workspace(root.path() / "packages/app", kaixa::ResolutionOptions{{}, &extensions, {}, {}});
     context.check(resolved.has_value(), "ancestor provider resolves from a nested package");
     if (!resolved) {
         context.fail(kaixa::format_diagnostic(resolved.error()));
@@ -325,9 +321,7 @@ KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
         "resolver = \"cmake\"\n"
     );
 
-    kaixa::ProviderLayer local{
-        {{"engine", "path", true, kaixa::Value::table({{"path", "repository"}}), {}}}, {root.path()}
-    };
+    kaixa::ProviderLayer local{{{"engine", "path", true, kaixa::Value::table({{"path", "repository"}}), {}}}, {root.path()}};
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
     const std::vector<kaixa::ProviderLayer> layers{local};
     const auto resolved = kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, &extensions, {}, layers});
@@ -338,22 +332,22 @@ KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
 
 KAIXA_TEST(provider_layers_reject_multiple_defaults) {
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
-    const std::vector<kaixa::ProviderLayer> layers{
-        {{{"first", "path", true, kaixa::Value::table({{"path", "first"}}), {}},
-          {"second", "path", true, kaixa::Value::table({{"path", "second"}}), {}}},
-         {}}
+    const kaixa::ProviderLayer layer{
+        {
+            {"first", "path", true, kaixa::Value::table({{"path", "first"}}), {}},
+            {"second", "path", true, kaixa::Value::table({{"path", "second"}}), {}},
+        },
+        {},
     };
+    const std::vector<kaixa::ProviderLayer> layers{layer};
 
     const auto configured = kaixa::configure_providers(extensions, layers);
     context.check(!configured.has_value(), "multiple default providers are rejected");
     if (configured)
         return;
 
-    context.check_contains(
-        configured.error().message,
-        "more than one default package provider is configured",
-        "default provider diagnostic"
-    );
+    context
+        .check_contains(configured.error().message, "more than one default package provider is configured", "default provider diagnostic");
 }
 
 KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
@@ -395,9 +389,7 @@ KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
     candidates.push_back(path_candidate("engine", "1.4.0", root.path() / "engine-1.4"));
 
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
-    extensions.add(
-        std::make_unique<TestProvider>(kaixa::ProviderInfo{"official", "test_provider", true}, std::move(candidates))
-    );
+    extensions.add(std::make_unique<TestProvider>(kaixa::ProviderInfo{"official", "test_provider", true}, std::move(candidates)));
     const auto resolved = kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, &extensions, {}, {}});
     context.check(resolved.has_value(), "default provider resolves");
     if (!resolved) {

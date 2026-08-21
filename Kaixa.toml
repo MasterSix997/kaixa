@@ -19,7 +19,7 @@ kaixa_core = "0.2.0-dev"
 kaixa_plugins = "0.2.0-dev"
 
 [bin]
-sources = ["apps/kaixa/*.cpp"]
+sources = ["apps/kaixa/*.cpp", "apps/kaixa/command_line.cpp"]
 
 [cmake]
 languages = ["CXX"]

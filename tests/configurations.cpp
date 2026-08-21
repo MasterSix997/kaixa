@@ -88,17 +88,10 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
 
     const std::vector<kaixa::ConfigurationSet> layers{*published, *user};
     const std::vector<std::string> requested;
-    const std::vector<kaixa::ResolverArgumentOverride> overrides{
-        {"cmake", {"-DBUILD_TESTING=ON"}, {}},
+    const std::vector<kaixa::ResolverArgumentOverride> overrides{{"cmake", {"-DBUILD_TESTING=ON"}, {}},
         {"cmake", {"--verbose"}, "build"},
-        {"lua", {"--trace"}, {}}
-    };
-    const auto effective = kaixa::resolve_configurations(
-        layers,
-        requested,
-        std::nullopt,
-        overrides
-    );
+        {"lua", {"--trace"}, {}}};
+    const auto effective = kaixa::resolve_configurations(layers, requested, std::nullopt, overrides);
     context.check(effective.has_value(), "configuration layers resolve");
     if (!effective)
         return;
@@ -139,11 +132,7 @@ KAIXA_TEST(configurations_compose_published_local_and_cli_layers) {
     context.check_equal(cmake->arguments.size(), std::size_t{1}, "CLI argument is separate");
     context.check_equal(cmake->scoped_arguments.size(), std::size_t{1}, "scoped CLI argument is separate");
     if (!cmake->scoped_arguments.empty()) {
-        context.check_equal(
-            cmake->scoped_arguments.front().scope,
-            std::string("build"),
-            "build argument scope"
-        );
+        context.check_equal(cmake->scoped_arguments.front().scope, std::string("build"), "build argument scope");
     }
     const kaixa::ResolverBuildConfiguration* lua = effective->find("lua");
     context.check(lua != nullptr, "second resolver override exists");
@@ -182,14 +171,12 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
     manifest.configurations.defaults.push_back("clang");
     kaixa::ConfigurationDefinition clang;
     clang.name = "clang";
-    clang.resolvers.push_back({
-        "cmake",
-        kaixa::Value::table({
-            {"generator", "Ninja"},
-            {"cxx-compiler", "clang++"},
-            {"arguments", kaixa::Value::array({"-DBUILD_TESTING=OFF"})}
-        })
-    });
+    clang.resolvers.push_back(
+        {"cmake",
+            kaixa::Value::table(
+                {{"generator", "Ninja"}, {"cxx-compiler", "clang++"}, {"arguments", kaixa::Value::array({"-DBUILD_TESTING=OFF"})}}
+            )}
+    );
     manifest.configurations.definitions.push_back(std::move(clang));
     root.write_manifest("Kaixa.toml", manifest);
     root.write("CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
@@ -203,22 +190,13 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
     const std::vector<kaixa::ConfigurationSet> layers{package.manifest->configurations};
     const std::vector<std::string> requested;
     const std::vector<kaixa::ResolverArgumentOverride> overrides;
-    auto configuration = kaixa::resolve_configurations(
-        layers,
-        requested,
-        std::nullopt,
-        overrides
-    );
+    auto configuration = kaixa::resolve_configurations(layers, requested, std::nullopt, overrides);
     if (!configuration) {
         context.fail(kaixa::format_diagnostic(configuration.error()));
         return;
     }
 
-    const kaixa::BuildEnvironment environment{
-        root.path(),
-        root.path() / "out",
-        std::move(*configuration)
-    };
+    const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", std::move(*configuration)};
     const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake project plans");
@@ -226,15 +204,10 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
         return;
 
     const std::vector<std::string> command = plan->actions().front().argv;
-    for (const std::string& expected: {
-             std::string("Ninja"),
-             std::string("-DCMAKE_CXX_COMPILER=clang++"),
-             std::string("-DBUILD_TESTING=OFF")
-         }) {
-        context.check(
-            std::ranges::find(command, expected) != command.end(),
-            "configure command contains " + expected
-        );
+    for (
+        const std::string& expected: {std::string("Ninja"), std::string("-DCMAKE_CXX_COMPILER=clang++"), std::string("-DBUILD_TESTING=OFF")}
+    ) {
+        context.check(std::ranges::find(command, expected) != command.end(), "configure command contains " + expected);
     }
 }
 
@@ -242,12 +215,7 @@ KAIXA_TEST(configuration_selection_rejects_an_unknown_name) {
     const std::vector<kaixa::ConfigurationSet> layers(1);
     const std::vector<std::string> requested{"missing"};
     const std::vector<kaixa::ResolverArgumentOverride> overrides;
-    const auto configuration = kaixa::resolve_configurations(
-        layers,
-        requested,
-        std::nullopt,
-        overrides
-    );
+    const auto configuration = kaixa::resolve_configurations(layers, requested, std::nullopt, overrides);
     context.check(!configuration.has_value(), "unknown configuration is rejected");
     if (!configuration) {
         context.check_contains(

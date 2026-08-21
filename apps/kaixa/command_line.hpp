@@ -59,8 +59,13 @@ namespace kaixa::cli {
         bool all_targets = false;
 
         [[nodiscard]] bool empty() const noexcept {
-            return examples.empty() && tests.empty() && benchmarks.empty()
-                && !all_examples && !all_tests && !all_benchmarks && !all_targets;
+            return examples.empty()
+                && tests.empty()
+                && benchmarks.empty()
+                && !all_examples
+                && !all_tests
+                && !all_benchmarks
+                && !all_targets;
         }
     };
 

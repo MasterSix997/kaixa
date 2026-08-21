@@ -32,9 +32,7 @@ KAIXA_TEST(manifest_reads_the_current_schema) {
     context.check_equal(manifest->resolver, std::string("cmake"), "resolver");
     context.check_equal(manifest->dependencies.size(), std::size_t{1}, "dependency count");
     if (!manifest->dependencies.empty()) {
-        context.check_equal(
-            manifest->dependencies.front().selection.path->generic_string(), std::string("../math"), "dependency path"
-        );
+        context.check_equal(manifest->dependencies.front().selection.path->generic_string(), std::string("../math"), "dependency path");
     }
 }
 
@@ -53,7 +51,8 @@ KAIXA_TEST(manifest_normalizes_products_public_edges_features_and_inline_members
         "\n"
         "[features]\n"
         "default = [\"full\"]\n"
-        "full = { dependencies = [\"graphics\"], dependency-features = { graphics = [\"vulkan\"] } }\n"
+        "full = { dependencies = [\"graphics\"], "
+        "dependency-features = { graphics = [\"vulkan\"] } }\n"
         "\n"
         "[bin]\n"
         "sources = [\"main.cpp\"]\n"
@@ -136,14 +135,13 @@ KAIXA_TEST(manifest_tree_loads_target_layers_and_advanced_target_data) {
 
 KAIXA_TEST(manifest_rejects_unknown_keys) {
     const auto manifest = kaixa::parse_manifest_string(
-        "[package]\nname = \"app\"\nresolver = \"cmake\"\ntypo = true\n", "invalid-manifest"
+        "[package]\nname = \"app\"\nresolver = \"cmake\"\ntypo = true\n",
+        "invalid-manifest"
     );
 
     context.check(!manifest.has_value(), "unknown package key is rejected");
     if (!manifest) {
-        context.check_contains(
-            kaixa::format_diagnostic(manifest.error()), "package.typo", "diagnostic names the unknown key"
-        );
+        context.check_contains(kaixa::format_diagnostic(manifest.error()), "package.typo", "diagnostic names the unknown key");
     }
 }
 
@@ -165,10 +163,7 @@ KAIXA_TEST(file_sets_expand_globs_and_keep_literal_generated_files) {
     }
 
     context.check_equal(expanded->size(), std::size_t{3}, "matched and literal file count");
-    context.check(
-        std::ranges::find(*expanded, std::filesystem::path("src/first.cpp")) != expanded->end(),
-        "direct match is included"
-    );
+    context.check(std::ranges::find(*expanded, std::filesystem::path("src/first.cpp")) != expanded->end(), "direct match is included");
     context.check(
         std::ranges::find(*expanded, std::filesystem::path("src/nested/second.cpp")) != expanded->end(),
         "recursive match is included"
@@ -215,9 +210,7 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     context.check(manifest->targets[1].each_source, "plural benchmarks are per source");
     context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
     context.check_equal(manifest->targets[0].dependencies.size(), std::size_t{1}, "target dependency count");
-    context.check_equal(
-        manifest->targets[0].dependencies.front().request.package, std::string("support"), "target dependency name"
-    );
+    context.check_equal(manifest->targets[0].dependencies.front().request.package, std::string("support"), "target dependency name");
 }
 
 KAIXA_TEST(package_target_names_may_preserve_resolver_namespaces) {
@@ -261,6 +254,7 @@ KAIXA_TEST(package_targets_preserve_feature_requirements_for_selection) {
     context.check(graph.has_value(), "feature requirement is normalized without activating it");
     if (!graph)
         return;
+
     const kaixa::PackageNode& app = graph->nodes().front();
     context.check(app.manifest.has_value(), "managed package retains its manifest");
     if (app.manifest && !app.manifest->resolved_targets.empty()) {
@@ -289,17 +283,15 @@ KAIXA_TEST(programmatic_manifest_formats_and_round_trips) {
     kaixa::ConfigurationDefinition dev;
     dev.name = "dev";
     dev.profile = "debug";
-    dev.resolvers.push_back(
-        {"cmake", kaixa::Value::table({{"generator", "Ninja"}, {"arguments", kaixa::Value::array({"-DDEV=ON"})}})}
-    );
+    dev.resolvers.push_back({"cmake", kaixa::Value::table({{"generator", "Ninja"}, {"arguments", kaixa::Value::array({"-DDEV=ON"})}})});
     authored.configurations.definitions.push_back(std::move(dev));
     authored.resolver_options = kaixa::Value::table(
         {{"source", "project"},
-         {"cxx-standard", 23},
-         {"target",
-          kaixa::Value::array({kaixa::Value::table(
-              {{"name", "app"}, {"type", "executable"}, {"sources", kaixa::Value::array({"src/main.cpp"})}}
-          )})}}
+            {"cxx-standard", 23},
+            {"target",
+                kaixa::Value::array(
+                    {kaixa::Value::table({{"name", "app"}, {"type", "executable"}, {"sources", kaixa::Value::array({"src/main.cpp"})}})}
+                )}}
     );
 
     const auto text = kaixa::format_manifest(authored);
@@ -339,9 +331,7 @@ KAIXA_TEST(programmatic_manifest_rejects_invalid_data) {
     const auto text = kaixa::format_manifest(manifest);
     context.check(!text.has_value(), "invalid programmatic manifest is rejected");
     if (!text) {
-        context.check_contains(
-            kaixa::format_diagnostic(text.error()), "duplicate dependency `math`", "diagnostic explains invalid model"
-        );
+        context.check_contains(kaixa::format_diagnostic(text.error()), "duplicate dependency `math`", "diagnostic explains invalid model");
     }
 }
 
@@ -377,9 +367,7 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
         return;
 
     context.check_equal(plan->actions().size(), std::size_t{2}, "one composed configure and build");
-    context.check_equal(
-        plan->generated_files().size(), std::size_t{3}, "variant metadata, integration and File API query"
-    );
+    context.check_equal(plan->generated_files().size(), std::size_t{3}, "variant metadata, integration and File API query");
     if (plan->actions().size() == 2) {
         context.check(plan->actions()[0].stage == kaixa::ActionStage::synchronize, "configure synchronizes");
         context.check(plan->actions()[1].stage == kaixa::ActionStage::build, "build stays explicit");
@@ -388,10 +376,8 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
 
 KAIXA_TEST(graph_rejects_dependency_cycles) {
     kaixa::Graph graph;
-    const kaixa::PackageId first =
-        graph.add({{}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
-    const kaixa::PackageId second =
-        graph.add({{}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
+    const kaixa::PackageId first = graph.add({{}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
+    const kaixa::PackageId second = graph.add({{}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
     graph[first].dependencies.push_back(second);
     graph[second].dependencies.push_back(first);
 

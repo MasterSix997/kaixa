@@ -27,15 +27,11 @@ namespace kaixa {
         void add(Action action) { m_actions.push_back(std::move(action)); }
         void output(BuildOutput output) { m_outputs.push_back(std::move(output)); }
 
-        [[nodiscard]] std::span<const GeneratedFile> generated_files() const noexcept {
-            return m_files;
-        }
+        [[nodiscard]] std::span<const GeneratedFile> generated_files() const noexcept { return m_files; }
         [[nodiscard]] std::span<Action> actions() noexcept { return m_actions; }
         [[nodiscard]] std::span<const Action> actions() const noexcept { return m_actions; }
         [[nodiscard]] std::span<const BuildOutput> outputs() const noexcept { return m_outputs; }
-        [[nodiscard]] bool empty() const noexcept {
-            return m_files.empty() && m_actions.empty() && m_outputs.empty();
-        }
+        [[nodiscard]] bool empty() const noexcept { return m_files.empty() && m_actions.empty() && m_outputs.empty(); }
 
     private:
         std::vector<GeneratedFile> m_files;

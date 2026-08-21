@@ -85,19 +85,19 @@ namespace kaixa {
         try {
             for (const std::string& pattern: files.exclude)
                 exclusions.emplace_back(regex_pattern(normalized_pattern(pattern)));
+
         } catch (const std::regex_error& failure) {
-            return std::unexpected(
-                error_at(files.location, "invalid file exclusion pattern: " + std::string(failure.what()))
-            );
+            return std::unexpected(error_at(files.location, "invalid file exclusion pattern: " + std::string(failure.what())));
         }
 
         std::vector<std::filesystem::path> result;
         for (const std::string& declared: files.include) {
             const std::string pattern = normalized_pattern(declared);
             if (!is_glob_pattern(pattern)) {
-                const std::filesystem::path path = std::filesystem::path(pattern).is_absolute()
-                                                       ? std::filesystem::path(pattern)
-                                                       : root / std::filesystem::path(pattern);
+                std::filesystem::path path = pattern;
+                if (path.is_relative())
+                    path = root / path;
+
                 if (!matches_any(relative_pattern_path(path, root), exclusions))
                     result.push_back(output_path(path, relative_to));
 
@@ -108,9 +108,7 @@ namespace kaixa {
             try {
                 matcher = std::regex(regex_pattern(pattern));
             } catch (const std::regex_error& failure) {
-                return std::unexpected(
-                    error_at(files.location, "invalid file pattern `" + declared + "`: " + failure.what())
-                );
+                return std::unexpected(error_at(files.location, "invalid file pattern `" + declared + "`: " + failure.what()));
             }
 
             const std::filesystem::path directory = search_root(root, pattern);
@@ -118,9 +116,10 @@ namespace kaixa {
             std::filesystem::recursive_directory_iterator iterator(directory, failure);
             const std::filesystem::recursive_directory_iterator end;
             if (failure) {
-                return std::unexpected(
-                    error_at(files.location, "cannot inspect file pattern `" + declared + "`: " + failure.message())
-                );
+                if (allow_unmatched && failure == std::errc::no_such_file_or_directory)
+                    continue;
+
+                return std::unexpected(error_at(files.location, "cannot inspect file pattern `" + declared + "`: " + failure.message()));
             }
 
             bool matched = false;

@@ -39,6 +39,7 @@ namespace kaixa {
             if (!location.config_path.empty()) {
                 if (wrote_location)
                     text += ' ';
+
                 text += '[';
                 text += location.config_path;
                 text += ']';

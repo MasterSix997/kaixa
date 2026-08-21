@@ -14,7 +14,10 @@
 #include <vector>
 
 namespace kaixa {
-    enum class DependencyVisibility { private_dependency, public_dependency };
+    enum class DependencyVisibility {
+        private_dependency,
+        public_dependency
+    };
 
     struct PackageRequest {
         std::string package;
@@ -42,12 +45,12 @@ namespace kaixa {
         SourceLocation location;
 
         DependencyBinding() = default;
-        DependencyBinding(
-            std::string dependency_name, std::filesystem::path dependency_path, SourceLocation source_location = {}
-        )
-            : request{std::move(dependency_name), std::nullopt, {}, false},
-              selection{std::nullopt, std::move(dependency_path), std::nullopt}, alias(std::nullopt),
-              visibility(DependencyVisibility::private_dependency), location(std::move(source_location)) {}
+        DependencyBinding(std::string dependency_name, std::filesystem::path dependency_path, SourceLocation source_location = {})
+            : request{std::move(dependency_name), std::nullopt, {}, false}
+            , selection{std::nullopt, std::move(dependency_path), std::nullopt}
+            , alias(std::nullopt)
+            , visibility(DependencyVisibility::private_dependency)
+            , location(std::move(source_location)) {}
 
         [[nodiscard]] std::string_view local_name() const noexcept {
             return alias ? std::string_view(*alias) : std::string_view(request.package);
@@ -64,7 +67,10 @@ namespace kaixa {
         SourceLocation location;
     };
 
-    enum class ProductDeclarationKind { library, executable };
+    enum class ProductDeclarationKind {
+        library,
+        executable
+    };
 
     struct ProductDeclaration {
         ProductDeclarationKind kind = ProductDeclarationKind::library;
@@ -82,7 +88,11 @@ namespace kaixa {
         SourceLocation location;
     };
 
-    enum class PackageTargetKind { test, example, benchmark };
+    enum class PackageTargetKind {
+        test,
+        example,
+        benchmark
+    };
 
     struct PackageTargetReference {
         PackageTargetKind kind = PackageTargetKind::test;
@@ -134,7 +144,8 @@ namespace kaixa {
 
         Manifest() = default;
         Manifest(std::string package_name, std::string resolver_name)
-            : name(std::move(package_name)), resolver(std::move(resolver_name)) {}
+            : name(std::move(package_name))
+            , resolver(std::move(resolver_name)) {}
     };
 
     struct ManifestDocument {
@@ -171,13 +182,15 @@ namespace kaixa {
     [[nodiscard]] bool is_valid_target_name(std::string_view name) noexcept;
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document(const Value& document);
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document_file(const std::filesystem::path& path);
-    [[nodiscard]] Result<ManifestDocument>
-    parse_manifest_document_string(std::string_view text, std::string_view source_name);
+    [[nodiscard]] Result<ManifestDocument> parse_manifest_document_string(std::string_view text, std::string_view source_name);
     [[nodiscard]] Result<Manifest> parse_manifest(const Value& document);
     [[nodiscard]] Result<Manifest> parse_manifest_file(const std::filesystem::path& path);
     [[nodiscard]] Result<Manifest> parse_manifest_string(std::string_view text, std::string_view source_name);
-    [[nodiscard]] Result<std::vector<PackageTarget>>
-    parse_package_targets_file(const std::filesystem::path& path, PackageTargetKind kind, std::string_view resolver);
+    [[nodiscard]] Result<std::vector<PackageTarget>> parse_package_targets_file(
+        const std::filesystem::path& path,
+        PackageTargetKind kind,
+        std::string_view resolver
+    );
     [[nodiscard]] Result<ManifestTree> load_manifest_tree(const std::filesystem::path& root);
     [[nodiscard]] Result<ManifestTreeSummary> validate_manifest_tree(const std::filesystem::path& root);
     [[nodiscard]] Result<std::string> format_manifest(const Manifest& manifest);

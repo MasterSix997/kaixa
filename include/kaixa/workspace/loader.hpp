@@ -28,9 +28,10 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);
-    [[nodiscard]] Result<PackageResolution>
-    resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options);
-    [[nodiscard]] Result<PackageResolution>
-    resolve_workspace(const std::filesystem::path& start, std::span<const std::string> selected_packages = {});
+    [[nodiscard]] Result<PackageResolution> resolve_workspace(const std::filesystem::path& start, const ResolutionOptions& options);
+    [[nodiscard]] Result<PackageResolution> resolve_workspace(
+        const std::filesystem::path& start,
+        std::span<const std::string> selected_packages = {}
+    );
     [[nodiscard]] Result<Graph> load_workspace(const std::filesystem::path& start);
 }

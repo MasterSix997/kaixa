@@ -4,8 +4,8 @@
 #include <cstdint>
 #include <iostream>
 #include <optional>
-#include <sstream>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -91,24 +91,20 @@ namespace kaixa::cli {
             return output;
         }
 
-        std::string origin_suffix(
-            const SourceLocation& location,
-            const std::filesystem::path& workspace,
-            const bool verbose
-        ) {
+        std::string origin_suffix(const SourceLocation& location, const std::filesystem::path& workspace, const bool verbose) {
             return verbose ? " [origin: " + origin_text(location, workspace) + ']' : "";
         }
 
-        void print_entries(
-            const Value& value,
-            const std::string_view prefix,
-            const std::filesystem::path& workspace,
-            const bool verbose
-        ) {
+        void print_entries(const Value& value, const std::string_view prefix, const std::filesystem::path& workspace, const bool verbose) {
             const std::vector<TableEntry>* table = value.as_table();
             if (!table) {
-                std::cout << "    " << prefix << " = " << format_value(value)
-                    << origin_suffix(value.location(), workspace, verbose) << '\n';
+                std::cout
+                    << "    "
+                    << prefix
+                    << " = "
+                    << format_value(value)
+                    << origin_suffix(value.location(), workspace, verbose)
+                    << '\n';
                 return;
             }
 
@@ -133,11 +129,7 @@ namespace kaixa::cli {
             SourceLocation origin;
         };
 
-        void read_option(
-            const Value& settings,
-            const std::string_view key,
-            std::optional<DisplayOption>& destination
-        ) {
+        void read_option(const Value& settings, const std::string_view key, std::optional<DisplayOption>& destination) {
             const Value* value = settings.find(key);
             if (value && value->as_string())
                 destination = DisplayOption{*value->as_string(), value->location()};
@@ -160,17 +152,10 @@ namespace kaixa::cli {
                 destination.push_back({argument, command_line});
         }
 
-        void apply_definition(
-            const LocatedArgument& argument,
-            const std::string_view name,
-            std::optional<DisplayOption>& destination
-        ) {
+        void apply_definition(const LocatedArgument& argument, const std::string_view name, std::optional<DisplayOption>& destination) {
             const std::string prefix = "-D" + std::string(name) + '=';
             if (argument.value.starts_with(prefix)) {
-                destination = DisplayOption{
-                    std::string(argument.value.substr(prefix.size())),
-                    argument.origin
-                };
+                destination = DisplayOption{std::string(argument.value.substr(prefix.size())), argument.origin};
             }
         }
 
@@ -195,25 +180,15 @@ namespace kaixa::cli {
             bool found_generator = false;
             for (std::size_t index = 0; index < arguments.size(); ++index) {
                 const LocatedArgument& argument = arguments[index];
-                if (!found_generator && (argument.value == "-G" || argument.value == "--generator")
-                    && index + 1 < arguments.size()) {
-                    result.generator = DisplayOption{
-                        std::string(arguments[index + 1].value),
-                        argument.origin
-                    };
+                if (!found_generator && (argument.value == "-G" || argument.value == "--generator") && index + 1 < arguments.size()) {
+                    result.generator = DisplayOption{std::string(arguments[index + 1].value), argument.origin};
                     found_generator = true;
-                } else if (!found_generator && argument.value.starts_with("-G")
-                    && argument.value.size() > 2) {
-                    result.generator = DisplayOption{
-                        std::string(argument.value.substr(2)),
-                        argument.origin
-                    };
+                } else if (!found_generator && argument.value.starts_with("-G") && argument.value.size() > 2) {
+                    result.generator = DisplayOption{std::string(argument.value.substr(2)), argument.origin};
                     found_generator = true;
                 } else if (!found_generator && argument.value.starts_with("--generator=")) {
-                    result.generator = DisplayOption{
-                        std::string(argument.value.substr(std::string_view("--generator=").size())),
-                        argument.origin
-                    };
+                    result.generator = DisplayOption{std::string(argument.value.substr(std::string_view("--generator=").size())),
+                        argument.origin};
                     found_generator = true;
                 }
 
@@ -237,8 +212,7 @@ namespace kaixa::cli {
                 return;
             }
 
-            std::cout << quote(option->value)
-                << origin_suffix(option->origin, workspace, verbose) << '\n';
+            std::cout << quote(option->value) << origin_suffix(option->origin, workspace, verbose) << '\n';
         }
 
         void print_effective_cmake(
@@ -249,9 +223,7 @@ namespace kaixa::cli {
             ResolverBuildConfiguration defaults;
             defaults.resolver = "cmake";
             const ResolverBuildConfiguration* resolver = configuration.find("cmake");
-            const CmakeDisplayOptions options = effective_cmake_options(
-                resolver ? *resolver : defaults
-            );
+            const CmakeDisplayOptions options = effective_cmake_options(resolver ? *resolver : defaults);
 
             std::cout << "effective CMake:\n";
             print_option("generator", options.generator, workspace, "<CMake default>", verbose);
@@ -285,8 +257,7 @@ namespace kaixa::cli {
                         if (definition.name != selected)
                             continue;
 
-                        std::cout << (wrote_origin ? ", " : " [origin: ")
-                            << origin_text(definition.location, workspace);
+                        std::cout << (wrote_origin ? ", " : " [origin: ") << origin_text(definition.location, workspace);
                         wrote_origin = true;
                     }
                 }
@@ -314,14 +285,20 @@ namespace kaixa::cli {
                     print_entries(*resolver.settings, {}, workspace, verbose);
 
                 if (!resolver.arguments.empty()) {
-                    std::cout << "    configure-arguments += "
+                    std::cout
+                        << "    configure-arguments += "
                         << format_arguments(resolver.arguments)
-                        << (verbose ? " [origin: command line]" : "") << '\n';
+                        << (verbose ? " [origin: command line]" : "")
+                        << '\n';
                 }
                 for (const ResolverArgumentGroup& arguments: resolver.scoped_arguments) {
-                    std::cout << "    " << arguments.scope << "-arguments += "
+                    std::cout
+                        << "    "
+                        << arguments.scope
+                        << "-arguments += "
                         << format_arguments(arguments.arguments)
-                        << (verbose ? " [origin: command line]" : "") << '\n';
+                        << (verbose ? " [origin: command line]" : "")
+                        << '\n';
                 }
             }
         }
@@ -346,14 +323,12 @@ namespace kaixa::cli {
         }
 
         for (const std::string& name: names) {
-            const bool selected = std::ranges::find(configuration.selected, name)
-                != configuration.selected.end();
+            const bool selected = std::ranges::find(configuration.selected, name) != configuration.selected.end();
             std::cout << name << (selected ? " [default]" : "") << '\n';
             for (const ConfigurationSource& source: sources) {
                 for (const ConfigurationDefinition& definition: source.configurations.definitions) {
                     if (definition.name == name) {
-                        std::cout << "  " << source.name << ": "
-                            << origin_text(definition.location, workspace) << '\n';
+                        std::cout << "  " << source.name << ": " << origin_text(definition.location, workspace) << '\n';
                     }
                 }
             }
@@ -367,8 +342,7 @@ namespace kaixa::cli {
         const std::filesystem::path& workspace,
         const bool verbose
     ) {
-        std::cout << "profile: " << configuration.profile
-            << origin_suffix(configuration.profile_origin, workspace, verbose) << '\n';
+        std::cout << "profile: " << configuration.profile << origin_suffix(configuration.profile_origin, workspace, verbose) << '\n';
         print_selected_configurations(configuration, sources, workspace, verbose);
         print_resolver_settings(configuration, workspace, verbose);
         if (root_resolver == "cmake")

@@ -15,7 +15,10 @@ namespace kaixa {
         [[nodiscard]] bool operator==(const PackageId&) const = default;
     };
 
-    enum class PackageKind { managed, opaque };
+    enum class PackageKind {
+        managed,
+        opaque
+    };
 
     struct PackageTargetDependencies {
         std::string target;

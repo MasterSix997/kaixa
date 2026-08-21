@@ -8,8 +8,9 @@
 #include <kaixa/extension/registry.hpp>
 #include <kaixa/extension/source.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
-#include <kaixa/model/graph.hpp>
+#include <kaixa/model/effective_product.hpp>
 #include <kaixa/model/file_set.hpp>
+#include <kaixa/model/graph.hpp>
 #include <kaixa/model/manifest.hpp>
 #include <kaixa/services/build_service.hpp>
 #include <kaixa/services/clean_service.hpp>

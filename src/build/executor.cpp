@@ -15,17 +15,13 @@ namespace kaixa {
 
         bool consumes_changed_path(const Action& action, const std::vector<std::filesystem::path>& changed) {
             return std::ranges::any_of(action.inputs, [&](const std::filesystem::path& input) {
-                return std::ranges::any_of(changed, [&](const std::filesystem::path& path) {
-                    return same_path(input, path);
-                });
+                return std::ranges::any_of(changed, [&](const std::filesystem::path& path) { return same_path(input, path); });
             });
         }
 
         void append_changed_outputs(std::vector<std::filesystem::path>& changed, const Action& action) {
             for (const std::filesystem::path& output: action.outputs) {
-                if (std::ranges::none_of(changed, [&](const std::filesystem::path& path) {
-                        return same_path(output, path);
-                    })) {
+                if (std::ranges::none_of(changed, [&](const std::filesystem::path& path) { return same_path(output, path); })) {
                     changed.push_back(output);
                 }
             }
@@ -35,13 +31,11 @@ namespace kaixa {
             std::error_code failure;
             const bool exists = std::filesystem::exists(generated.path, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect generated file `" + generated.path.string()
-                        + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot inspect generated file `" + generated.path.string() + "`: " + failure.message()));
             }
             if (!exists)
                 return GeneratedFileState::missing;
+
             if (!std::filesystem::is_regular_file(generated.path, failure) || failure)
                 return GeneratedFileState::different;
 
@@ -49,14 +43,13 @@ namespace kaixa {
             if (!content)
                 return std::unexpected(content.error());
 
-            return *content == generated.content
-                ? GeneratedFileState::current
-                : GeneratedFileState::different;
+            return *content == generated.content ? GeneratedFileState::current : GeneratedFileState::different;
         }
 
         Result<ActionState> action_state(const Action& action) {
             if (action.checked_state)
                 return *action.checked_state;
+
             if (action.outputs.empty())
                 return ActionState::unknown;
 
@@ -65,9 +58,7 @@ namespace kaixa {
                 std::error_code failure;
                 if (!std::filesystem::exists(output, failure)) {
                     if (failure) {
-                        return std::unexpected(error(
-                            "cannot inspect action output `" + output.string() + "`: " + failure.message()
-                        ));
+                        return std::unexpected(error("cannot inspect action output `" + output.string() + "`: " + failure.message()));
                     }
                     return ActionState::required;
                 }
@@ -76,9 +67,7 @@ namespace kaixa {
 
                 const auto modified = std::filesystem::last_write_time(output, failure);
                 if (failure) {
-                    return std::unexpected(error(
-                        "cannot inspect action output `" + output.string() + "`: " + failure.message()
-                    ));
+                    return std::unexpected(error("cannot inspect action output `" + output.string() + "`: " + failure.message()));
                 }
                 if (!oldest_output || modified < *oldest_output)
                     oldest_output = modified;
@@ -88,9 +77,7 @@ namespace kaixa {
                 std::error_code failure;
                 if (!std::filesystem::exists(input, failure)) {
                     if (failure) {
-                        return std::unexpected(error(
-                            "cannot inspect action input `" + input.string() + "`: " + failure.message()
-                        ));
+                        return std::unexpected(error("cannot inspect action input `" + input.string() + "`: " + failure.message()));
                     }
                     return ActionState::required;
                 }
@@ -99,9 +86,7 @@ namespace kaixa {
 
                 const auto modified = std::filesystem::last_write_time(input, failure);
                 if (failure) {
-                    return std::unexpected(error(
-                        "cannot inspect action input `" + input.string() + "`: " + failure.message()
-                    ));
+                    return std::unexpected(error("cannot inspect action input `" + input.string() + "`: " + failure.message()));
                 }
                 if (oldest_output && modified > *oldest_output)
                     return ActionState::unknown;
@@ -113,15 +98,11 @@ namespace kaixa {
             const ProcessRequest request{action.argv, action.working_directory};
             auto result = run_process(request);
             if (!result) {
-                return std::unexpected(std::move(result).error().add_note(
-                    "while running `" + format_command(action.argv) + "`"
-                ));
+                return std::unexpected(std::move(result).error().add_note("while running `" + format_command(action.argv) + "`"));
             }
             if (!result->succeeded()) {
-                return std::unexpected(error(
-                    "`" + action.description + "` exited with code "
-                        + std::to_string(result->exit_code)
-                ).add_note("command: " + format_command(action.argv)));
+                return std::unexpected(error("`" + action.description + "` exited with code " + std::to_string(result->exit_code))
+                        .add_note("command: " + format_command(action.argv)));
             }
             return {};
         }
@@ -131,8 +112,7 @@ namespace kaixa {
         return std::ranges::any_of(generated_files, [](const GeneratedFileCheck& file) {
             return file.state != GeneratedFileState::current;
         }) || std::ranges::any_of(actions, [](const ActionCheck& action) {
-            return action.stage == ActionStage::synchronize
-                && action.state == ActionState::required;
+            return action.stage == ActionStage::synchronize && action.state == ActionState::required;
         });
     }
 
@@ -188,8 +168,7 @@ namespace kaixa {
 
         for (std::size_t index = 0; index < plan.actions().size(); ++index) {
             const Action& action = plan.actions()[index];
-            if (action.stage != ActionStage::synchronize
-                || state->actions[index].state == ActionState::current) {
+            if (action.stage != ActionStage::synchronize || state->actions[index].state == ActionState::current) {
                 continue;
             }
 

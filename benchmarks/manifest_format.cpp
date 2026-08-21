@@ -22,6 +22,5 @@ int main() {
 
     const auto elapsed = std::chrono::steady_clock::now() - started;
     const auto microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed);
-    std::cout << iterations << " manifests formatted in " << microseconds.count()
-        << " us (" << bytes << " bytes)\n";
+    std::cout << iterations << " manifests formatted in " << microseconds.count() << " us (" << bytes << " bytes)\n";
 }

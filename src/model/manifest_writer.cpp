@@ -28,23 +28,23 @@ namespace kaixa {
             result.push_back('"');
             for (const char character: text) {
                 switch (character) {
-                    case '\b': result += "\\b"; break;
-                    case '\t': result += "\\t"; break;
-                    case '\n': result += "\\n"; break;
-                    case '\f': result += "\\f"; break;
-                    case '\r': result += "\\r"; break;
-                    case '"': result += "\\\""; break;
-                    case '\\': result += "\\\\"; break;
-                    default: {
-                        const auto byte = static_cast<unsigned char>(character);
-                        if (byte < 0x20U || byte == 0x7FU) {
-                            result += "\\u00";
-                            result.push_back(hexadecimal[byte >> 4U]);
-                            result.push_back(hexadecimal[byte & 0x0FU]);
-                        } else {
-                            result.push_back(character);
-                        }
+                case '\b': result += "\\b"; break;
+                case '\t': result += "\\t"; break;
+                case '\n': result += "\\n"; break;
+                case '\f': result += "\\f"; break;
+                case '\r': result += "\\r"; break;
+                case '"': result += "\\\""; break;
+                case '\\': result += "\\\\"; break;
+                default: {
+                    const auto byte = static_cast<unsigned char>(character);
+                    if (byte < 0x20U || byte == 0x7FU) {
+                        result += "\\u00";
+                        result.push_back(hexadecimal[byte >> 4U]);
+                        result.push_back(hexadecimal[byte & 0x0FU]);
+                    } else {
+                        result.push_back(character);
                     }
+                }
                 }
             }
             result.push_back('"');
@@ -57,19 +57,18 @@ namespace kaixa {
 
         std::string_view target_section(const PackageTarget& target) {
             switch (target.kind) {
-                case PackageTargetKind::test: return target.each_source ? "tests" : "test";
-                case PackageTargetKind::example: return target.each_source ? "examples" : "example";
-                case PackageTargetKind::benchmark:
-                    return target.each_source ? "benchmarks" : "benchmark";
+            case PackageTargetKind::test: return target.each_source ? "tests" : "test";
+            case PackageTargetKind::example: return target.each_source ? "examples" : "example";
+            case PackageTargetKind::benchmark: return target.each_source ? "benchmarks" : "benchmark";
             }
             return "target";
         }
 
         std::string_view reference_key(const PackageTargetKind kind) {
             switch (kind) {
-                case PackageTargetKind::test: return "tests";
-                case PackageTargetKind::example: return "examples";
-                case PackageTargetKind::benchmark: return "benchmarks";
+            case PackageTargetKind::test: return "tests";
+            case PackageTargetKind::example: return "examples";
+            case PackageTargetKind::benchmark: return "benchmarks";
             }
             return "targets";
         }
@@ -88,13 +87,17 @@ namespace kaixa {
         Result<std::string> format_value(const Value& value) {
             if (const bool* boolean = value.as_boolean())
                 return *boolean ? "true" : "false";
+
             if (const std::int64_t* integer = value.as_integer())
                 return std::to_string(*integer);
+
             if (const double* floating = value.as_floating()) {
                 if (std::isnan(*floating))
                     return "nan";
+
                 if (std::isinf(*floating))
                     return std::signbit(*floating) ? "-inf" : "inf";
+
                 std::ostringstream output;
                 output.imbue(std::locale::classic());
                 output << std::setprecision(std::numeric_limits<double>::max_digits10) << *floating;
@@ -106,14 +109,17 @@ namespace kaixa {
             }
             if (const std::string* string = value.as_string())
                 return toml_string(*string);
+
             if (const std::vector<Value>* array = value.as_array()) {
                 std::string output = "[";
                 for (std::size_t index = 0; index < array->size(); ++index) {
                     auto item = format_value((*array)[index]);
                     if (!item)
                         return std::unexpected(item.error());
+
                     if (index != 0)
                         output += ", ";
+
                     output += *item;
                 }
                 output += ']';
@@ -129,15 +135,15 @@ namespace kaixa {
                         [&](const TableEntry& candidate) { return candidate.key == entry.key; }
                     );
                     if (duplicate != table->begin() + static_cast<std::ptrdiff_t>(index)) {
-                        return std::unexpected(error(
-                            "duplicate manifest value key `" + entry.key + "`"
-                        ));
+                        return std::unexpected(error("duplicate manifest value key `" + entry.key + "`"));
                     }
                     auto child = format_value(entry.value);
                     if (!child)
                         return std::unexpected(child.error());
+
                     if (index != 0)
                         output += ", ";
+
                     output += key(entry.key) + " = " + *child;
                 }
                 output += " }";
@@ -159,9 +165,7 @@ namespace kaixa {
                     [&](const TableEntry& candidate) { return candidate.key == entry.key; }
                 );
                 if (duplicate != entries->begin() + static_cast<std::ptrdiff_t>(index)) {
-                    return std::unexpected(error(
-                        "duplicate manifest value key `" + entry.key + "`"
-                    ));
+                    return std::unexpected(error("duplicate manifest value key `" + entry.key + "`"));
                 }
                 auto formatted = format_value(entry.value);
                 if (!formatted)
@@ -176,6 +180,7 @@ namespace kaixa {
             const std::vector<TableEntry>* entries = value.as_table();
             if (!entries)
                 return std::unexpected(error("manifest resolver settings must be a table"));
+
             if (entries->empty()) {
                 output += prefix + " = {}\n";
                 return {};
@@ -241,6 +246,7 @@ namespace kaixa {
 
             if (dependency.request.version)
                 append_field("version", toml_string(dependency.request.version->text));
+
             if (!dependency.request.features.empty()) {
                 std::string features = "[";
                 for (std::size_t index = 0; index < dependency.request.features.size(); ++index) {
@@ -254,12 +260,16 @@ namespace kaixa {
             }
             if (dependency.request.optional)
                 append_field("optional", "true");
+
             if (dependency.alias)
                 append_field("alias", toml_string(*dependency.alias));
+
             if (dependency.selection.provider)
                 append_field("from", toml_string(*dependency.selection.provider));
+
             if (dependency.selection.path)
                 append_field("path", toml_string(dependency.selection.path->generic_string()));
+
             if (dependency.selection.source) {
                 auto options = format_value(dependency.selection.source->options);
                 if (!options)
@@ -330,11 +340,7 @@ namespace kaixa {
             return {};
         }
 
-        Result<void> append_resolver_document(
-            std::string& output,
-            const std::string_view resolver,
-            const Value& value
-        ) {
+        Result<void> append_resolver_document(std::string& output, const std::string_view resolver, const Value& value) {
             const std::vector<TableEntry>* entries = value.as_table();
             if (!entries)
                 return std::unexpected(error("manifest resolver settings must be a table"));
@@ -348,16 +354,13 @@ namespace kaixa {
                     [&](const TableEntry& candidate) { return candidate.key == entry.key; }
                 );
                 if (duplicate != entries->begin() + static_cast<std::ptrdiff_t>(index)) {
-                    return std::unexpected(error(
-                        "duplicate manifest value key `" + entry.key + "`"
-                    ));
+                    return std::unexpected(error("duplicate manifest value key `" + entry.key + "`"));
                 }
 
                 const std::vector<Value>* array = entry.value.as_array();
-                const bool tables = array && !array->empty() && std::ranges::all_of(*array,
-                    [](const Value& item) {
-                        return item.is_table();
-                    });
+                const bool tables = array
+                    && !array->empty()
+                    && std::ranges::all_of(*array, [](const Value& item) { return item.is_table(); });
                 if (tables)
                     continue;
 
@@ -370,10 +373,7 @@ namespace kaixa {
 
             for (const TableEntry& entry: *entries) {
                 const std::vector<Value>* array = entry.value.as_array();
-                if (!array || array->empty() || !std::ranges::all_of(*array,
-                    [](const Value& item) {
-                        return item.is_table();
-                    })) {
+                if (!array || array->empty() || !std::ranges::all_of(*array, [](const Value& item) { return item.is_table(); })) {
                     continue;
                 }
                 for (const Value& item: *array) {
@@ -444,9 +444,7 @@ namespace kaixa {
             for (std::size_t index = 0; index < manifest.dependencies.size(); ++index) {
                 const DependencyBinding& dependency = manifest.dependencies[index];
                 if (!is_valid_package_name(dependency.request.package)) {
-                    return std::unexpected(error(
-                        "invalid dependency name `" + dependency.request.package + "`"
-                    ));
+                    return std::unexpected(error("invalid dependency name `" + dependency.request.package + "`"));
                 }
                 if (dependency.request.version) {
                     auto requirement = parse_version_requirement(dependency.request.version->text);
@@ -455,43 +453,30 @@ namespace kaixa {
                 }
                 if (dependency.alias && !is_valid_identifier(*dependency.alias))
                     return std::unexpected(error("invalid dependency alias `" + *dependency.alias + "`"));
+
                 if (dependency.selection.path && dependency.selection.path->empty()) {
-                    return std::unexpected(error(
-                        "dependency `" + dependency.request.package + "` has an empty path"
-                    ));
+                    return std::unexpected(error("dependency `" + dependency.request.package + "` has an empty path"));
                 }
                 if (dependency.selection.source
-                    && (!is_valid_identifier(dependency.selection.source->driver)
-                        || !dependency.selection.source->options.is_table())) {
-                    return std::unexpected(error(
-                        "dependency `" + dependency.request.package + "` has an invalid source"
-                    ));
+                    && (!is_valid_identifier(dependency.selection.source->driver) || !dependency.selection.source->options.is_table())) {
+                    return std::unexpected(error("dependency `" + dependency.request.package + "` has an invalid source"));
                 }
                 if (dependency.selection.path && dependency.selection.source) {
-                    return std::unexpected(error(
-                        "dependency `" + dependency.request.package
-                            + "` combines a path with a source driver"
-                    ));
+                    return std::unexpected(error("dependency `" + dependency.request.package + "` combines a path with a source driver"));
                 }
-                if (dependency.selection.provider
-                    && (dependency.selection.path || dependency.selection.source)) {
-                    return std::unexpected(error(
-                        "dependency `" + dependency.request.package
-                            + "` combines a provider with a direct source"
-                    ));
+                if (dependency.selection.provider && (dependency.selection.path || dependency.selection.source)) {
+                    return std::unexpected(
+                        error("dependency `" + dependency.request.package + "` combines a provider with a direct source")
+                    );
                 }
 
                 const auto duplicate = std::ranges::find_if(
                     manifest.dependencies.begin(),
                     manifest.dependencies.begin() + static_cast<std::ptrdiff_t>(index),
-                    [&](const DependencyBinding& candidate) {
-                        return candidate.request.package == dependency.request.package;
-                    }
+                    [&](const DependencyBinding& candidate) { return candidate.request.package == dependency.request.package; }
                 );
                 if (duplicate != manifest.dependencies.begin() + static_cast<std::ptrdiff_t>(index))
-                    return std::unexpected(error(
-                        "duplicate dependency `" + dependency.request.package + "`"
-                    ));
+                    return std::unexpected(error("duplicate dependency `" + dependency.request.package + "`"));
             }
             if (manifest.resolver_options && !manifest.resolver_options->is_table())
                 return std::unexpected(error("manifest resolver options must be a table"));
@@ -509,23 +494,15 @@ namespace kaixa {
 
                 for (const DependencyBinding& dependency: target.dependencies) {
                     if (!is_valid_package_name(dependency.request.package)) {
-                        return std::unexpected(error(
-                            "invalid package target dependency name `"
-                                + dependency.request.package + "`"
-                        ));
+                        return std::unexpected(error("invalid package target dependency name `" + dependency.request.package + "`"));
                     }
                     if (dependency.selection.path && dependency.selection.path->empty()) {
-                        return std::unexpected(error(
-                            "package target dependency `" + dependency.request.package
-                                + "` has an empty path"
-                        ));
+                        return std::unexpected(error("package target dependency `" + dependency.request.package + "` has an empty path"));
                     }
                 }
 
                 if (target.resolver_options && !target.resolver_options->is_table()) {
-                    return std::unexpected(error(
-                        "package target resolver options must be a table"
-                    ));
+                    return std::unexpected(error("package target resolver options must be a table"));
                 }
             }
 
@@ -537,47 +514,31 @@ namespace kaixa {
                 const auto duplicate = std::ranges::find_if(
                     manifest.configurations.definitions.begin(),
                     manifest.configurations.definitions.begin() + static_cast<std::ptrdiff_t>(index),
-                    [&](const ConfigurationDefinition& candidate) {
-                        return candidate.name == configuration.name;
-                    }
+                    [&](const ConfigurationDefinition& candidate) { return candidate.name == configuration.name; }
                 );
-                if (duplicate != manifest.configurations.definitions.begin()
-                    + static_cast<std::ptrdiff_t>(index)) {
-                    return std::unexpected(error(
-                        "duplicate build configuration `" + configuration.name + "`"
-                    ));
+                if (duplicate != manifest.configurations.definitions.begin() + static_cast<std::ptrdiff_t>(index)) {
+                    return std::unexpected(error("duplicate build configuration `" + configuration.name + "`"));
                 }
 
-                for (std::size_t resolver_index = 0;
-                     resolver_index < configuration.resolvers.size();
-                     ++resolver_index) {
-                    const ResolverConfigurationDefinition& resolver =
-                        configuration.resolvers[resolver_index];
+                for (std::size_t resolver_index = 0; resolver_index < configuration.resolvers.size(); ++resolver_index) {
+                    const ResolverConfigurationDefinition& resolver = configuration.resolvers[resolver_index];
                     if (!is_valid_identifier(resolver.resolver)) {
-                        return std::unexpected(error(
-                            "invalid resolver name `" + resolver.resolver
-                                + "` in build configuration `" + configuration.name + "`"
-                        ));
+                        return std::unexpected(
+                            error("invalid resolver name `" + resolver.resolver + "` in build configuration `" + configuration.name + "`")
+                        );
                     }
                     if (!resolver.settings.is_table()) {
-                        return std::unexpected(error(
-                            "settings for resolver `" + resolver.resolver + "` must be a table"
-                        ));
+                        return std::unexpected(error("settings for resolver `" + resolver.resolver + "` must be a table"));
                     }
                     const auto duplicate_resolver = std::ranges::find_if(
                         configuration.resolvers.begin(),
-                        configuration.resolvers.begin()
-                            + static_cast<std::ptrdiff_t>(resolver_index),
-                        [&](const ResolverConfigurationDefinition& candidate) {
-                            return candidate.resolver == resolver.resolver;
-                        }
+                        configuration.resolvers.begin() + static_cast<std::ptrdiff_t>(resolver_index),
+                        [&](const ResolverConfigurationDefinition& candidate) { return candidate.resolver == resolver.resolver; }
                     );
-                    if (duplicate_resolver != configuration.resolvers.begin()
-                        + static_cast<std::ptrdiff_t>(resolver_index)) {
-                        return std::unexpected(error(
-                            "duplicate resolver `" + resolver.resolver
-                                + "` in build configuration `" + configuration.name + "`"
-                        ));
+                    if (duplicate_resolver != configuration.resolvers.begin() + static_cast<std::ptrdiff_t>(resolver_index)) {
+                        return std::unexpected(
+                            error("duplicate resolver `" + resolver.resolver + "` in build configuration `" + configuration.name + "`")
+                        );
                     }
                 }
             }
@@ -596,11 +557,7 @@ namespace kaixa {
 
         output += "resolver = " + toml_string(manifest.resolver) + '\n';
 
-        for (const PackageTargetKind kind: {
-                 PackageTargetKind::test,
-                 PackageTargetKind::example,
-                 PackageTargetKind::benchmark
-             }) {
+        for (const PackageTargetKind kind: {PackageTargetKind::test, PackageTargetKind::example, PackageTargetKind::benchmark}) {
             std::vector<std::string> paths;
             for (const PackageTargetReference& reference: manifest.target_references) {
                 if (reference.kind == kind)
@@ -647,29 +604,17 @@ namespace kaixa {
         }
 
         if (manifest.resolver_options) {
-            auto appended = append_resolver_document(
-                output,
-                manifest.resolver,
-                *manifest.resolver_options
-            );
+            auto appended = append_resolver_document(output, manifest.resolver, *manifest.resolver_options);
             if (!appended)
                 return std::unexpected(appended.error());
         }
 
         for (const PackageTarget& target: manifest.targets) {
             const std::string_view section = target_section(target);
-            const std::size_t count = static_cast<std::size_t>(std::ranges::count_if(
-                manifest.targets,
-                [&](const PackageTarget& candidate) {
-                    return target_section(candidate) == section;
-                }
-            ));
-            auto appended = append_package_target(
-                output,
-                target,
-                manifest.resolver,
-                count > 1
-            );
+            const std::size_t count = static_cast<std::size_t>(std::ranges::count_if(manifest.targets, [&](const PackageTarget& candidate) {
+                return target_section(candidate) == section;
+            }));
+            auto appended = append_package_target(output, target, manifest.resolver, count > 1);
             if (!appended)
                 return std::unexpected(appended.error());
         }

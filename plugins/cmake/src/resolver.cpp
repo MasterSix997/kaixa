@@ -20,34 +20,38 @@
 
 namespace kaixa::plugin::cmake {
     namespace {
+        using detail::dependency_mode;
         using detail::DependencyMode;
         using detail::GenerationMode;
         using detail::Options;
-        using detail::dependency_mode;
         using detail::read_build_options;
         using detail::read_options;
 
         std::string configuration_name(const std::string& profile) {
             if (profile == "debug")
                 return "Debug";
+
             if (profile == "release")
                 return "Release";
+
             if (profile == "relwithdebinfo")
                 return "RelWithDebInfo";
+
             if (profile == "minsizerel")
                 return "MinSizeRel";
+
             return profile;
         }
 
         std::optional<std::string> requested_generator(const std::vector<std::string>& arguments) {
             for (std::size_t index = 0; index < arguments.size(); ++index) {
                 const std::string& argument = arguments[index];
-                if ((argument == "-G" || argument == "--generator")
-                    && index + 1 < arguments.size()) {
+                if ((argument == "-G" || argument == "--generator") && index + 1 < arguments.size()) {
                     return arguments[index + 1];
                 }
                 if (argument.starts_with("-G") && argument.size() > 2)
                     return argument.substr(2);
+
                 if (argument.starts_with("--generator="))
                     return argument.substr(std::string("--generator=").size());
             }
@@ -64,9 +68,7 @@ namespace kaixa::plugin::cmake {
             }
 
             if (!generator.empty()) {
-                return generator.contains("Visual Studio")
-                    || generator.contains("Xcode")
-                    || generator.contains("Multi-Config");
+                return generator.contains("Visual Studio") || generator.contains("Xcode") || generator.contains("Multi-Config");
             }
 
 #ifdef _WIN32
@@ -101,7 +103,9 @@ namespace kaixa::plugin::cmake {
                 const bool valid = (character >= 'a' && character <= 'z')
                     || (character >= 'A' && character <= 'Z')
                     || (character >= '0' && character <= '9')
-                    || character == '-' || character == '_' || character == '+';
+                    || character == '-'
+                    || character == '_'
+                    || character == '+';
                 if (!valid)
                     character = '_';
             }
@@ -133,12 +137,16 @@ namespace kaixa::plugin::cmake {
             absorb(project.generation == GenerationMode::source ? "source" : "state");
             if (options.generator)
                 absorb(*options.generator);
+
             if (options.c_compiler)
                 absorb(*options.c_compiler);
+
             if (options.cxx_compiler)
                 absorb(*options.cxx_compiler);
+
             if (options.toolchain)
                 absorb(options.toolchain->generic_string());
+
             for (const std::string& argument: arguments)
                 absorb(argument);
 
@@ -161,21 +169,19 @@ namespace kaixa::plugin::cmake {
             return environment.state_root / "cache" / "cmake" / variant / package.name;
         }
 
-        Result<bool> requires_install(const Graph& graph, const PackageNode& package) {
+        Result<bool> requires_install(const Graph& graph, const PackageNode& package, const ProductRealizationContext& realization) {
             for (const PackageNode& candidate: graph.nodes()) {
                 if (candidate.kind != PackageKind::managed || candidate.resolver != "cmake")
                     continue;
 
-                const auto dependency = std::ranges::find(
-                    candidate.dependencies,
-                    package.id
-                );
+                const auto dependency = std::ranges::find(candidate.dependencies, package.id);
                 if (dependency == candidate.dependencies.end())
                     continue;
 
-                auto options = read_options(graph, candidate);
+                auto options = read_options(graph, candidate, realization);
                 if (!options)
                     return std::unexpected(options.error());
+
                 if (dependency_mode(*options, package.id) == DependencyMode::find_package)
                     return true;
             }
@@ -186,15 +192,17 @@ namespace kaixa::plugin::cmake {
             const Graph& graph,
             const PackageId id,
             const bool include_associated,
+            const ProductRealizationContext& realization,
             std::vector<bool>& visited,
             std::vector<PackageId>& packages
         ) {
             if (visited[id.index])
                 return {};
+
             visited[id.index] = true;
 
             const PackageNode& package = graph[id];
-            auto options = read_options(graph, package);
+            auto options = read_options(graph, package, realization);
             if (!options)
                 return std::unexpected(options.error());
 
@@ -202,22 +210,28 @@ namespace kaixa::plugin::cmake {
                 const PackageNode& target = graph[dependency];
                 if (target.kind != PackageKind::managed || target.resolver != "cmake")
                     continue;
+
                 if (dependency_mode(*options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
-                auto collected = collect_source_dependencies(graph, dependency, false, visited, packages);
+                auto collected = collect_source_dependencies(graph, dependency, false, realization, visited, packages);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
 
             if (include_associated) {
                 for (const PackageTargetDependencies& dependencies: package.target_dependencies) {
+                    if (std::ranges::none_of(options->targets, [&](const detail::TargetOptions& target) {
+                            return target.name == dependencies.target;
+                        })) {
+                        continue;
+                    }
                     for (const PackageId dependency: dependencies.packages) {
                         const PackageNode& target = graph[dependency];
                         if (target.kind != PackageKind::managed || target.resolver != "cmake")
                             continue;
 
-                        auto collected = collect_source_dependencies(graph, dependency, false, visited, packages);
+                        auto collected = collect_source_dependencies(graph, dependency, false, realization, visited, packages);
                         if (!collected)
                             return std::unexpected(collected.error());
                     }
@@ -239,10 +253,11 @@ namespace kaixa::plugin::cmake {
         ) {
             if (visited[id.index])
                 return {};
+
             visited[id.index] = true;
 
             const PackageNode& package = graph[id];
-            auto options = read_options(graph, package);
+            auto options = read_options(graph, package, {environment.configuration.profile, host_target_os()});
             if (!options)
                 return std::unexpected(options.error());
 
@@ -251,21 +266,12 @@ namespace kaixa::plugin::cmake {
                 if (target.kind != PackageKind::managed || target.resolver != "cmake")
                     continue;
 
-                if (dependency_mode(*options, dependency) == DependencyMode::find_package
-                    && !added[dependency.index]) {
+                if (dependency_mode(*options, dependency) == DependencyMode::find_package && !added[dependency.index]) {
                     added[dependency.index] = true;
                     prefixes.push_back(artifact_directory(environment, target, variant));
                 }
 
-                auto collected = collect_package_prefixes(
-                    graph,
-                    dependency,
-                    environment,
-                    variant,
-                    visited,
-                    added,
-                    prefixes
-                );
+                auto collected = collect_package_prefixes(graph, dependency, environment, variant, visited, added, prefixes);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
@@ -277,6 +283,7 @@ namespace kaixa::plugin::cmake {
             for (const std::filesystem::path& prefix: prefixes) {
                 if (!result.empty())
                     result += ';';
+
                 result += prefix.string();
             }
             return result;
@@ -287,6 +294,7 @@ namespace kaixa::plugin::cmake {
             std::string equals;
             while (value.contains("]" + equals + "]"))
                 equals += '=';
+
             return "[" + equals + "[" + value + "]" + equals + "]";
         }
 
@@ -313,66 +321,75 @@ namespace kaixa::plugin::cmake {
         std::string product_integration(const BuildContext& context) {
             const std::filesystem::path metadata = product_metadata_directory(context);
             const std::filesystem::path dependencies = context.directory / "_dependencies";
-            return
-                "  set(_kaixa_product_directory " + cmake_quote(metadata) + ")\n"
-                "  set(_kaixa_dependency_binary " + cmake_quote(dependencies) + ")\n"
-                "  function(_kaixa_write_product _kaixa_target _kaixa_type)\n"
-                "    string(SHA256 _kaixa_id \"${_kaixa_target}\")\n"
-                "    if(_kaixa_type STREQUAL \"EXECUTABLE\" OR "
-                    "_kaixa_type STREQUAL \"STATIC_LIBRARY\" OR "
-                    "_kaixa_type STREQUAL \"SHARED_LIBRARY\" OR "
-                    "_kaixa_type STREQUAL \"MODULE_LIBRARY\")\n"
-                "      set(_kaixa_artifact \"$<TARGET_FILE:${_kaixa_target}>\")\n"
-                "    else()\n"
-                "      set(_kaixa_artifact \"\")\n"
-                "    endif()\n"
-                "    file(GENERATE\n"
-                "      OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/${_kaixa_id}.product\"\n"
-                "      CONTENT \"${_kaixa_target}\\n${_kaixa_type}\\n${_kaixa_artifact}\\n\"\n"
-                "    )\n"
-                "  endfunction()\n"
-                "  function(_kaixa_collect_products _kaixa_directory)\n"
-                "    get_property(_kaixa_targets DIRECTORY \"${_kaixa_directory}\" "
-                    "PROPERTY BUILDSYSTEM_TARGETS)\n"
-                "    foreach(_kaixa_target IN LISTS _kaixa_targets)\n"
-                "      get_target_property(_kaixa_type \"${_kaixa_target}\" TYPE)\n"
-                "      _kaixa_write_product(\"${_kaixa_target}\" \"${_kaixa_type}\")\n"
-                "    endforeach()\n"
-                "    get_property(_kaixa_subdirectories DIRECTORY \"${_kaixa_directory}\" "
-                    "PROPERTY SUBDIRECTORIES)\n"
-                "    foreach(_kaixa_subdirectory IN LISTS _kaixa_subdirectories)\n"
-                "      get_property(_kaixa_binary DIRECTORY \"${_kaixa_subdirectory}\" "
-                    "PROPERTY BINARY_DIR)\n"
-                "      cmake_path(IS_PREFIX _kaixa_dependency_binary \"${_kaixa_binary}\" "
-                    "NORMALIZE _kaixa_is_dependency)\n"
-                "      if(NOT _kaixa_is_dependency)\n"
-                "        _kaixa_collect_products(\"${_kaixa_subdirectory}\")\n"
-                "      endif()\n"
-                "    endforeach()\n"
-                "  endfunction()\n"
-                "  function(_kaixa_write_products)\n"
-                "    file(REMOVE_RECURSE \"${_kaixa_product_directory}\")\n"
-                "    file(GENERATE "
-                    "OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/.catalog\" CONTENT \"\")\n"
-                "    _kaixa_collect_products(\"${CMAKE_SOURCE_DIR}\")\n"
-                "  endfunction()\n"
-                "  cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" "
-                    "CALL _kaixa_write_products)\n";
+            return "  set(_kaixa_product_directory "
+                + cmake_quote(metadata)
+                + ")\n"
+                  "  set(_kaixa_dependency_binary "
+                + cmake_quote(dependencies)
+                + ")\n"
+                  "  function(_kaixa_write_product _kaixa_target _kaixa_type)\n"
+                  "    string(SHA256 _kaixa_id \"${_kaixa_target}\")\n"
+                  "    if(_kaixa_type STREQUAL \"EXECUTABLE\" OR "
+                  "_kaixa_type STREQUAL \"STATIC_LIBRARY\" OR "
+                  "_kaixa_type STREQUAL \"SHARED_LIBRARY\" OR "
+                  "_kaixa_type STREQUAL \"MODULE_LIBRARY\")\n"
+                  "      set(_kaixa_artifact \"$<TARGET_FILE:${_kaixa_target}>\")\n"
+                  "    else()\n"
+                  "      set(_kaixa_artifact \"\")\n"
+                  "    endif()\n"
+                  "    file(GENERATE\n"
+                  "      OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/${_kaixa_id}.product\"\n"
+                  "      CONTENT \"${_kaixa_target}\\n${_kaixa_type}\\n${_kaixa_artifact}\\n\"\n"
+                  "    )\n"
+                  "  endfunction()\n"
+                  "  function(_kaixa_collect_products _kaixa_directory)\n"
+                  "    get_property(_kaixa_targets DIRECTORY \"${_kaixa_directory}\" "
+                  "PROPERTY BUILDSYSTEM_TARGETS)\n"
+                  "    foreach(_kaixa_target IN LISTS _kaixa_targets)\n"
+                  "      get_target_property(_kaixa_type \"${_kaixa_target}\" TYPE)\n"
+                  "      _kaixa_write_product(\"${_kaixa_target}\" \"${_kaixa_type}\")\n"
+                  "    endforeach()\n"
+                  "    get_property(_kaixa_subdirectories DIRECTORY \"${_kaixa_directory}\" "
+                  "PROPERTY SUBDIRECTORIES)\n"
+                  "    foreach(_kaixa_subdirectory IN LISTS _kaixa_subdirectories)\n"
+                  "      get_property(_kaixa_binary DIRECTORY \"${_kaixa_subdirectory}\" "
+                  "PROPERTY BINARY_DIR)\n"
+                  "      cmake_path(IS_PREFIX _kaixa_dependency_binary \"${_kaixa_binary}\" "
+                  "NORMALIZE _kaixa_is_dependency)\n"
+                  "      if(NOT _kaixa_is_dependency)\n"
+                  "        _kaixa_collect_products(\"${_kaixa_subdirectory}\")\n"
+                  "      endif()\n"
+                  "    endforeach()\n"
+                  "  endfunction()\n"
+                  "  function(_kaixa_write_products)\n"
+                  "    file(REMOVE_RECURSE \"${_kaixa_product_directory}\")\n"
+                  "    file(GENERATE "
+                  "OUTPUT \"${_kaixa_product_directory}/$<CONFIG>/.catalog\" CONTENT \"\")\n"
+                  "    _kaixa_collect_products(\"${CMAKE_SOURCE_DIR}\")\n"
+                  "  endfunction()\n"
+                  "  cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" "
+                  "CALL _kaixa_write_products)\n";
         }
 
         Result<ProductKind> product_kind(const std::string_view type) {
             if (type == "EXECUTABLE")
                 return ProductKind::executable;
+
             if (type == "STATIC_LIBRARY")
                 return ProductKind::static_library;
+
             if (type == "SHARED_LIBRARY")
                 return ProductKind::shared_library;
+
             if (type == "MODULE_LIBRARY")
                 return ProductKind::module_library;
+
             if (type == "OBJECT_LIBRARY")
                 return ProductKind::object_library;
+
             if (type == "INTERFACE_LIBRARY")
                 return ProductKind::interface_library;
+
             if (type == "UTILITY")
                 return ProductKind::utility;
 
@@ -383,52 +400,40 @@ namespace kaixa::plugin::cmake {
             if (!package.manifest)
                 return ProductPurpose::primary;
 
-            const auto target = std::ranges::find_if(
-                package.manifest->resolved_targets,
-                [&](const PackageTarget& candidate) {
-                    return candidate.name == name;
-                }
-            );
+            const auto target = std::ranges::find_if(package.manifest->resolved_targets, [&](const PackageTarget& candidate) {
+                return candidate.name == name;
+            });
             if (target == package.manifest->resolved_targets.end())
                 return ProductPurpose::primary;
 
             switch (target->kind) {
-                case PackageTargetKind::test: return ProductPurpose::test;
-                case PackageTargetKind::example: return ProductPurpose::example;
-                case PackageTargetKind::benchmark: return ProductPurpose::benchmark;
+            case PackageTargetKind::test: return ProductPurpose::test;
+            case PackageTargetKind::example: return ProductPurpose::example;
+            case PackageTargetKind::benchmark: return ProductPurpose::benchmark;
             }
             return ProductPurpose::primary;
         }
 
         Result<std::vector<BuildProduct>> read_products(const PackageNode& package, const BuildContext& context) {
-            const std::filesystem::path directory =
-                product_metadata_directory(context) / context.configuration;
+            const std::filesystem::path directory = product_metadata_directory(context) / context.configuration;
             std::error_code failure;
             const bool exists = std::filesystem::exists(directory, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect CMake products in `" + directory.string()
-                        + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot inspect CMake products in `" + directory.string() + "`: " + failure.message()));
             }
             if (!exists) {
-                return std::unexpected(error(
-                    "CMake target information is unavailable"
-                ).add_note("run `kaixa generate` to configure the workspace"));
+                return std::unexpected(
+                    error("CMake target information is unavailable").add_note("run `kaixa generate` to configure the workspace")
+                );
             }
             if (!std::filesystem::is_directory(directory, failure) || failure) {
-                return std::unexpected(error(
-                    "CMake product metadata is not a directory: " + directory.string()
-                ));
+                return std::unexpected(error("CMake product metadata is not a directory: " + directory.string()));
             }
 
             std::vector<BuildProduct> products;
             std::filesystem::directory_iterator entries(directory, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot list CMake products in `" + directory.string()
-                        + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot list CMake products in `" + directory.string() + "`: " + failure.message()));
             }
 
             for (const std::filesystem::directory_entry& entry: entries) {
@@ -439,38 +444,28 @@ namespace kaixa::plugin::cmake {
                 std::string name;
                 std::string type;
                 std::string artifact;
-                if (!input || !std::getline(input, name) || !std::getline(input, type)
-                    || !std::getline(input, artifact)) {
-                    return std::unexpected(error(
-                        "cannot read CMake product metadata `" + entry.path().string() + "`"
-                    ));
+                if (!input || !std::getline(input, name) || !std::getline(input, type) || !std::getline(input, artifact)) {
+                    return std::unexpected(error("cannot read CMake product metadata `" + entry.path().string() + "`"));
                 }
                 if (!name.empty() && name.back() == '\r')
                     name.pop_back();
+
                 if (!type.empty() && type.back() == '\r')
                     type.pop_back();
+
                 if (!artifact.empty() && artifact.back() == '\r')
                     artifact.pop_back();
+
                 if (name.empty() || type.empty()) {
-                    return std::unexpected(error(
-                        "invalid CMake product metadata `" + entry.path().string() + "`"
-                    ));
+                    return std::unexpected(error("invalid CMake product metadata `" + entry.path().string() + "`"));
                 }
 
                 auto kind = product_kind(type);
                 if (!kind)
-                    return std::unexpected(std::move(kind).error().add_note(
-                        "in `" + entry.path().string() + "`"
-                    ));
+                    return std::unexpected(std::move(kind).error().add_note("in `" + entry.path().string() + "`"));
 
                 const ProductPurpose purpose = product_purpose(package, name);
-                BuildProduct product{
-                    std::move(name),
-                    *kind,
-                    purpose,
-                    package.id,
-                    std::nullopt
-                };
+                BuildProduct product{std::move(name), *kind, purpose, package.id, std::nullopt};
                 if (!artifact.empty())
                     product.artifact = std::move(artifact);
 
@@ -486,6 +481,7 @@ namespace kaixa::plugin::cmake {
             for (const char character: value) {
                 if (character == '\\' || character == '"')
                     result += '\\';
+
                 if (character == '\n') {
                     result += "\\n";
                     continue;
@@ -497,11 +493,7 @@ namespace kaixa::plugin::cmake {
             return result;
         }
 
-        void append_toml_array(
-            std::string& output,
-            const std::string_view name,
-            const std::span<const std::string> values
-        ) {
+        void append_toml_array(std::string& output, const std::string_view name, const std::span<const std::string> values) {
             output += std::string(name) + " = [";
             for (std::size_t index = 0; index < values.size(); ++index) {
                 if (index != 0)
@@ -513,62 +505,60 @@ namespace kaixa::plugin::cmake {
         }
 
         std::string variant_metadata(const BuildEnvironment& environment, const BuildContext& context) {
-            std::string output =
-                "# Generated by Kaixa.\n"
-                "resolver = \"cmake\"\n"
-                "label = " + toml_string(context.variant.label) + "\n"
-                "fingerprint = " + toml_string(context.variant.fingerprint) + "\n"
-                "build = " + toml_string(context.directory.generic_string()) + "\n"
-                "output = " + toml_string(context.output.generic_string()) + "\n"
-                "profile = " + toml_string(environment.configuration.profile) + "\n"
-                "source = " + toml_string(context.project.source.generic_string()) + "\n"
-                "generation = " + toml_string(
-                    context.project.generation == GenerationMode::source ? "source" : "state"
-                ) + "\n";
+            std::string output = "# Generated by Kaixa.\n"
+                                 "resolver = \"cmake\"\n"
+                                 "label = "
+                + toml_string(context.variant.label)
+                + "\n"
+                  "fingerprint = "
+                + toml_string(context.variant.fingerprint)
+                + "\n"
+                  "build = "
+                + toml_string(context.directory.generic_string())
+                + "\n"
+                  "output = "
+                + toml_string(context.output.generic_string())
+                + "\n"
+                  "profile = "
+                + toml_string(environment.configuration.profile)
+                + "\n"
+                  "source = "
+                + toml_string(context.project.source.generic_string())
+                + "\n"
+                  "generation = "
+                + toml_string(context.project.generation == GenerationMode::source ? "source" : "state")
+                + "\n";
             append_toml_array(output, "configs", environment.configuration.selected);
             output += "\n[cmake]\n";
             if (context.generator)
                 output += "generator = " + toml_string(*context.generator) + "\n";
+
             if (context.build.c_compiler) {
-                output += "c-compiler = "
-                    + toml_string(*context.build.c_compiler) + "\n";
+                output += "c-compiler = " + toml_string(*context.build.c_compiler) + "\n";
             }
             if (context.build.cxx_compiler) {
-                output += "cxx-compiler = "
-                    + toml_string(*context.build.cxx_compiler) + "\n";
+                output += "cxx-compiler = " + toml_string(*context.build.cxx_compiler) + "\n";
             }
             if (context.build.toolchain) {
-                output += "toolchain = "
-                    + toml_string(context.build.toolchain->generic_string()) + "\n";
+                output += "toolchain = " + toml_string(context.build.toolchain->generic_string()) + "\n";
             }
             append_toml_array(output, "configure-arguments", context.build.configure_arguments);
             return output;
         }
 
-        Result<BuildContext> prepare_build_context(
-            const Graph& graph,
-            const PackageNode& package,
-            const BuildEnvironment& environment
-        ) {
-            auto project = read_options(graph, package);
+        Result<BuildContext> prepare_build_context(const Graph& graph, const PackageNode& package, const BuildEnvironment& environment) {
+            auto project = read_options(graph, package, {environment.configuration.profile, host_target_os()});
             if (!project)
                 return std::unexpected(project.error());
 
-            const ResolverBuildConfiguration* configuration =
-                environment.configuration.find("cmake");
-            auto build = read_build_options(configuration && configuration->settings
-                ? &*configuration->settings
-                : nullptr
-            );
+            const ResolverBuildConfiguration* configuration = environment.configuration.find("cmake");
+            auto build = read_build_options(configuration && configuration->settings ? &*configuration->settings : nullptr);
             if (!build)
                 return std::unexpected(build.error());
 
             if (configuration) {
-                build->configure_arguments.insert(
-                    build->configure_arguments.end(),
-                    configuration->arguments.begin(),
-                    configuration->arguments.end()
-                );
+                build->configure_arguments
+                    .insert(build->configure_arguments.end(), configuration->arguments.begin(), configuration->arguments.end());
                 for (const ResolverArgumentGroup& scoped: configuration->scoped_arguments) {
                     std::vector<std::string>* destination = nullptr;
                     if (scoped.scope == "configure")
@@ -578,16 +568,12 @@ namespace kaixa::plugin::cmake {
                     else if (scoped.scope == "install")
                         destination = &build->install_arguments;
                     else {
-                        return std::unexpected(error(
-                            "unknown CMake argument scope `" + scoped.scope + "`"
-                        ).add_note("expected configure, build or install"));
+                        return std::unexpected(
+                            error("unknown CMake argument scope `" + scoped.scope + "`").add_note("expected configure, build or install")
+                        );
                     }
 
-                    destination->insert(
-                        destination->end(),
-                        scoped.arguments.begin(),
-                        scoped.arguments.end()
-                    );
+                    destination->insert(destination->end(), scoped.arguments.begin(), scoped.arguments.end());
                 }
             }
 
@@ -595,39 +581,29 @@ namespace kaixa::plugin::cmake {
             if (!generator)
                 generator = build->generator;
 
-            BuildVariant variant = build_variant(
-                environment,
-                *build,
-                build->configure_arguments,
-                *project
-            );
-            const std::filesystem::path directory =
-                cmake_build_root(environment, variant.directory) / package.name;
-            const std::filesystem::path output =
-                environment.state_root / "build" / variant.directory;
+            BuildVariant variant = build_variant(environment, *build, build->configure_arguments, *project);
+            const std::filesystem::path directory = cmake_build_root(environment, variant.directory) / package.name;
+            const std::filesystem::path output = environment.state_root / "build" / variant.directory;
             const std::filesystem::path metadata = graph.roots().size() == 1 && graph.is_root(package.id)
                 ? directory.parent_path() / "variant.toml"
                 : directory.parent_path() / ".variants" / (package.name + ".toml");
-            return BuildContext{
-                std::move(*project),
+            return BuildContext{std::move(*project),
                 std::move(*build),
                 std::move(generator),
                 std::move(variant),
                 configuration_name(environment.configuration.profile),
                 directory,
                 output,
-                metadata
-            };
+                metadata};
         }
 
         Result<std::optional<std::string>> stored_fingerprint(const std::filesystem::path& metadata) {
             std::error_code failure;
             if (!std::filesystem::exists(metadata, failure)) {
                 if (failure) {
-                    return std::unexpected(error(
-                        "cannot inspect CMake variant metadata `" + metadata.string()
-                            + "`: " + failure.message()
-                    ));
+                    return std::unexpected(
+                        error("cannot inspect CMake variant metadata `" + metadata.string() + "`: " + failure.message())
+                    );
                 }
 
                 return std::nullopt;
@@ -635,9 +611,7 @@ namespace kaixa::plugin::cmake {
 
             std::ifstream input(metadata, std::ios::binary);
             if (!input) {
-                return std::unexpected(error(
-                    "cannot read CMake variant metadata `" + metadata.string() + "`"
-                ));
+                return std::unexpected(error("cannot read CMake variant metadata `" + metadata.string() + "`"));
             }
 
             std::string line;
@@ -655,10 +629,7 @@ namespace kaixa::plugin::cmake {
             std::error_code failure;
             const bool exists = std::filesystem::exists(context.directory, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect CMake build tree `" + context.directory.string()
-                        + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot inspect CMake build tree `" + context.directory.string() + "`: " + failure.message()));
             }
             if (!exists)
                 return false;
@@ -672,9 +643,15 @@ namespace kaixa::plugin::cmake {
 
         std::string reset_script(const BuildContext& context) {
             const std::filesystem::path query = detail::file_api_query(context.directory);
-            return "file(REMOVE_RECURSE " + cmake_quote(context.directory) + ")\n"
-                + "file(MAKE_DIRECTORY " + cmake_quote(query.parent_path()) + ")\n"
-                + "file(WRITE " + cmake_quote(query) + " \"\")\n";
+            return "file(REMOVE_RECURSE "
+                + cmake_quote(context.directory)
+                + ")\n"
+                + "file(MAKE_DIRECTORY "
+                + cmake_quote(query.parent_path())
+                + ")\n"
+                + "file(WRITE "
+                + cmake_quote(query)
+                + " \"\")\n";
         }
 
         Result<PreparedProject> prepare_project(
@@ -684,36 +661,33 @@ namespace kaixa::plugin::cmake {
             const std::string_view variant,
             BuildPlan& plan
         ) {
-            auto options = read_options(graph, package);
+            auto options = read_options(graph, package, {environment.configuration.profile, host_target_os()});
             if (!options)
                 return std::unexpected(options.error());
 
             std::filesystem::path source = options->source;
             if (!options->targets.empty() && options->generation == GenerationMode::state) {
-                source = environment.state_root / "generated" / "cmake"
-                    / variant / package.name / "project";
+                source = environment.state_root / "generated" / "cmake" / variant / package.name / "project";
             }
             const std::filesystem::path project = source / "CMakeLists.txt";
             if (!options->targets.empty()) {
-                if (options->generation == GenerationMode::source
-                    && std::filesystem::is_regular_file(project)) {
+                if (options->generation == GenerationMode::source && std::filesystem::is_regular_file(project)) {
                     std::ifstream input(project, std::ios::binary);
                     std::string first_line;
                     if (!input || !std::getline(input, first_line)) {
-                        return std::unexpected(error(
-                            "cannot inspect existing `" + project.string() + "`"
-                        ));
+                        return std::unexpected(error("cannot inspect existing `" + project.string() + "`"));
                     }
                     if (first_line.ends_with('\r'))
                         first_line.pop_back();
+
                     if (first_line != detail::generated_marker) {
                         SourceLocation location;
                         if (package.manifest)
                             location = package.manifest->location;
+
                         return std::unexpected(error_at(
                             std::move(location),
-                            "refusing to overwrite `" + project.string()
-                                + "` because it was not generated by Kaixa"
+                            "refusing to overwrite `" + project.string() + "` because it was not generated by Kaixa"
                         ));
                     }
                 }
@@ -725,19 +699,17 @@ namespace kaixa::plugin::cmake {
                 SourceLocation location;
                 if (package.manifest)
                     location = package.manifest->location;
-                return std::unexpected(error_at(
-                    std::move(location),
-                    "CMake package `" + package.name + "` has no `" + project.string() + "`"
-                ));
+
+                return std::unexpected(
+                    error_at(std::move(location), "CMake package `" + package.name + "` has no `" + project.string() + "`")
+                );
             }
             return PreparedProject{std::move(source), project};
         }
 
         class ResolverImpl final : public Resolver {
         public:
-            [[nodiscard]] ResolverInfo info() const override {
-                return {"cmake", "generates, adopts and composes CMake projects"};
-            }
+            [[nodiscard]] ResolverInfo info() const override { return {"cmake", "generates, adopts and composes CMake projects"}; }
 
             [[nodiscard]] Result<void> plan(
                 const Graph& graph,
@@ -746,7 +718,8 @@ namespace kaixa::plugin::cmake {
                 const BuildRequest& request,
                 BuildPlan& plan
             ) const override {
-                auto install = requires_install(graph, package);
+                const ProductRealizationContext realization{environment.configuration.profile, host_target_os()};
+                auto install = requires_install(graph, package, realization);
                 if (!install)
                     return std::unexpected(install.error());
 
@@ -761,10 +734,7 @@ namespace kaixa::plugin::cmake {
                 if (!reset)
                     return std::unexpected(reset.error());
 
-                plan.generate({
-                    context->metadata,
-                    variant_metadata(environment, *context)
-                });
+                plan.generate({context->metadata, variant_metadata(environment, *context)});
                 if (graph.is_root(package.id)) {
                     plan.output({package.id, "cmake", context->output});
                 }
@@ -775,6 +745,7 @@ namespace kaixa::plugin::cmake {
                     graph,
                     package.id,
                     false,
+                    realization,
                     normal_source_visited,
                     normal_source_packages
                 );
@@ -783,42 +754,32 @@ namespace kaixa::plugin::cmake {
 
                 std::vector<bool> source_visited(graph.size(), false);
                 std::vector<PackageId> source_packages;
-                auto source_result = collect_source_dependencies(
-                    graph,
-                    package.id,
-                    true,
-                    source_visited,
-                    source_packages
-                );
+                auto source_result = collect_source_dependencies(graph, package.id, true, realization, source_visited, source_packages);
                 if (!source_result)
                     return std::unexpected(source_result.error());
 
                 std::vector<std::optional<PreparedProject>> projects(graph.size());
                 for (const PackageId id: source_packages) {
-                    auto project = prepare_project(
-                        graph,
-                        graph[id],
-                        environment,
-                        context->variant.directory,
-                        plan
-                    );
+                    auto project = prepare_project(graph, graph[id], environment, context->variant.directory, plan);
                     if (!project)
                         return std::unexpected(project.error());
 
                     projects[id.index] = std::move(*project);
                 }
 
-                const std::filesystem::path integration_file =
-                    environment.state_root / "generated" / "cmake"
-                    / context->variant.directory / package.name / "dependencies.cmake";
+                const std::filesystem::path integration_file = environment.state_root
+                    / "generated"
+                    / "cmake"
+                    / context->variant.directory
+                    / package.name
+                    / "dependencies.cmake";
 
-                std::string integration =
-                    "# Generated by Kaixa.\n"
-                    "if(KAIXA_CMAKE_PREFIX_PATH)\n"
-                    "  list(PREPEND CMAKE_PREFIX_PATH ${KAIXA_CMAKE_PREFIX_PATH})\n"
-                    "endif()\n"
-                    "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
-                    "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
+                std::string integration = "# Generated by Kaixa.\n"
+                                          "if(KAIXA_CMAKE_PREFIX_PATH)\n"
+                                          "  list(PREPEND CMAKE_PREFIX_PATH ${KAIXA_CMAKE_PREFIX_PATH})\n"
+                                          "endif()\n"
+                                          "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
+                                          "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
                 integration += product_integration(*context);
                 for (const PackageId id: source_packages) {
                     if (id == package.id)
@@ -827,7 +788,8 @@ namespace kaixa::plugin::cmake {
                     const PackageNode& dependency = graph[id];
 
                     integration += "  add_subdirectory("
-                        + cmake_quote(projects[id.index]->source) + " "
+                        + cmake_quote(projects[id.index]->source)
+                        + " "
                         + cmake_quote(context->directory / "_dependencies" / dependency.name);
                     if (!normal_source_visited[id.index])
                         integration += " EXCLUDE_FROM_ALL";
@@ -839,9 +801,12 @@ namespace kaixa::plugin::cmake {
                 plan.generate({detail::file_api_query(context->directory), {}});
 
                 if (*reset) {
-                    const std::filesystem::path script =
-                        environment.state_root / "generated" / "cmake"
-                        / context->variant.directory / package.name / "reset.cmake";
+                    const std::filesystem::path script = environment.state_root
+                        / "generated"
+                        / "cmake"
+                        / context->variant.directory
+                        / package.name
+                        / "reset.cmake";
                     plan.generate({script, reset_script(*context)});
 
                     Action reset_action;
@@ -872,19 +837,10 @@ namespace kaixa::plugin::cmake {
 
                 Action configure;
                 configure.description = "configure " + package.name;
-                configure.argv = {
-                    "cmake",
-                    "-S", projects[package.id.index]->source.string(),
-                    "-B", context->directory.string()
-                };
+                configure.argv = {"cmake", "-S", projects[package.id.index]->source.string(), "-B", context->directory.string()};
                 if (*install) {
                     configure.argv.push_back(
-                        "-DCMAKE_INSTALL_PREFIX="
-                            + artifact_directory(
-                                environment,
-                                package,
-                                context->variant.directory
-                            ).string()
+                        "-DCMAKE_INSTALL_PREFIX=" + artifact_directory(environment, package, context->variant.directory).string()
                     );
                 }
                 configure.argv.push_back("-DCMAKE_PROJECT_INCLUDE=" + integration_file.string());
@@ -893,8 +849,7 @@ namespace kaixa::plugin::cmake {
                 configure.argv.push_back("-DKAIXA_CMAKE_PREFIX_PATH=" + join_prefixes(prefixes));
                 if (graph.is_root(package.id)) {
                     const std::string output = context->output.generic_string();
-                    if (context->project.runtime_output || context->project.library_output
-                        || context->project.archive_output) {
+                    if (context->project.runtime_output || context->project.library_output || context->project.archive_output) {
                         configure.argv.push_back("-DKAIXA_OUTPUT_ROOT=" + output);
                     }
 
@@ -904,8 +859,8 @@ namespace kaixa::plugin::cmake {
                 }
                 if (!uses_multiple_configurations(context->generator))
                     configure.argv.push_back("-DCMAKE_BUILD_TYPE=" + context->configuration);
-                if (context->build.generator
-                    && !requested_generator(context->build.configure_arguments)) {
+
+                if (context->build.generator && !requested_generator(context->build.configure_arguments)) {
                     configure.argv.push_back("-G");
                     configure.argv.push_back(*context->build.generator);
                 }
@@ -917,18 +872,12 @@ namespace kaixa::plugin::cmake {
                 }
                 if (context->build.toolchain) {
                     if (!std::filesystem::is_regular_file(*context->build.toolchain)) {
-                        return std::unexpected(error(
-                            "CMake toolchain file does not exist: "
-                                + context->build.toolchain->string()
-                        ));
+                        return std::unexpected(error("CMake toolchain file does not exist: " + context->build.toolchain->string()));
                     }
                     configure.argv.push_back("-DCMAKE_TOOLCHAIN_FILE=" + context->build.toolchain->string());
                 }
-                configure.argv.insert(
-                    configure.argv.end(),
-                    context->build.configure_arguments.begin(),
-                    context->build.configure_arguments.end()
-                );
+                configure.argv
+                    .insert(configure.argv.end(), context->build.configure_arguments.begin(), context->build.configure_arguments.end());
                 configure.working_directory = package.directory;
                 configure.package = package.id;
                 configure.stage = ActionStage::synchronize;
@@ -936,25 +885,14 @@ namespace kaixa::plugin::cmake {
                     configure.inputs.push_back(projects[id.index]->cmakelists);
 
                 configure.outputs.push_back(context->directory / "CMakeCache.txt");
-                auto checked_state = detail::configuration_state(
-                    context->directory,
-                    configure.inputs
-                );
-                configure.checked_state = *reset
-                    ? ActionState::required
-                    : (checked_state ? *checked_state : ActionState::unknown);
+                auto checked_state = detail::configuration_state(context->directory, configure.inputs);
+                configure.checked_state = *reset ? ActionState::required : (checked_state ? *checked_state : ActionState::unknown);
                 plan.add(std::move(configure));
 
                 const auto make_build_action = [&](const bool selected) {
                     Action build;
-                    build.description = selected
-                        ? "build selected targets for " + package.name
-                        : "build " + package.name;
-                    build.argv = {
-                        "cmake",
-                        "--build", context->directory.string(),
-                        "--config", context->configuration
-                    };
+                    build.description = selected ? "build selected targets for " + package.name : "build " + package.name;
+                    build.argv = {"cmake", "--build", context->directory.string(), "--config", context->configuration};
                     build.working_directory = package.directory;
                     build.inputs.push_back(context->directory / "CMakeCache.txt");
                     build.outputs.push_back(context->directory);
@@ -967,11 +905,7 @@ namespace kaixa::plugin::cmake {
                         build.argv.push_back("--parallel");
                         build.argv.push_back(std::to_string(*request.jobs));
                     }
-                    build.argv.insert(
-                        build.argv.end(),
-                        context->build.build_arguments.begin(),
-                        context->build.build_arguments.end()
-                    );
+                    build.argv.insert(build.argv.end(), context->build.build_arguments.begin(), context->build.build_arguments.end());
                     if (*install)
                         build.stage = ActionStage::synchronize;
 
@@ -985,25 +919,20 @@ namespace kaixa::plugin::cmake {
                     plan.add(make_build_action(true));
 
                 if (!request.build_default && request.targets.empty()) {
-                    return std::unexpected(error(
-                        "CMake build request selects neither default nor explicit targets"
-                    ));
+                    return std::unexpected(error("CMake build request selects neither default nor explicit targets"));
                 }
 
                 if (*install) {
-                    const std::filesystem::path destination = artifact_directory(
-                        environment,
-                        package,
-                        context->variant.directory
-                    );
+                    const std::filesystem::path destination = artifact_directory(environment, package, context->variant.directory);
                     Action install_action;
                     install_action.description = "install " + package.name;
-                    install_action.argv = {
-                        "cmake",
-                        "--install", context->directory.string(),
-                        "--config", context->configuration,
-                        "--prefix", destination.string()
-                    };
+                    install_action.argv = {"cmake",
+                        "--install",
+                        context->directory.string(),
+                        "--config",
+                        context->configuration,
+                        "--prefix",
+                        destination.string()};
                     install_action.argv.insert(
                         install_action.argv.end(),
                         context->build.install_arguments.begin(),
@@ -1030,14 +959,7 @@ namespace kaixa::plugin::cmake {
                 if (!context)
                     return std::unexpected(context.error());
 
-                return detail::plan_tests(
-                    context->project,
-                    package,
-                    context->directory,
-                    context->configuration,
-                    request,
-                    plan
-                );
+                return detail::plan_tests(context->project, package, context->directory, context->configuration, request, plan);
             }
 
             [[nodiscard]] Result<std::vector<BuildProduct>> products(
@@ -1065,17 +987,10 @@ namespace kaixa::plugin::cmake {
 
                 plan.add(context->output);
                 plan.add(cmake_build_root(environment, context->variant.directory));
-                plan.add(
-                    environment.state_root / "cache" / "cmake"
-                        / context->variant.directory
-                );
+                plan.add(environment.state_root / "cache" / "cmake" / context->variant.directory);
                 if (request.generated_files) {
-                    if (!context->project.targets.empty()
-                        && context->project.generation == GenerationMode::source) {
-                        plan.generated_file({
-                            context->project.source / "CMakeLists.txt",
-                            std::string(detail::generated_marker)
-                        });
+                    if (!context->project.targets.empty() && context->project.generation == GenerationMode::source) {
+                        plan.generated_file({context->project.source / "CMakeLists.txt", std::string(detail::generated_marker)});
                     }
                 }
                 return {};

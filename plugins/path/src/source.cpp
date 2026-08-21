@@ -6,11 +6,12 @@ namespace kaixa::plugin::path {
     namespace {
         class PathSourceDriver final : public SourceDriver {
         public:
-            [[nodiscard]] SourceDriverInfo info() const override {
-                return {"path", "opens an existing local source tree"};
-            }
+            [[nodiscard]] SourceDriverInfo info() const override { return {"path", "opens an existing local source tree"}; }
 
-            [[nodiscard]] Result<std::optional<SourceTree>> locate(const SourceLocator& source, const SourceContext& context) const override {
+            [[nodiscard]] Result<std::optional<SourceTree>> locate(
+                const SourceLocator& source,
+                const SourceContext& context
+            ) const override {
                 const std::vector<TableEntry>* options = source.options.as_table();
                 if (!options)
                     return std::unexpected(error("path source options must be a table"));
@@ -22,16 +23,10 @@ namespace kaixa::plugin::path {
                         continue;
                     }
 
-                    return std::unexpected(error_at(
-                        option.value.location(),
-                        "unknown path source option `" + option.key + "`"
-                    ));
+                    return std::unexpected(error_at(option.value.location(), "unknown path source option `" + option.key + "`"));
                 }
                 if (!path || !path->as_string()) {
-                    return std::unexpected(error_at(
-                        source.options.location(),
-                        "path source requires a string `path`"
-                    ));
+                    return std::unexpected(error_at(source.options.location(), "path source requires a string `path`"));
                 }
 
                 std::filesystem::path directory = *path->as_string();
@@ -41,20 +36,16 @@ namespace kaixa::plugin::path {
                 std::error_code failure;
                 directory = std::filesystem::absolute(directory, failure).lexically_normal();
                 if (failure) {
-                    return std::unexpected(error_at(
-                        path->location(),
-                        "cannot resolve path source `" + *path->as_string() + "`: "
-                            + failure.message()
-                    ));
+                    return std::unexpected(
+                        error_at(path->location(), "cannot resolve path source `" + *path->as_string() + "`: " + failure.message())
+                    );
                 }
 
                 const bool exists = std::filesystem::exists(directory, failure);
                 if (failure) {
-                    return std::unexpected(error_at(
-                        path->location(),
-                        "cannot inspect path source `" + directory.string() + "`: "
-                            + failure.message()
-                    ));
+                    return std::unexpected(
+                        error_at(path->location(), "cannot inspect path source `" + directory.string() + "`: " + failure.message())
+                    );
                 }
                 if (!exists)
                     return std::optional<SourceTree>{};
@@ -62,10 +53,8 @@ namespace kaixa::plugin::path {
                 if (!std::filesystem::is_directory(directory, failure) || failure) {
                     return std::unexpected(error_at(
                         path->location(),
-                        failure
-                            ? "cannot inspect path source `" + directory.string() + "`: "
-                                + failure.message()
-                            : "path source is not a directory: " + directory.string()
+                        failure ? "cannot inspect path source `" + directory.string() + "`: " + failure.message()
+                                : "path source is not a directory: " + directory.string()
                     ));
                 }
 

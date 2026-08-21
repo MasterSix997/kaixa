@@ -36,9 +36,7 @@ KAIXA_TEST(manifest_allows_metadata_only_packages_and_reads_version_shorthand) {
     );
     context.check(shorthand.has_value(), "version shorthand is accepted");
     if (shorthand)
-        context.check_equal(
-            shorthand->dependencies.front().request.version->text, std::string("0.4"), "version requirement"
-        );
+        context.check_equal(shorthand->dependencies.front().request.version->text, std::string("0.4"), "version requirement");
 }
 
 KAIXA_TEST(find_manifest_walks_from_a_nested_file) {
@@ -67,11 +65,8 @@ KAIXA_TEST(workspace_rejects_a_dependency_with_the_wrong_package_name) {
     const auto graph = kaixa::load_workspace(root.path());
     context.check(!graph.has_value(), "mismatched package name is rejected");
     if (!graph) {
-        context.check_contains(
-            kaixa::format_diagnostic(graph.error()),
-            "points to package `not_math`",
-            "diagnostic names the actual package"
-        );
+        context
+            .check_contains(kaixa::format_diagnostic(graph.error()), "points to package `not_math`", "diagnostic names the actual package");
     }
 }
 
@@ -84,9 +79,7 @@ KAIXA_TEST(workspace_rejects_a_missing_local_dependency) {
     const auto graph = kaixa::load_workspace(root.path());
     context.check(!graph.has_value(), "missing dependency is rejected");
     if (!graph) {
-        context.check_contains(
-            kaixa::format_diagnostic(graph.error()), "directory does not exist", "diagnostic explains the failure"
-        );
+        context.check_contains(kaixa::format_diagnostic(graph.error()), "directory does not exist", "diagnostic explains the failure");
     }
 }
 
@@ -121,9 +114,7 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
         std::ranges::find(command, "-DCMAKE_BUILD_TYPE=Release") != command.end(),
         "single-config generator receives the profile"
     );
-    context.check(
-        std::ranges::find(command, source.string()) != command.end(), "configured source directory is forwarded"
-    );
+    context.check(std::ranges::find(command, source.string()) != command.end(), "configured source directory is forwarded");
 }
 
 KAIXA_TEST(cmake_rejects_an_unknown_dependency_mode) {
@@ -179,9 +170,7 @@ KAIXA_TEST(cmake_rejects_direct_and_repeated_target_forms_together) {
     if (plan)
         return;
 
-    context.check_contains(
-        kaixa::format_diagnostic(plan.error()), "cannot be combined", "diagnostic explains target form conflict"
-    );
+    context.check_contains(kaixa::format_diagnostic(plan.error()), "cannot be combined", "diagnostic explains target form conflict");
 }
 
 KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
@@ -201,15 +190,15 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     configuration.profile = "debug";
     configuration.resolvers.push_back(
         {"cmake",
-         std::nullopt,
-         {"-G",
-          "Ninja",
-          "-DCMAKE_C_COMPILER=clang",
-          "-DCMAKE_CXX_COMPILER=clang++",
-          "-DCMAKE_TOOLCHAIN_FILE=" + (root.path() / "toolchain.cmake").string(),
-          "-DBUILD_TESTING=OFF",
-          "--fresh"},
-         {}}
+            std::nullopt,
+            {"-G",
+                "Ninja",
+                "-DCMAKE_C_COMPILER=clang",
+                "-DCMAKE_CXX_COMPILER=clang++",
+                "-DCMAKE_TOOLCHAIN_FILE=" + (root.path() / "toolchain.cmake").string(),
+                "-DBUILD_TESTING=OFF",
+                "--fresh"},
+            {}}
     );
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", std::move(configuration)};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
@@ -218,20 +207,20 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
         return;
 
     const std::vector<std::string> command = plan->actions().front().argv;
-    for (const std::string& expected:
-         {std::string("Ninja"),
-          std::string("-DCMAKE_C_COMPILER=clang"),
-          std::string("-DCMAKE_CXX_COMPILER=clang++"),
-          std::string("-DCMAKE_TOOLCHAIN_FILE=") + (root.path() / "toolchain.cmake").string(),
-          std::string("-DBUILD_TESTING=OFF"),
-          std::string("--fresh")}) {
+    for (
+        const std::string& expected: {std::string("Ninja"),
+            std::string("-DCMAKE_C_COMPILER=clang"),
+            std::string("-DCMAKE_CXX_COMPILER=clang++"),
+            std::string("-DCMAKE_TOOLCHAIN_FILE=") + (root.path() / "toolchain.cmake").string(),
+            std::string("-DBUILD_TESTING=OFF"),
+            std::string("--fresh")}
+    ) {
         context.check(std::ranges::find(command, expected) != command.end(), "configure command contains " + expected);
     }
 }
 
 KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
-    const std::filesystem::path workspace =
-        std::filesystem::path(__FILE__).parent_path() / "workspaces/package_dependency";
+    const std::filesystem::path workspace = std::filesystem::path(__FILE__).parent_path() / "workspaces/package_dependency";
     const auto graph = kaixa::load_workspace(workspace);
     if (!graph) {
         context.fail(kaixa::format_diagnostic(graph.error()));
@@ -242,15 +231,13 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
     configuration.profile = "debug";
     configuration.resolvers.push_back(
         {"cmake",
-         kaixa::Value::table(
-             {{"configure-arguments", kaixa::Value::array({"-DROUTED_CONFIGURE=ON"})},
-              {"build-arguments", kaixa::Value::array({"--verbose"})},
-              {"install-arguments", kaixa::Value::array({"--strip"})}}
-         ),
-         {},
-         {{"configure", {"-DCLI_CONFIGURE=ON"}},
-          {"build", {"--clean-first"}},
-          {"install", {"--component", "Development"}}}}
+            kaixa::Value::table(
+                {{"configure-arguments", kaixa::Value::array({"-DROUTED_CONFIGURE=ON"})},
+                    {"build-arguments", kaixa::Value::array({"--verbose"})},
+                    {"install-arguments", kaixa::Value::array({"--strip"})}}
+            ),
+            {},
+            {{"configure", {"-DCLI_CONFIGURE=ON"}}, {"build", {"--clean-first"}}, {"install", {"--component", "Development"}}}}
     );
     const kaixa::BuildEnvironment environment{workspace, workspace / ".test-phase-output", std::move(configuration)};
     const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
@@ -275,10 +262,7 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
                 && std::ranges::find(configure->argv, "-DCLI_CONFIGURE=ON") != configure->argv.end(),
             "configure receives only configure arguments"
         );
-        context.check(
-            std::ranges::find(configure->argv, "--verbose") == configure->argv.end(),
-            "configure excludes build arguments"
-        );
+        context.check(std::ranges::find(configure->argv, "--verbose") == configure->argv.end(), "configure excludes build arguments");
     }
     if (install != plan->actions().end()) {
         context.check(

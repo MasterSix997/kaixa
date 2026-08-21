@@ -12,32 +12,22 @@ namespace kaixa::cli {
         class Parser {
         public:
             explicit Parser(const std::span<const std::string_view> arguments)
-                : m_arguments(arguments) {
-            }
+                : m_arguments(arguments) {}
 
-            [[nodiscard]] bool done() const noexcept {
-                return m_index == m_arguments.size();
-            }
+            [[nodiscard]] bool done() const noexcept { return m_index == m_arguments.size(); }
 
-            [[nodiscard]] std::string_view peek() const {
-                return m_arguments[m_index];
-            }
+            [[nodiscard]] std::string_view peek() const { return m_arguments[m_index]; }
 
-            std::string_view take() {
-                return m_arguments[m_index++];
-            }
+            std::string_view take() { return m_arguments[m_index++]; }
 
             [[nodiscard]] std::expected<std::string_view, ParseError> value(const std::string_view option) {
                 if (done()) {
-                    return std::unexpected(ParseError{
-                        std::string(option) + " requires a value"
-                    });
+                    return std::unexpected(ParseError{std::string(option) + " requires a value"});
                 }
                 if (peek().starts_with("--")) {
-                    return std::unexpected(ParseError{
-                        std::string(option) + " requires a value before option `"
-                            + std::string(peek()) + "`"
-                    });
+                    return std::unexpected(
+                        ParseError{std::string(option) + " requires a value before option `" + std::string(peek()) + "`"}
+                    );
                 }
 
                 return take();
@@ -54,26 +44,15 @@ namespace kaixa::cli {
             std::vector<std::string> arguments,
             std::string scope
         ) {
-            const auto existing = std::ranges::find_if(
-                options.resolver_arguments,
-                [&](const ResolverArgumentOverride& item) {
-                    return item.resolver == resolver && item.scope == scope;
-                }
-            );
+            const auto existing = std::ranges::find_if(options.resolver_arguments, [&](const ResolverArgumentOverride& item) {
+                return item.resolver == resolver && item.scope == scope;
+            });
             if (existing == options.resolver_arguments.end()) {
-                options.resolver_arguments.push_back({
-                    std::move(resolver),
-                    std::move(arguments),
-                    std::move(scope)
-                });
+                options.resolver_arguments.push_back({std::move(resolver), std::move(arguments), std::move(scope)});
                 return;
             }
 
-            existing->arguments.insert(
-                existing->arguments.end(),
-                arguments.begin(),
-                arguments.end()
-            );
+            existing->arguments.insert(existing->arguments.end(), arguments.begin(), arguments.end());
         }
 
         std::expected<bool, ParseError> parse_workspace_option(Parser& parser, WorkspaceOptions& options) {
@@ -121,9 +100,7 @@ namespace kaixa::cli {
             if (option == "--no-default-configs") {
                 parser.take();
                 if (!options.use_default_configurations) {
-                    return std::unexpected(ParseError{
-                        "--no-default-configs was specified more than once"
-                    });
+                    return std::unexpected(ParseError{"--no-default-configs was specified more than once"});
                 }
 
                 options.use_default_configurations = false;
@@ -136,9 +113,7 @@ namespace kaixa::cli {
             parser.take();
             auto resolver = parser.value("--for");
             if (!resolver) {
-                return std::unexpected(ParseError{
-                    "--for requires a resolver name"
-                });
+                return std::unexpected(ParseError{"--for requires a resolver name"});
             }
 
             std::vector<std::string> arguments;
@@ -146,9 +121,7 @@ namespace kaixa::cli {
                 arguments.emplace_back(parser.take());
 
             if (arguments.empty()) {
-                return std::unexpected(ParseError{
-                    "--for " + std::string(*resolver) + " requires arguments"
-                });
+                return std::unexpected(ParseError{"--for " + std::string(*resolver) + " requires arguments"});
             }
 
             std::string selector(*resolver);
@@ -156,21 +129,14 @@ namespace kaixa::cli {
             const std::size_t separator = selector.rfind('.');
             if (separator != std::string::npos) {
                 if (separator == 0 || separator + 1 == selector.size()) {
-                    return std::unexpected(ParseError{
-                        "invalid resolver scope `" + selector + "`"
-                    });
+                    return std::unexpected(ParseError{"invalid resolver scope `" + selector + "`"});
                 }
 
                 scope = selector.substr(separator + 1);
                 selector.resize(separator);
             }
 
-            append_resolver_arguments(
-                options,
-                std::move(selector),
-                std::move(arguments),
-                std::move(scope)
-            );
+            append_resolver_arguments(options, std::move(selector), std::move(arguments), std::move(scope));
             return true;
         }
 
@@ -180,12 +146,11 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, options);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
             return options;
         }
@@ -219,9 +184,7 @@ namespace kaixa::cli {
 
                 parser.take();
                 if (command.request.filter) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
+                    return std::unexpected(ParseError{"unexpected argument `" + std::string(argument) + "`"});
                 }
 
                 command.request.filter = argument;
@@ -248,9 +211,7 @@ namespace kaixa::cli {
                         return std::unexpected(value.error());
 
                     if (command.target) {
-                        return std::unexpected(ParseError{
-                            "--target can be specified only once for bench"
-                        });
+                        return std::unexpected(ParseError{"--target can be specified only once for bench"});
                     }
 
                     command.target = *value;
@@ -260,9 +221,7 @@ namespace kaixa::cli {
                 if (argument == "--list") {
                     parser.take();
                     if (command.list) {
-                        return std::unexpected(ParseError{
-                            "--list was specified more than once"
-                        });
+                        return std::unexpected(ParseError{"--list was specified more than once"});
                     }
 
                     command.list = true;
@@ -272,23 +231,18 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
 
             if (command.list && command.target) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with --target; omit --target to list benchmarks"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with --target; omit --target to list benchmarks"});
             }
             if (command.list && !command.arguments.empty()) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with benchmark arguments"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with benchmark arguments"});
             }
             return command;
         }
@@ -304,25 +258,17 @@ namespace kaixa::cli {
                 return std::unexpected(value.error());
 
             if (std::ranges::find(products, *value) != products.end()) {
-                return std::unexpected(ParseError{
-                    std::string(option) + " `" + std::string(*value) + "` was specified more than once"
-                });
+                return std::unexpected(ParseError{std::string(option) + " `" + std::string(*value) + "` was specified more than once"});
             }
 
             products.emplace_back(*value);
             return {};
         }
 
-        std::expected<void, ParseError> select_all_products(
-            Parser& parser,
-            const std::string_view option,
-            bool& selected
-        ) {
+        std::expected<void, ParseError> select_all_products(Parser& parser, const std::string_view option, bool& selected) {
             parser.take();
             if (selected) {
-                return std::unexpected(ParseError{
-                    std::string(option) + " was specified more than once"
-                });
+                return std::unexpected(ParseError{std::string(option) + " was specified more than once"});
             }
 
             selected = true;
@@ -340,9 +286,7 @@ namespace kaixa::cli {
                         return std::unexpected(value.error());
 
                     if (std::ranges::find(command.targets, *value) != command.targets.end()) {
-                        return std::unexpected(ParseError{
-                            "--target `" + std::string(*value) + "` was specified more than once"
-                        });
+                        return std::unexpected(ParseError{"--target `" + std::string(*value) + "` was specified more than once"});
                     }
 
                     command.targets.emplace_back(*value);
@@ -413,9 +357,7 @@ namespace kaixa::cli {
                     const char* end = begin + value->size();
                     const auto parsed_jobs = std::from_chars(begin, end, jobs);
                     if (parsed_jobs.ec != std::errc{} || parsed_jobs.ptr != end || jobs == 0) {
-                        return std::unexpected(ParseError{
-                            "--jobs requires a positive integer"
-                        });
+                        return std::unexpected(ParseError{"--jobs requires a positive integer"});
                     }
 
                     command.jobs = jobs;
@@ -425,51 +367,41 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
 
             if (command.list && !command.targets.empty()) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with --target"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with --target"});
             }
             if (command.list && command.jobs) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with --jobs"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with --jobs"});
             }
             if (!command.targets.empty() && !command.selection.empty()) {
-                return std::unexpected(ParseError{
-                    "--target cannot be combined with semantic product selectors"
-                });
+                return std::unexpected(ParseError{"--target cannot be combined with semantic product selectors"});
             }
             if (command.selection.all_targets
-                && (command.selection.all_examples || command.selection.all_tests
-                    || command.selection.all_benchmarks || !command.selection.examples.empty()
-                    || !command.selection.tests.empty() || !command.selection.benchmarks.empty())) {
-                return std::unexpected(ParseError{
-                    "--all-targets already selects every product and cannot be combined with category selectors"
-                });
+                && (command.selection.all_examples
+                    || command.selection.all_tests
+                    || command.selection.all_benchmarks
+                    || !command.selection.examples.empty()
+                    || !command.selection.tests.empty()
+                    || !command.selection.benchmarks.empty())) {
+                return std::unexpected(
+                    ParseError{"--all-targets already selects every product and cannot be combined with category selectors"}
+                );
             }
             if (command.selection.all_examples && !command.selection.examples.empty()) {
-                return std::unexpected(ParseError{
-                    "--examples already selects every example; remove --example"
-                });
+                return std::unexpected(ParseError{"--examples already selects every example; remove --example"});
             }
             if (command.selection.all_tests && !command.selection.tests.empty()) {
-                return std::unexpected(ParseError{
-                    "--tests already selects every test; remove --test"
-                });
+                return std::unexpected(ParseError{"--tests already selects every test; remove --test"});
             }
             if (command.selection.all_benchmarks && !command.selection.benchmarks.empty()) {
-                return std::unexpected(ParseError{
-                    "--benchmarks already selects every benchmark; remove --bench"
-                });
+                return std::unexpected(ParseError{"--benchmarks already selects every benchmark; remove --bench"});
             }
 
             return command;
@@ -494,9 +426,7 @@ namespace kaixa::cli {
                         return std::unexpected(value.error());
 
                     if (command.target) {
-                        return std::unexpected(ParseError{
-                            "--target can be specified only once for run"
-                        });
+                        return std::unexpected(ParseError{"--target can be specified only once for run"});
                     }
 
                     command.target = *value;
@@ -510,9 +440,7 @@ namespace kaixa::cli {
                         return std::unexpected(value.error());
 
                     if (command.example) {
-                        return std::unexpected(ParseError{
-                            "--example can be specified only once for run"
-                        });
+                        return std::unexpected(ParseError{"--example can be specified only once for run"});
                     }
 
                     command.example = *value;
@@ -522,9 +450,7 @@ namespace kaixa::cli {
                 if (argument == "--examples") {
                     parser.take();
                     if (command.examples) {
-                        return std::unexpected(ParseError{
-                            "--examples was specified more than once"
-                        });
+                        return std::unexpected(ParseError{"--examples was specified more than once"});
                     }
 
                     command.examples = true;
@@ -540,43 +466,35 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
 
             if (command.list && command.target) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with --target"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with --target"});
             }
             if (command.list && !command.arguments.empty()) {
-                return std::unexpected(ParseError{
-                    "--list cannot be combined with program arguments"
-                });
+                return std::unexpected(ParseError{"--list cannot be combined with program arguments"});
             }
             if (command.target && command.example) {
-                return std::unexpected(ParseError{
-                    "--target selects a regular application; use only --example to run an example"
-                });
+                return std::unexpected(ParseError{"--target selects a regular application; use only --example to run an example"});
             }
             if (command.examples && command.example) {
-                return std::unexpected(ParseError{
-                    "--examples lists all examples; use --example <name> to select one"
-                });
+                return std::unexpected(ParseError{"--examples lists all examples; use --example <name> to select one"});
             }
             if (command.examples && !command.list) {
-                return std::unexpected(ParseError{
-                    "--examples selects multiple programs and is valid only with --list; use --example <name> to run one"
-                });
+                return std::unexpected(
+                    ParseError{"--examples selects multiple programs and is valid only with --list; "
+                               "use --example <name> to run one"}
+                );
             }
             if (command.list && command.example) {
-                return std::unexpected(ParseError{
-                    "--example selects one program and cannot be combined with --list; use --examples --list"
-                });
+                return std::unexpected(
+                    ParseError{"--example selects one program and cannot be combined with --list; use --examples --list"}
+                );
             }
 
             return command;
@@ -605,21 +523,19 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
-                return std::unexpected(ParseError{
-                    "unexpected argument `" + std::string(parser.take()) + "`"
-                });
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
 
-            if (command.all && (command.workspace.profile
-                || !command.workspace.configurations.empty()
-                || !command.workspace.resolver_arguments.empty()
-                || !command.workspace.use_default_configurations)) {
-                return std::unexpected(ParseError{
-                    "--all cannot be combined with build configuration options"
-                });
+            if (command.all
+                && (command.workspace.profile
+                    || !command.workspace.configurations.empty()
+                    || !command.workspace.resolver_arguments.empty()
+                    || !command.workspace.use_default_configurations)) {
+                return std::unexpected(ParseError{"--all cannot be combined with build configuration options"});
             }
             return command;
         }
@@ -637,14 +553,13 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
                 const std::string_view argument = parser.take();
                 if (has_mode) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
+                    return std::unexpected(ParseError{"unexpected argument `" + std::string(argument) + "`"});
                 }
 
                 if (argument == "packages")
@@ -658,9 +573,7 @@ namespace kaixa::cli {
                 else if (argument == "config")
                     command.mode = InspectMode::config;
                 else {
-                    return std::unexpected(ParseError{
-                        "unknown inspect mode `" + std::string(argument) + "`"
-                    });
+                    return std::unexpected(ParseError{"unknown inspect mode `" + std::string(argument) + "`"});
                 }
                 has_mode = true;
             }
@@ -672,9 +585,7 @@ namespace kaixa::cli {
             while (!parser.done()) {
                 const std::string_view option = parser.take();
                 if (option != "--path") {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(option) + "`"
-                    });
+                    return std::unexpected(ParseError{"unexpected argument `" + std::string(option) + "`"});
                 }
 
                 auto value = parser.value(option);
@@ -699,14 +610,13 @@ namespace kaixa::cli {
                 auto parsed = parse_workspace_option(parser, command.workspace);
                 if (!parsed)
                     return std::unexpected(parsed.error());
+
                 if (*parsed)
                     continue;
 
                 const std::string_view argument = parser.take();
                 if (has_name) {
-                    return std::unexpected(ParseError{
-                        "unexpected argument `" + std::string(argument) + "`"
-                    });
+                    return std::unexpected(ParseError{"unexpected argument `" + std::string(argument) + "`"});
                 }
 
                 command.workspace.configurations.emplace_back(argument);
@@ -728,9 +638,7 @@ namespace kaixa::cli {
                 return Command{std::move(*command)};
             }
             if (action != "list" && action != "path") {
-                return std::unexpected(ParseError{
-                    "unknown config command `" + std::string(action) + "`"
-                });
+                return std::unexpected(ParseError{"unknown config command `" + std::string(action) + "`"});
             }
 
             auto path = parse_path_option(parser);
@@ -746,7 +654,9 @@ namespace kaixa::cli {
 
     void print_usage(std::ostream& out) {
         out
-            << "Kaixa " << version() << "\n\n"
+            << "Kaixa "
+            << version()
+            << "\n\n"
             << "Usage:\n"
             << "  kaixa inspect [packages|targets|outputs|actions|config] [--path path]\n"
             << "        [--verbose] [--profile name] [--config name]...\n\n"
@@ -788,6 +698,7 @@ namespace kaixa::cli {
         const std::string_view name = parser.take();
         if (name == "--help" || name == "-h")
             return HelpCommand{};
+
         if (name == "--version")
             return VersionCommand{};
 
@@ -843,10 +754,7 @@ namespace kaixa::cli {
         }
 
         if (name != "check" && name != "generate") {
-            return std::unexpected(ParseError{
-                "unknown command `" + std::string(name) + "`",
-                true
-            });
+            return std::unexpected(ParseError{"unknown command `" + std::string(name) + "`", true});
         }
 
         auto workspace = parse_workspace(parser);
@@ -855,6 +763,7 @@ namespace kaixa::cli {
 
         if (name == "check")
             return Command{CheckCommand{std::move(*workspace)}};
+
         return Command{GenerateCommand{std::move(*workspace)}};
     }
 }

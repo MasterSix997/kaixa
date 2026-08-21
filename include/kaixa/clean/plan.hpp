@@ -17,16 +17,10 @@ namespace kaixa {
         void add(std::filesystem::path path);
         void generated_file(GeneratedCleanFile file);
 
-        [[nodiscard]] std::span<const std::filesystem::path> paths() const noexcept {
-            return m_paths;
-        }
-        [[nodiscard]] std::span<const GeneratedCleanFile> generated_files() const noexcept {
-            return m_generated_files;
-        }
+        [[nodiscard]] std::span<const std::filesystem::path> paths() const noexcept { return m_paths; }
+        [[nodiscard]] std::span<const GeneratedCleanFile> generated_files() const noexcept { return m_generated_files; }
 
-        [[nodiscard]] bool empty() const noexcept {
-            return m_paths.empty() && m_generated_files.empty();
-        }
+        [[nodiscard]] bool empty() const noexcept { return m_paths.empty() && m_generated_files.empty(); }
 
     private:
         std::vector<std::filesystem::path> m_paths;

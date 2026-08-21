@@ -54,9 +54,7 @@ KAIXA_TEST(dependencies_normalize_versions_aliases_and_source_drivers) {
     context.check_equal(*manifest->dependencies[1].alias, std::string("physics"), "inline alias");
     context.check_equal(manifest->dependencies[1].local_name(), std::string_view("physics"), "local binding name");
     context.check_equal(manifest->dependencies[2].selection.source->driver, std::string("git"), "source driver");
-    context.check(
-        manifest->dependencies[2].selection.source->options.find("url") != nullptr, "source options remain opaque"
-    );
+    context.check(manifest->dependencies[2].selection.source->options.find("url") != nullptr, "source options remain opaque");
 
     const auto formatted = kaixa::format_manifest(*manifest);
     context.check(formatted.has_value(), "normalized dependencies format");
@@ -173,9 +171,7 @@ KAIXA_TEST(package_set_supports_multiple_defaults_and_explicit_roots) {
         return;
 
     context.check_equal(defaults->graph.roots().size(), std::size_t{2}, "default root count");
-    context.check_equal(
-        defaults->graph[defaults->graph.roots().front()].name, std::string("editor"), "default order is preserved"
-    );
+    context.check_equal(defaults->graph[defaults->graph.roots().front()].name, std::string("editor"), "default order is preserved");
     context.check_equal(defaults->available.candidates().size(), std::size_t{3}, "all candidates remain observable");
 
     const std::vector<std::string> selected_names{"game_runner"};
@@ -186,11 +182,8 @@ KAIXA_TEST(package_set_supports_multiple_defaults_and_explicit_roots) {
 
     context.check_equal(selected->graph.roots().size(), std::size_t{1}, "one explicit root");
     context.check_equal(selected->graph.size(), std::size_t{1}, "unreached packages stay outside the graph");
-    context.check_equal(
-        selected->graph[selected->graph.roots().front()].name,
-        std::string("game_runner"),
-        "explicit root replaces defaults"
-    );
+    context
+        .check_equal(selected->graph[selected->graph.roots().front()].name, std::string("game_runner"), "explicit root replaces defaults");
 }
 
 KAIXA_TEST(package_selection_reports_duplicates_and_available_names) {
@@ -212,9 +205,7 @@ KAIXA_TEST(package_selection_reports_duplicates_and_available_names) {
     const auto duplicate = kaixa::resolve_workspace(root.path(), duplicate_names);
     context.check(!duplicate.has_value(), "duplicate package selection is rejected");
     if (!duplicate) {
-        context.check_contains(
-            kaixa::format_diagnostic(duplicate.error()), "selected more than once", "duplicate diagnostic"
-        );
+        context.check_contains(kaixa::format_diagnostic(duplicate.error()), "selected more than once", "duplicate diagnostic");
     }
 
     const std::vector<std::string> missing_names{"missing"};
@@ -252,9 +243,8 @@ KAIXA_TEST(package_set_reports_an_incompatible_nearest_candidate) {
     const auto graph = kaixa::load_workspace(root.path());
     context.check(!graph.has_value(), "incompatible local candidate is rejected");
     if (!graph) {
-        context.check_contains(
-            kaixa::format_diagnostic(graph.error()), "does not satisfy `^2`", "diagnostic reports the candidate version"
-        );
+        context
+            .check_contains(kaixa::format_diagnostic(graph.error()), "does not satisfy `^2`", "diagnostic reports the candidate version");
     }
 }
 
@@ -342,12 +332,8 @@ KAIXA_TEST(target_policy_creates_a_separate_configured_package_instance) {
     }
     context.check_equal(resolution->instances.size(), std::size_t{2}, "default and target instances");
     context.check_equal(resolution->instances[0].artifact, std::string("default"), "default artifact");
-    context.check_equal(
-        resolution->instances[1].artifact, std::string("app.tests.noexcept"), "policy-specific artifact"
-    );
-    context.check_equal(
-        resolution->instances[1].policy_layers.size(), std::size_t{2}, "package-set and target policies compose"
-    );
+    context.check_equal(resolution->instances[1].artifact, std::string("app.tests.noexcept"), "policy-specific artifact");
+    context.check_equal(resolution->instances[1].policy_layers.size(), std::size_t{2}, "package-set and target policies compose");
 }
 
 KAIXA_TEST(configured_features_activate_optional_dependencies) {
@@ -379,8 +365,7 @@ KAIXA_TEST(configured_features_activate_optional_dependencies) {
     );
 
     const kaixa::Value feature_settings = kaixa::Value::table({{"app", kaixa::Value::array({kaixa::Value("tools")})}});
-    const auto resolution =
-        kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, nullptr, {}, {}, &feature_settings});
+    const auto resolution = kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, nullptr, {}, {}, &feature_settings});
     context.check(resolution.has_value(), "configured feature graph resolves");
     if (!resolution) {
         context.fail(kaixa::format_diagnostic(resolution.error()));
@@ -390,8 +375,6 @@ KAIXA_TEST(configured_features_activate_optional_dependencies) {
     const auto app = resolution->graph.find_by_name("app");
     context.check(app.has_value(), "configured package exists");
     if (app) {
-        context.check_equal(
-            resolution->graph[*app].active_features.front(), std::string("tools"), "configured feature is active"
-        );
+        context.check_equal(resolution->graph[*app].active_features.front(), std::string("tools"), "configured feature is active");
     }
 }

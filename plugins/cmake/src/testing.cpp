@@ -30,8 +30,7 @@ namespace kaixa::plugin::cmake::detail {
         std::string discovery_script(const TestOptions& test) {
             const std::string label = std::string(test_target_label_prefix) + test.target;
             std::string output;
-            output += "set(_kaixa_test_executable "
-                + quote("$<TARGET_FILE:" + test.target + ">") + ")\n";
+            output += "set(_kaixa_test_executable " + quote("$<TARGET_FILE:" + test.target + ">") + ")\n";
             output += "set(_kaixa_test_prefix " + quote(test.name) + ")\n";
             output += "set(_kaixa_test_label " + quote(label) + ")\n";
             output += R"cmake(execute_process(
@@ -43,11 +42,13 @@ namespace kaixa::plugin::cmake::detail {
 )
 if(NOT _kaixa_result EQUAL 0)
   message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
+
 endif()
 string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
 foreach(_kaixa_case IN LISTS _kaixa_cases)
   if(_kaixa_case STREQUAL "")
     continue()
+
   endif()
   set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
   add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")cmake";
@@ -66,17 +67,17 @@ endforeach()
             const std::string filename = "kaixa-discovery-" + std::to_string(index);
             const std::string script = discovery_script(test);
 
-            output += "set(" + variable
-                + " \"${CMAKE_CURRENT_BINARY_DIR}/" + filename + "\")\n";
+            output += "set(" + variable + " \"${CMAKE_CURRENT_BINARY_DIR}/" + filename + "\")\n";
             output += "if(CMAKE_CONFIGURATION_TYPES)\n";
-            output += "  file(GENERATE OUTPUT \"${" + variable
-                + "}-$<CONFIG>.cmake\" CONTENT " + quote(script) + ")\n";
-            output += "  file(WRITE \"${" + variable + "}.cmake\""
-                + " \"include(\\\"${" + variable
+            output += "  file(GENERATE OUTPUT \"${" + variable + "}-$<CONFIG>.cmake\" CONTENT " + quote(script) + ")\n";
+            output += "  file(WRITE \"${"
+                + variable
+                + "}.cmake\""
+                + " \"include(\\\"${"
+                + variable
                 + "}-\\${CTEST_CONFIGURATION_TYPE}.cmake\\\")\\n\")\n";
             output += "else()\n";
-            output += "  file(GENERATE OUTPUT \"${" + variable
-                + "}.cmake\" CONTENT " + quote(script) + ")\n";
+            output += "  file(GENERATE OUTPUT \"${" + variable + "}.cmake\" CONTENT " + quote(script) + ")\n";
             output += "endif()\n";
             output += "set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES";
             output += " \"${" + variable + "}.cmake\")\n";
@@ -84,13 +85,10 @@ endforeach()
 
         Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package) {
             const auto action = std::ranges::find_if(plan.actions(), [&](const Action& candidate) {
-                return candidate.package == package.id
-                    && candidate.stage == ActionStage::build;
+                return candidate.package == package.id && candidate.stage == ActionStage::build;
             });
             if (action == plan.actions().end()) {
-                return std::unexpected(error(
-                    "CMake test plan has no build action for package `" + package.name + "`"
-                ));
+                return std::unexpected(error("CMake test plan has no build action for package `" + package.name + "`"));
             }
 
             return &*action;
@@ -114,8 +112,11 @@ endforeach()
                 output += " " + quote(argument);
 
             output += ")\n";
-            output += "set_tests_properties(" + quote(test.name) + " PROPERTIES LABELS "
-                + quote(std::string(test_target_label_prefix) + test.target) + ")\n";
+            output += "set_tests_properties("
+                + quote(test.name)
+                + " PROPERTIES LABELS "
+                + quote(std::string(test_target_label_prefix) + test.target)
+                + ")\n";
         }
     }
 
@@ -129,23 +130,14 @@ endforeach()
     ) {
         std::vector<std::string> build_targets;
         if (request.target) {
-            const auto target = std::ranges::find_if(
-                options.targets,
-                [&](const TargetOptions& candidate) {
-                    return candidate.name == *request.target;
-                }
-            );
+            const auto target = std::ranges::find_if(options.targets, [&](const TargetOptions& candidate) {
+                return candidate.name == *request.target;
+            });
             if (target == options.targets.end()) {
-                return std::unexpected(error(
-                    "CMake target `" + *request.target + "` does not exist"
-                ));
+                return std::unexpected(error("CMake target `" + *request.target + "` does not exist"));
             }
-            if (std::ranges::none_of(options.tests, [&](const TestOptions& test) {
-                    return test.target == *request.target;
-                })) {
-                return std::unexpected(error(
-                    "CMake target `" + *request.target + "` does not declare tests"
-                ));
+            if (std::ranges::none_of(options.tests, [&](const TestOptions& test) { return test.target == *request.target; })) {
+                return std::unexpected(error("CMake target `" + *request.target + "` does not declare tests"));
             }
 
             build_targets.push_back(*request.target);
@@ -162,21 +154,13 @@ endforeach()
                 return std::unexpected(build.error());
 
             (*build)->argv.push_back("--target");
-            (*build)->argv.insert(
-                (*build)->argv.end(),
-                build_targets.begin(),
-                build_targets.end()
-            );
+            (*build)->argv.insert((*build)->argv.end(), build_targets.begin(), build_targets.end());
         }
 
         const bool list = request.mode == TestMode::list;
         Action action;
         action.description = list ? "list tests " + package.name : "test " + package.name;
-        action.argv = {
-            "ctest",
-            "--test-dir", build_directory.string(),
-            "--build-config", std::string(configuration)
-        };
+        action.argv = {"ctest", "--test-dir", build_directory.string(), "--build-config", std::string(configuration)};
         action.argv.push_back(list ? "--show-only" : "--output-on-failure");
         if (request.filter) {
             action.argv.push_back("--tests-regex");
@@ -184,10 +168,7 @@ endforeach()
         }
         if (request.target) {
             action.argv.push_back("--label-regex");
-            action.argv.push_back(
-                "^" + regex_escape(test_target_label_prefix)
-                    + regex_escape(*request.target) + "$"
-            );
+            action.argv.push_back("^" + regex_escape(test_target_label_prefix) + regex_escape(*request.target) + "$");
         }
         action.working_directory = package.directory;
         action.package = package.id;

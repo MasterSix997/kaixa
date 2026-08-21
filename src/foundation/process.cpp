@@ -8,13 +8,13 @@
 #include <system_error>
 
 #ifdef _WIN32
-    #ifndef NOMINMAX
-        #define NOMINMAX
-    #endif
-    #include <windows.h>
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
 #else
-    #include <sys/wait.h>
-    #include <unistd.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #endif
 
 namespace kaixa {
@@ -22,6 +22,7 @@ namespace kaixa {
         bool needs_quotes(const std::string_view argument) {
             if (argument.empty())
                 return true;
+
             for (const char character: argument) {
                 if (std::isspace(static_cast<unsigned char>(character)) != 0 || character == '"')
                     return true;
@@ -59,30 +60,17 @@ namespace kaixa {
         Result<std::wstring> widen(const std::string_view text) {
             if (text.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
                 return std::unexpected(error("text is too long for the Windows process API"));
+
             if (text.empty())
                 return std::wstring{};
 
             const int source_size = static_cast<int>(text.size());
-            const int required = MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                text.data(),
-                source_size,
-                nullptr,
-                0
-            );
+            const int required = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), source_size, nullptr, 0);
             if (required == 0)
                 return std::unexpected(error("process argument is not valid UTF-8"));
 
             std::wstring result(static_cast<std::size_t>(required), L'\0');
-            MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                text.data(),
-                source_size,
-                result.data(),
-                required
-            );
+            MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(), source_size, result.data(), required);
             return result;
         }
 
@@ -97,6 +85,7 @@ namespace kaixa {
         for (const std::string& argument: argv) {
             if (!command.empty())
                 command += ' ';
+
             command += quote(argument);
         }
         return command;
@@ -128,6 +117,7 @@ namespace kaixa {
         const auto wide_command_result = widen(format_command(request.argv));
         if (!wide_command_result)
             return std::unexpected(wide_command_result.error());
+
         std::wstring command = *wide_command_result;
 
         std::wstring working_directory;
@@ -135,6 +125,7 @@ namespace kaixa {
             const auto directory_result = widen(request.working_directory.string());
             if (!directory_result)
                 return std::unexpected(directory_result.error());
+
             working_directory = *directory_result;
         }
 
@@ -155,9 +146,7 @@ namespace kaixa {
             &process
         );
         if (!created)
-            return std::unexpected(error(
-                "cannot start `" + request.argv.front() + "`: " + windows_error(GetLastError())
-            ));
+            return std::unexpected(error("cannot start `" + request.argv.front() + "`: " + windows_error(GetLastError())));
 
         const DWORD wait_result = WaitForSingleObject(process.hProcess, INFINITE);
         DWORD exit_code = 0;
@@ -167,8 +156,10 @@ namespace kaixa {
 
         if (wait_result == WAIT_FAILED)
             return std::unexpected(error("cannot wait for child process"));
+
         if (!read_exit_code)
             return std::unexpected(error("cannot read child process exit code"));
+
         return ProcessResult{static_cast<int>(exit_code)};
 #else
         const pid_t child = fork();
@@ -176,14 +167,14 @@ namespace kaixa {
             return std::unexpected(error(std::string("cannot fork: ") + std::strerror(errno)));
 
         if (child == 0) {
-            if (!request.working_directory.empty()
-                && chdir(request.working_directory.c_str()) != 0)
+            if (!request.working_directory.empty() && chdir(request.working_directory.c_str()) != 0)
                 _exit(126);
 
             std::vector<char*> arguments;
             arguments.reserve(request.argv.size() + 1);
             for (const std::string& argument: request.argv)
                 arguments.push_back(const_cast<char*>(argument.c_str()));
+
             arguments.push_back(nullptr);
             execvp(arguments.front(), arguments.data());
             _exit(127);
@@ -192,15 +183,15 @@ namespace kaixa {
         int status = 0;
         while (waitpid(child, &status, 0) < 0) {
             if (errno != EINTR)
-                return std::unexpected(error(
-                    std::string("cannot wait for child process: ") + std::strerror(errno)
-                ));
+                return std::unexpected(error(std::string("cannot wait for child process: ") + std::strerror(errno)));
         }
 
         if (WIFEXITED(status))
             return ProcessResult{WEXITSTATUS(status)};
+
         if (WIFSIGNALED(status))
             return ProcessResult{128 + WTERMSIG(status)};
+
         return std::unexpected(error("child process ended without an exit status"));
 #endif
     }

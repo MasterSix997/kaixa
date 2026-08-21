@@ -32,14 +32,14 @@ namespace kaixa {
             std::vector<std::filesystem::path> action_outputs,
             std::optional<ActionState> known_state = std::nullopt,
             const ActionStage action_stage = ActionStage::build
-        ) : description(std::move(action_description)),
-            argv(std::move(action_argv)),
-            working_directory(std::move(action_working_directory)),
-            inputs(std::move(action_inputs)),
-            outputs(std::move(action_outputs)),
-            checked_state(known_state),
-            stage(action_stage) {
-        }
+        )
+            : description(std::move(action_description))
+            , argv(std::move(action_argv))
+            , working_directory(std::move(action_working_directory))
+            , inputs(std::move(action_inputs))
+            , outputs(std::move(action_outputs))
+            , checked_state(known_state)
+            , stage(action_stage) {}
 
         std::string description;
         std::vector<std::string> argv;

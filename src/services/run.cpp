@@ -21,11 +21,9 @@ namespace kaixa {
             if (product.kind != ProductKind::executable || !product.artifact)
                 continue;
 
-            targets.push_back({
-                product.name,
-                product.purpose,
-                ProcessRequest{{product.artifact->string()}, graph[product.package].directory}
-            });
+            targets.push_back(
+                {product.name, product.purpose, ProcessRequest{{product.artifact->string()}, graph[product.package].directory}}
+            );
         }
         return targets;
     }
@@ -40,8 +38,7 @@ namespace kaixa {
             return std::unexpected(targets.error());
 
         std::erase_if(*targets, [](const RunTarget& target) {
-            return target.purpose == ProductPurpose::test
-                || target.purpose == ProductPurpose::benchmark;
+            return target.purpose == ProductPurpose::test || target.purpose == ProductPurpose::benchmark;
         });
         return targets;
     }
@@ -52,27 +49,16 @@ namespace kaixa {
         const std::string_view package_name
     ) {
         if (requested) {
-            const std::size_t matches = static_cast<std::size_t>(std::ranges::count(
-                targets,
-                *requested,
-                &RunTarget::name
-            ));
+            const std::size_t matches = static_cast<std::size_t>(std::ranges::count(targets, *requested, &RunTarget::name));
             if (matches > 1) {
-                return std::unexpected(error(
-                    "runnable target `" + *requested
-                        + "` is provided by multiple selected packages"
-                ).add_note("narrow the operation with `--package <name>`"));
+                return std::unexpected(error("runnable target `" + *requested + "` is provided by multiple selected packages")
+                        .add_note("narrow the operation with `--package <name>`"));
             }
 
-            const auto selected = std::ranges::find_if(
-                targets,
-                [&](const RunTarget& target) { return target.name == *requested; }
-            );
+            const auto selected = std::ranges::find_if(targets, [&](const RunTarget& target) { return target.name == *requested; });
             if (selected == targets.end()) {
                 if (targets.empty()) {
-                    return std::unexpected(error(
-                        "runnable target `" + *requested + "` does not exist"
-                    ));
+                    return std::unexpected(error("runnable target `" + *requested + "` does not exist"));
                 }
 
                 std::string available;
@@ -82,18 +68,17 @@ namespace kaixa {
 
                     available += target.name;
                 }
-                return std::unexpected(error(
-                    "runnable target `" + *requested + "` does not exist"
-                ).add_note("available targets: " + available));
+                return std::unexpected(
+                    error("runnable target `" + *requested + "` does not exist").add_note("available targets: " + available)
+                );
             }
 
             return *selected;
         }
 
-        const auto named_after_package = std::ranges::find_if(
-            targets,
-            [&](const RunTarget& target) { return target.name == package_name; }
-        );
+        const auto named_after_package = std::ranges::find_if(targets, [&](const RunTarget& target) {
+            return target.name == package_name;
+        });
         if (named_after_package != targets.end())
             return *named_after_package;
 
@@ -110,9 +95,7 @@ namespace kaixa {
 
             choices += target.name;
         }
-        return std::unexpected(error(
-            "multiple runnable targets are available"
-        ).add_note("select one with `--target`: " + choices));
+        return std::unexpected(error("multiple runnable targets are available").add_note("select one with `--target`: " + choices));
     }
 
     Result<BuildPlan> plan_run(

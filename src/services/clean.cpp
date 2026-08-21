@@ -12,9 +12,7 @@ namespace kaixa {
             std::error_code failure;
             std::filesystem::path result = std::filesystem::absolute(path, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot resolve path `" + path.string() + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot resolve path `" + path.string() + "`: " + failure.message()));
             }
 
             return result.lexically_normal();
@@ -45,12 +43,9 @@ namespace kaixa {
 
     void CleanPlan::generated_file(GeneratedCleanFile file) {
         file.path = file.path.lexically_normal();
-        const auto existing = std::ranges::find_if(
-            m_generated_files,
-            [&](const GeneratedCleanFile& candidate) {
-                return candidate.path == file.path;
-            }
-        );
+        const auto existing = std::ranges::find_if(m_generated_files, [&](const GeneratedCleanFile& candidate) {
+            return candidate.path == file.path;
+        });
         if (existing == m_generated_files.end())
             m_generated_files.push_back(std::move(file));
     }
@@ -68,18 +63,10 @@ namespace kaixa {
 
             Resolver* resolver = registry.find_resolver(package.resolver);
             if (!resolver) {
-                return std::unexpected(error(
-                    "resolver `" + package.resolver + "` is not installed"
-                ));
+                return std::unexpected(error("resolver `" + package.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_clean(
-                graph,
-                package,
-                environment,
-                request,
-                plan
-            );
+            auto planned = resolver->plan_clean(graph, package, environment, request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }
@@ -96,6 +83,7 @@ namespace kaixa {
         auto normalized_root = absolute_normalized(state_root);
         if (!normalized_root)
             return std::unexpected(normalized_root.error());
+
         auto normalized_workspace = absolute_normalized(workspace);
         if (!normalized_workspace)
             return std::unexpected(normalized_workspace.error());
@@ -108,21 +96,15 @@ namespace kaixa {
                 return std::unexpected(normalized.error());
 
             const bool is_root = *normalized == *normalized_root;
-            if ((!is_root && !is_descendant(*normalized, *normalized_root))
-                || (is_root && !allow_state_root)) {
-                return std::unexpected(error(
-                    "refusing to clean path outside the selected Kaixa state: "
-                        + normalized->string()
-                ));
+            if ((!is_root && !is_descendant(*normalized, *normalized_root)) || (is_root && !allow_state_root)) {
+                return std::unexpected(error("refusing to clean path outside the selected Kaixa state: " + normalized->string()));
             }
 
             if (std::ranges::find(paths, *normalized) == paths.end())
                 paths.push_back(std::move(*normalized));
         }
 
-        std::ranges::sort(paths, [](const auto& left, const auto& right) {
-            return path_depth(left) > path_depth(right);
-        });
+        std::ranges::sort(paths, [](const auto& left, const auto& right) { return path_depth(left) > path_depth(right); });
 
         std::vector<std::filesystem::path> generated_paths;
         generated_paths.reserve(plan.generated_files().size());
@@ -130,44 +112,33 @@ namespace kaixa {
             auto normalized = absolute_normalized(generated.path);
             if (!normalized)
                 return std::unexpected(normalized.error());
+
             if (!is_descendant(*normalized, *normalized_workspace)) {
-                return std::unexpected(error(
-                    "refusing to clean generated file outside the workspace: "
-                        + normalized->string()
-                ));
+                return std::unexpected(error("refusing to clean generated file outside the workspace: " + normalized->string()));
             }
 
             std::error_code failure;
             const bool exists = std::filesystem::exists(*normalized, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect generated file `" + normalized->string() + "`: "
-                        + failure.message()
-                ));
+                return std::unexpected(error("cannot inspect generated file `" + normalized->string() + "`: " + failure.message()));
             }
             if (!exists)
                 continue;
+
             if (!std::filesystem::is_regular_file(*normalized, failure) || failure) {
-                return std::unexpected(error(
-                    "generated clean path is not a regular file: " + normalized->string()
-                ));
+                return std::unexpected(error("generated clean path is not a regular file: " + normalized->string()));
             }
 
             std::ifstream input(*normalized, std::ios::binary);
             std::string first_line;
             if (!input || !std::getline(input, first_line)) {
-                return std::unexpected(error(
-                    "cannot inspect generated file `" + normalized->string() + "`"
-                ));
+                return std::unexpected(error("cannot inspect generated file `" + normalized->string() + "`"));
             }
             if (!first_line.empty() && first_line.back() == '\r')
                 first_line.pop_back();
 
             if (first_line != generated.marker) {
-                return std::unexpected(error(
-                    "refusing to clean `" + normalized->string()
-                        + "` because it was not generated by Kaixa"
-                ));
+                return std::unexpected(error("refusing to clean `" + normalized->string() + "` because it was not generated by Kaixa"));
             }
             generated_paths.push_back(std::move(*normalized));
         }
@@ -177,19 +148,14 @@ namespace kaixa {
             std::error_code failure;
             const bool exists = std::filesystem::exists(path, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot inspect clean path `" + path.string() + "`: "
-                        + failure.message()
-                ));
+                return std::unexpected(error("cannot inspect clean path `" + path.string() + "`: " + failure.message()));
             }
             if (!exists || dry_run)
                 continue;
 
             const std::uintmax_t removed = std::filesystem::remove_all(path, failure);
             if (failure) {
-                return std::unexpected(error(
-                    "cannot remove `" + path.string() + "`: " + failure.message()
-                ));
+                return std::unexpected(error("cannot remove `" + path.string() + "`: " + failure.message()));
             }
 
             ++report.removed_paths;
@@ -202,10 +168,7 @@ namespace kaixa {
         for (const std::filesystem::path& path: generated_paths) {
             std::error_code failure;
             if (!std::filesystem::remove(path, failure) || failure) {
-                return std::unexpected(error(
-                    "cannot remove generated file `" + path.string() + "`: "
-                        + failure.message()
-                ));
+                return std::unexpected(error("cannot remove generated file `" + path.string() + "`: " + failure.message()));
             }
 
             ++report.removed_paths;

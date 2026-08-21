@@ -29,16 +29,12 @@ namespace kaixa {
     }
 
     std::optional<PackageId> Graph::find_by_directory(const std::filesystem::path& directory) const {
-        const auto found = std::ranges::find_if(m_nodes, [&directory](const PackageNode& node) {
-            return node.directory == directory;
-        });
+        const auto found = std::ranges::find_if(m_nodes, [&directory](const PackageNode& node) { return node.directory == directory; });
         return found == m_nodes.end() ? std::nullopt : std::optional(found->id);
     }
 
     std::optional<PackageId> Graph::find_by_name(const std::string_view name) const {
-        const auto found = std::ranges::find_if(m_nodes, [name](const PackageNode& node) {
-            return node.name == name;
-        });
+        const auto found = std::ranges::find_if(m_nodes, [name](const PackageNode& node) { return node.name == name; });
         return found == m_nodes.end() ? std::nullopt : std::optional(found->id);
     }
 
@@ -65,12 +61,14 @@ namespace kaixa {
         std::function<Result<void>(PackageId)> visit = [&](const PackageId id) -> Result<void> {
             if (states[id.index] == State::complete)
                 return {};
+
             if (states[id.index] == State::visiting) {
                 std::string cycle = "dependency cycle: ";
                 const auto begin = std::ranges::find(stack, id);
                 for (auto current = begin; current != stack.end(); ++current) {
                     if (current != begin)
                         cycle += " -> ";
+
                     cycle += m_nodes[current->index].name;
                 }
                 cycle += " -> ";

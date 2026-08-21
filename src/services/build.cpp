@@ -16,20 +16,14 @@ namespace kaixa {
             const PackageNode& root = graph[id];
             Resolver* resolver = registry.find_resolver(root.resolver);
             if (!resolver) {
-                return std::unexpected(error(
-                    "resolver `" + root.resolver + "` is not installed"
-                ));
+                return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
             auto discovered = resolver->products(graph, root, environment);
             if (!discovered)
                 return std::unexpected(discovered.error());
 
-            products.insert(
-                products.end(),
-                std::make_move_iterator(discovered->begin()),
-                std::make_move_iterator(discovered->end())
-            );
+            products.insert(products.end(), std::make_move_iterator(discovered->begin()), std::make_move_iterator(discovered->end()));
         }
         return products;
     }
@@ -41,9 +35,7 @@ namespace kaixa {
         const BuildRequest& request
     ) {
         if (!request.targets.empty() && !request.packages.empty()) {
-            return std::unexpected(error(
-                "a build request cannot mix global and package-specific targets"
-            ));
+            return std::unexpected(error("a build request cannot mix global and package-specific targets"));
         }
 
         std::vector<PackageId> selected_roots;
@@ -53,19 +45,13 @@ namespace kaixa {
             selected_roots.reserve(request.packages.size());
             for (const PackageBuildRequest& package: request.packages) {
                 if (!package.build_default && package.targets.empty()) {
-                    return std::unexpected(error(
-                        "package-specific build request selects neither default nor explicit targets"
-                    ));
+                    return std::unexpected(error("package-specific build request selects neither default nor explicit targets"));
                 }
                 if (!graph.is_root(package.package)) {
-                    return std::unexpected(error(
-                        "package-specific build request selects a package outside the roots"
-                    ));
+                    return std::unexpected(error("package-specific build request selects a package outside the roots"));
                 }
                 if (std::ranges::find(selected_roots, package.package) != selected_roots.end()) {
-                    return std::unexpected(error(
-                        "package-specific build request selects the same package more than once"
-                    ));
+                    return std::unexpected(error("package-specific build request selects the same package more than once"));
                 }
 
                 selected_roots.push_back(package.package);
@@ -87,20 +73,14 @@ namespace kaixa {
                 SourceLocation location;
                 if (package.manifest)
                     location = package.manifest->location;
-                return std::unexpected(error_at(
-                    std::move(location),
-                    "resolver `" + package.resolver + "` is not installed"
-                ));
+
+                return std::unexpected(error_at(std::move(location), "resolver `" + package.resolver + "` is not installed"));
             }
 
             BuildRequest package_request = request;
             package_request.packages.clear();
             if (graph.is_root(id) && !request.packages.empty()) {
-                const auto selected = std::ranges::find(
-                    request.packages,
-                    id,
-                    &PackageBuildRequest::package
-                );
+                const auto selected = std::ranges::find(request.packages, id, &PackageBuildRequest::package);
                 package_request.targets = selected->targets;
                 package_request.build_default = selected->build_default;
             } else if (!graph.is_root(id)) {
@@ -108,13 +88,7 @@ namespace kaixa {
                 package_request.build_default = true;
             }
 
-            auto planned = resolver->plan(
-                graph,
-                package,
-                environment,
-                package_request,
-                plan
-            );
+            auto planned = resolver->plan(graph, package, environment, package_request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }
@@ -135,9 +109,7 @@ namespace kaixa {
             const PackageNode& root = graph[id];
             Resolver* resolver = registry.find_resolver(root.resolver);
             if (!resolver) {
-                return std::unexpected(error(
-                    "resolver `" + root.resolver + "` is not installed"
-                ));
+                return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
             auto planned = resolver->plan_tests(graph, root, environment, request, *plan);

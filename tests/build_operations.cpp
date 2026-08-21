@@ -27,18 +27,9 @@ KAIXA_TEST(check_is_read_only_and_reports_missing_outputs) {
         return;
 
     context.check_equal(report->generated_files.size(), std::size_t{1}, "one generated file");
-    context.check(
-        report->generated_files.front().state == kaixa::GeneratedFileState::missing,
-        "missing generated file is reported"
-    );
-    context.check(
-        report->actions.front().state == kaixa::ActionState::required,
-        "missing action output is required"
-    );
-    context.check(
-        report->actions.front().stage == kaixa::ActionStage::synchronize,
-        "action keeps its synchronization stage"
-    );
+    context.check(report->generated_files.front().state == kaixa::GeneratedFileState::missing, "missing generated file is reported");
+    context.check(report->actions.front().state == kaixa::ActionState::required, "missing action output is required");
+    context.check(report->actions.front().stage == kaixa::ActionStage::synchronize, "action keeps its synchronization stage");
     context.check(report->requires_synchronization(), "report requires synchronization");
     context.check(!std::filesystem::exists(generated.parent_path()), "check creates no directory");
 }
@@ -54,6 +45,7 @@ KAIXA_TEST(generate_writes_only_changed_files) {
     context.check(first.has_value(), "missing file is generated");
     if (!first)
         return;
+
     context.check_equal(first->written, std::size_t{1}, "one file written");
     context.check_equal(first->unchanged, std::size_t{0}, "no unchanged file initially");
     context.check_equal(first->synchronized, std::size_t{0}, "no synchronization action");
@@ -63,22 +55,17 @@ KAIXA_TEST(generate_writes_only_changed_files) {
     context.check(second.has_value(), "current file is accepted");
     if (!second)
         return;
+
     context.check_equal(second->written, std::size_t{0}, "current file is not rewritten");
     context.check_equal(second->unchanged, std::size_t{1}, "current file counted");
-    context.check(
-        std::filesystem::last_write_time(generated) == before,
-        "current file keeps its timestamp"
-    );
+    context.check(std::filesystem::last_write_time(generated) == before, "current file keeps its timestamp");
 
     plan = kaixa::BuildPlan{};
     plan.generate({generated, "second\n"});
     const auto changed = kaixa::check(plan);
     context.check(changed.has_value(), "changed file can be checked");
     if (changed) {
-        context.check(
-            changed->generated_files.front().state == kaixa::GeneratedFileState::different,
-            "different content is reported"
-        );
+        context.check(changed->generated_files.front().state == kaixa::GeneratedFileState::different, "different content is reported");
     }
 }
 
@@ -103,28 +90,17 @@ KAIXA_TEST(check_distinguishes_current_and_unknown_actions) {
     context.check(report.has_value(), "action states can be checked");
     if (!report)
         return;
-    context.check(
-        report->actions[0].state == kaixa::ActionState::current,
-        "newer regular output is current"
-    );
-    context.check(
-        report->actions[1].state == kaixa::ActionState::unknown,
-        "directory output has backend-owned state"
-    );
+
+    context.check(report->actions[0].state == kaixa::ActionState::current, "newer regular output is current");
+    context.check(report->actions[1].state == kaixa::ActionState::unknown, "directory output has backend-owned state");
     context.check(!report->requires_synchronization(), "unknown is not reported as required");
 
     std::filesystem::last_write_time(input, now + std::chrono::seconds(2));
     report = kaixa::check(plan);
     context.check(report.has_value(), "stale action can be checked");
     if (report) {
-        context.check(
-            report->actions[0].state == kaixa::ActionState::unknown,
-            "newer input leaves backend state unknown"
-        );
-        context.check(
-            !report->requires_synchronization(),
-            "unknown action is not reported as required"
-        );
+        context.check(report->actions[0].state == kaixa::ActionState::unknown, "newer input leaves backend state unknown");
+        context.check(!report->requires_synchronization(), "unknown action is not reported as required");
     }
 }
 
@@ -188,10 +164,7 @@ KAIXA_TEST(changed_generated_input_requires_synchronization) {
     const auto state = kaixa::check(plan);
     context.check(state.has_value(), "generated input plan can be checked");
     if (state) {
-        context.check(
-            state->actions.front().state == kaixa::ActionState::required,
-            "changed generated input promotes synchronization"
-        );
+        context.check(state->actions.front().state == kaixa::ActionState::required, "changed generated input promotes synchronization");
     }
 
     const auto report = kaixa::generate(plan);

@@ -9,10 +9,8 @@
 using kaixa::testing::TempDirectory;
 
 KAIXA_TEST(run_target_selection_prefers_the_package_name) {
-    const std::array targets = {
-        kaixa::RunTarget{"tools", kaixa::ProductPurpose::primary, {{"tools"}, {}}},
-        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"app"}, {}}}
-    };
+    const std::array targets = {kaixa::RunTarget{"tools", kaixa::ProductPurpose::primary, {{"tools"}, {}}},
+        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"app"}, {}}}};
 
     const auto selected = kaixa::select_run_target(targets, std::nullopt, "app");
     context.check(selected.has_value(), "package target is selected");
@@ -21,27 +19,19 @@ KAIXA_TEST(run_target_selection_prefers_the_package_name) {
 }
 
 KAIXA_TEST(run_target_selection_requires_a_choice_when_ambiguous) {
-    const std::array targets = {
-        kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
-        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}
-    };
+    const std::array targets = {kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
+        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}};
 
     const auto selected = kaixa::select_run_target(targets, std::nullopt, "workspace");
     context.check(!selected.has_value(), "ambiguous targets are rejected");
     if (!selected) {
-        context.check_contains(
-            kaixa::format_diagnostic(selected.error()),
-            "--target",
-            "ambiguity explains target selection"
-        );
+        context.check_contains(kaixa::format_diagnostic(selected.error()), "--target", "ambiguity explains target selection");
     }
 }
 
 KAIXA_TEST(run_target_selection_lists_available_targets_for_an_unknown_name) {
-    const std::array targets = {
-        kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
-        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}
-    };
+    const std::array targets = {kaixa::RunTarget{"editor", kaixa::ProductPurpose::primary, {{"editor"}, {}}},
+        kaixa::RunTarget{"game", kaixa::ProductPurpose::primary, {{"game"}, {}}}};
 
     const auto selected = kaixa::select_run_target(targets, std::string("server"), "workspace");
     context.check(!selected.has_value(), "unknown target is rejected");
@@ -53,19 +43,13 @@ KAIXA_TEST(run_target_selection_lists_available_targets_for_an_unknown_name) {
 }
 
 KAIXA_TEST(run_target_selection_rejects_duplicate_names_across_packages) {
-    const std::array targets = {
-        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"first"}, {}}},
-        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"second"}, {}}}
-    };
+    const std::array targets = {kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"first"}, {}}},
+        kaixa::RunTarget{"app", kaixa::ProductPurpose::primary, {{"second"}, {}}}};
 
     const auto selected = kaixa::select_run_target(targets, std::string("app"), {});
     context.check(!selected.has_value(), "duplicate runnable names are rejected");
     if (!selected) {
-        context.check_contains(
-            kaixa::format_diagnostic(selected.error()),
-            "--package",
-            "diagnostic explains how to narrow the package"
-        );
+        context.check_contains(kaixa::format_diagnostic(selected.error()), "--package", "diagnostic explains how to narrow the package");
     }
 }
 
@@ -150,8 +134,5 @@ KAIXA_TEST(clean_refuses_unsigned_generated_files) {
     const auto report = kaixa::clean(plan, state, root.path());
     context.check(!report.has_value(), "manual generated candidate is rejected");
     context.check(std::filesystem::exists(manual), "manual file remains");
-    context.check(
-        std::filesystem::exists(state / "build/debug/app.txt"),
-        "validation happens before state removal"
-    );
+    context.check(std::filesystem::exists(state / "build/debug/app.txt"), "validation happens before state removal");
 }

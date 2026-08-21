@@ -3,6 +3,7 @@
 
 #include <kaixa/foundation/process.hpp>
 #include <kaixa/kaixa.hpp>
+#include <kaixa/model/effective_product.hpp>
 #include <kaixa/plugin/bundle.hpp>
 
 #include <algorithm>
@@ -36,6 +37,7 @@ namespace kaixa::cli {
             const std::optional<std::string> base = environment_variable("APPDATA");
             if (base)
                 return std::filesystem::path(*base) / "Kaixa" / "config.toml";
+
 #else
             const std::optional<std::string> xdg = environment_variable("XDG_CONFIG_HOME");
             if (xdg)
@@ -44,6 +46,7 @@ namespace kaixa::cli {
             const std::optional<std::string> home = environment_variable("HOME");
             if (home)
                 return std::filesystem::path(*home) / ".config" / "kaixa" / "config.toml";
+
 #endif
             return std::nullopt;
         }
@@ -59,13 +62,13 @@ namespace kaixa::cli {
             const bool exists = std::filesystem::exists(path, failure);
             if (failure == std::make_error_code(std::errc::no_such_file_or_directory))
                 return {};
+
             if (failure) {
-                return std::unexpected(
-                    error("cannot inspect configuration file `" + path.string() + "`: " + failure.message())
-                );
+                return std::unexpected(error("cannot inspect configuration file `" + path.string() + "`: " + failure.message()));
             }
             if (!exists)
                 return {};
+
             if (!std::filesystem::is_regular_file(path, failure) || failure) {
                 return std::unexpected(error("configuration path is not a regular file: " + path.string()));
             }
@@ -98,14 +101,17 @@ namespace kaixa::cli {
             std::vector<ConfigurationSource> external_sources;
             std::vector<ProviderLayer> provider_layers;
             if (const auto user = user_configuration_path()) {
-                auto loaded =
-                    append_configuration_file(external_layers, external_sources, provider_layers, "user", *user);
+                auto loaded = append_configuration_file(external_layers, external_sources, provider_layers, "user", *user);
                 if (!loaded)
                     return std::unexpected(loaded.error());
             }
 
             auto local = append_configuration_file(
-                external_layers, external_sources, provider_layers, "local", directory / "Kaixa.user.toml"
+                external_layers,
+                external_sources,
+                provider_layers,
+                "local",
+                directory / "Kaixa.user.toml"
             );
             if (!local)
                 return std::unexpected(local.error());
@@ -136,32 +142,26 @@ namespace kaixa::cli {
             ExtensionRegistry registry = plugin::default_registry();
             auto resolved = resolve_workspace(
                 options.path,
-                ResolutionOptions{
-                    options.packages,
+                ResolutionOptions{options.packages,
                     &registry,
                     {},
                     provider_layers,
-                    features && features->settings ? &*features->settings : nullptr
-                }
+                    features && features->settings ? &*features->settings : nullptr}
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
 
             for (const ResolverArgumentOverride& override: options.resolver_arguments) {
                 if (!resolver_is_active(resolved->graph, override.resolver)) {
-                    return std::unexpected(
-                        error("resolver `" + override.resolver + "` does not participate in this build")
-                    );
+                    return std::unexpected(error("resolver `" + override.resolver + "` does not participate in this build"));
                 }
             }
 
-            return Workspace{
-                std::move(resolved->graph),
+            return Workspace{std::move(resolved->graph),
                 resolved->model.summary,
                 BuildEnvironment{directory, directory / ".kaixa", std::move(*configuration)},
                 std::move(registry),
-                std::move(sources)
-            };
+                std::move(sources)};
         }
 
         Result<PackageId> require_single_root(const Graph& graph, const std::string_view operation) {
@@ -169,33 +169,27 @@ namespace kaixa::cli {
                 return graph.roots().front();
 
             return std::unexpected(error(std::string(operation) + " requires exactly one selected package")
-                                       .add_note("select one package with `--package <name>`"));
+                    .add_note("select one package with `--package <name>`"));
         }
 
         Result<std::filesystem::path> find_workspace_directory(const std::filesystem::path& path) {
             std::error_code failure;
             std::filesystem::path directory = std::filesystem::absolute(path, failure);
             if (failure) {
-                return std::unexpected(
-                    error("cannot resolve workspace path `" + path.string() + "`: " + failure.message())
-                );
+                return std::unexpected(error("cannot resolve workspace path `" + path.string() + "`: " + failure.message()));
             }
 
             if (std::filesystem::is_regular_file(directory, failure))
                 directory = directory.parent_path();
             else if (failure) {
-                return std::unexpected(
-                    error("cannot inspect workspace path `" + directory.string() + "`: " + failure.message())
-                );
+                return std::unexpected(error("cannot inspect workspace path `" + directory.string() + "`: " + failure.message()));
             }
 
             while (!directory.empty()) {
                 const std::filesystem::path manifest = directory / "Kaixa.toml";
                 const bool found = std::filesystem::is_regular_file(manifest, failure);
                 if (failure) {
-                    return std::unexpected(
-                        error("cannot inspect workspace manifest `" + manifest.string() + "`: " + failure.message())
-                    );
+                    return std::unexpected(error("cannot inspect workspace manifest `" + manifest.string() + "`: " + failure.message()));
                 }
                 if (found)
                     return directory;
@@ -215,9 +209,7 @@ namespace kaixa::cli {
                 std::error_code failure;
                 const bool exists = std::filesystem::exists(path, failure);
                 if (failure) {
-                    return std::unexpected(
-                        error("cannot inspect clean path `" + path.string() + "`: " + failure.message())
-                    );
+                    return std::unexpected(error("cannot inspect clean path `" + path.string() + "`: " + failure.message()));
                 }
                 if (exists)
                     paths.push_back(path);
@@ -226,9 +218,7 @@ namespace kaixa::cli {
                 std::error_code failure;
                 const bool exists = std::filesystem::exists(generated.path, failure);
                 if (failure) {
-                    return std::unexpected(
-                        error("cannot inspect generated file `" + generated.path.string() + "`: " + failure.message())
-                    );
+                    return std::unexpected(error("cannot inspect generated file `" + generated.path.string() + "`: " + failure.message()));
                 }
                 if (exists)
                     paths.push_back(generated.path);
@@ -248,9 +238,12 @@ namespace kaixa::cli {
 
             std::cout << '\n';
             if (verbose && package.source) {
-                std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ')
-                          << "source: " << package.source->locator.driver
-                          << ", authority: " << package.source->authority;
+                std::cout
+                    << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ')
+                    << "source: "
+                    << package.source->locator.driver
+                    << ", authority: "
+                    << package.source->authority;
                 if (package.source->provider)
                     std::cout << ", provider: " << *package.source->provider;
 
@@ -263,6 +256,7 @@ namespace kaixa::cli {
                 std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ') << "features:";
                 for (const std::string& feature: package.active_features)
                     std::cout << ' ' << feature;
+
                 std::cout << '\n';
             }
             for (const PackageId dependency: package.dependencies)
@@ -326,10 +320,11 @@ namespace kaixa::cli {
         }
 
         void print_configuration_path(
-            const std::string_view name, const std::filesystem::path& path, const std::filesystem::path& workspace
+            const std::string_view name,
+            const std::filesystem::path& path,
+            const std::filesystem::path& workspace
         ) {
-            std::cout << name << ": " << display_path(path, workspace)
-                      << (path_exists(path) ? " [present]" : " [missing]") << '\n';
+            std::cout << name << ": " << display_path(path, workspace) << (path_exists(path) ? " [present]" : " [missing]") << '\n';
         }
 
         Result<void> print_actions(const BuildPlan& plan, const bool synchronization_only = false) {
@@ -341,6 +336,7 @@ namespace kaixa::cli {
                 const Action& action = plan.actions()[index];
                 if (synchronization_only && action.stage != ActionStage::synchronize)
                     continue;
+
                 if (action.stage == ActionStage::synchronize && state->actions[index].state == ActionState::current) {
                     continue;
                 }
@@ -364,13 +360,15 @@ namespace kaixa::cli {
             }
 
             for (const BuildOutput& output: plan.outputs()) {
-                std::cout << output.resolver << ' ' << graph[output.package].name << " -> "
-                          << display_path(output.path, workspace) << '\n';
+                std::cout << output.resolver << ' ' << graph[output.package].name << " -> " << display_path(output.path, workspace) << '\n';
             }
         }
 
         Result<void> inspect_actions(
-            const Graph& graph, const BuildPlan& plan, const std::filesystem::path& workspace, const bool verbose
+            const Graph& graph,
+            const BuildPlan& plan,
+            const std::filesystem::path& workspace,
+            const bool verbose
         ) {
             auto report = check(plan);
             if (!report)
@@ -396,6 +394,7 @@ namespace kaixa::cli {
                 std::cout << "  working directory: " << display_path(action.working_directory, workspace) << '\n';
                 for (const std::filesystem::path& input: action.inputs)
                     std::cout << "  input: " << display_path(input, workspace) << '\n';
+
                 for (const std::filesystem::path& output: action.outputs)
                     std::cout << "  output: " << display_path(output, workspace) << '\n';
             }
@@ -446,12 +445,105 @@ namespace kaixa::cli {
             }
         }
 
-        Result<void> validate_build_targets(
-            const std::span<const BuildProduct> products, const std::span<const std::string> requested
-        ) {
+        std::string_view effective_product_type_name(const EffectiveProductType type) {
+            switch (type) {
+            case EffectiveProductType::executable: return "executable";
+            case EffectiveProductType::static_library: return "static-library";
+            case EffectiveProductType::shared_library: return "shared-library";
+            case EffectiveProductType::interface_library: return "interface-library";
+            }
+            return "product";
+        }
+
+        std::string_view associated_target_kind_name(const PackageTargetKind kind) {
+            switch (kind) {
+            case PackageTargetKind::test: return "test";
+            case PackageTargetKind::example: return "example";
+            case PackageTargetKind::benchmark: return "benchmark";
+            }
+            return "target";
+        }
+
+        Result<void> inspect_effective_targets(const Graph& graph, const BuildEnvironment& environment, const bool verbose) {
+            bool any = false;
+            for (const PackageNode& node: graph.nodes()) {
+                if (!node.manifest)
+                    continue;
+
+                auto package = realize_package(graph, node.id, {environment.configuration.profile, host_target_os()});
+                if (!package)
+                    return std::unexpected(package.error());
+
+                if (package->products.empty() && package->targets.empty())
+                    continue;
+
+                any = true;
+                std::cout << node.name << ":\n";
+                for (const EffectiveProduct& product: package->products) {
+                    std::cout << "  " << effective_product_type_name(product.type) << ' ' << product.name << '\n';
+                    if (!verbose)
+                        continue;
+
+                    for (const std::filesystem::path& source: product.sources.files)
+                        std::cout << "    source: " << source.generic_string() << '\n';
+
+                    for (const std::filesystem::path& source: product.dependency_source_files)
+                        std::cout << "    dependency-source: " << source.generic_string() << '\n';
+
+                    for (const std::filesystem::path& header: product.public_headers.files)
+                        std::cout << "    public-header: " << header.generic_string() << '\n';
+
+                    for (const TableEntry& definition: product.definitions)
+                        std::cout << "    define: " << definition.key << '\n';
+
+                    for (const TableEntry& definition: product.public_definitions)
+                        std::cout << "    public-define: " << definition.key << '\n';
+
+                    for (const EffectiveResource& resource: product.resources)
+                        std::cout
+                            << "    resource: "
+                            << resource.source.generic_string()
+                            << " -> "
+                            << resource.destination.generic_string()
+
+                            << '\n';
+                }
+                for (const EffectiveTarget& target: package->targets) {
+                    std::cout << "  " << associated_target_kind_name(target.target.kind) << ' ' << target.target.name.value_or("<unnamed>");
+                    if (target.availability == TargetAvailability::skipped)
+                        std::cout << " [skipped]";
+
+                    std::cout << '\n';
+                    for (const std::string& reason: target.skip_reasons)
+                        std::cout << "    reason: " << reason << '\n';
+
+                    if (verbose) {
+                        for (const std::filesystem::path& source: target.target.sources.files)
+                            std::cout << "    source: " << source.generic_string() << '\n';
+
+                        if (target.target.category)
+                            std::cout << "    category: " << *target.target.category << '\n';
+
+                        for (const EffectiveResource& resource: target.resources)
+                            std::cout
+                                << "    resource: "
+                                << resource.source.generic_string()
+                                << " -> "
+
+                                << resource.destination.generic_string()
+                                << '\n';
+                    }
+                }
+            }
+            if (!any)
+                std::cout << "no products or associated targets\n";
+
+            return {};
+        }
+
+        Result<void> validate_build_targets(const std::span<const BuildProduct> products, const std::span<const std::string> requested) {
             for (const std::string& name: requested) {
-                const std::size_t matches =
-                    static_cast<std::size_t>(std::ranges::count(products, name, &BuildProduct::name));
+                const std::size_t matches = static_cast<std::size_t>(std::ranges::count(products, name, &BuildProduct::name));
                 if (matches == 0) {
                     std::string available;
                     for (const BuildProduct& product: products) {
@@ -468,10 +560,8 @@ namespace kaixa::cli {
                     return std::unexpected(std::move(diagnostic));
                 }
                 if (matches > 1) {
-                    return std::unexpected(
-                        error("build target `" + name + "` is provided by multiple selected packages")
-                            .add_note("narrow the operation with `--package <name>`")
-                    );
+                    return std::unexpected(error("build target `" + name + "` is provided by multiple selected packages")
+                            .add_note("narrow the operation with `--package <name>`"));
                 }
             }
             return {};
@@ -519,8 +609,7 @@ namespace kaixa::cli {
                 const auto named = std::ranges::find(products, name, &BuildProduct::name);
                 if (named == products.end()) {
                     Diagnostic diagnostic = error(
-                        std::string(option) + " selected unknown " + std::string(product_purpose_name(purpose)) + " `"
-                        + name + "`"
+                        std::string(option) + " selected unknown " + std::string(product_purpose_name(purpose)) + " `" + name + "`"
                     );
                     std::string available;
                     for (const BuildProduct& candidate: products) {
@@ -535,10 +624,7 @@ namespace kaixa::cli {
                     if (!available.empty()) {
                         return std::unexpected(
                             std::move(diagnostic)
-                                .add_note(
-                                    "available " + std::string(product_purpose_name(purpose))
-                                    + " products: " + available
-                                )
+                                .add_note("available " + std::string(product_purpose_name(purpose)) + " products: " + available)
                         );
                     }
 
@@ -549,21 +635,24 @@ namespace kaixa::cli {
                 });
                 if (product == products.end()) {
                     return std::unexpected(error(
-                        "`" + name + "` has purpose `" + std::string(product_purpose_name(named->purpose)) + "`, not `"
-                        + std::string(product_purpose_name(purpose)) + "`"
+                        "`"
+                        + name
+                        + "` has purpose `"
+                        + std::string(product_purpose_name(named->purpose))
+                        + "`, not `"
+                        + std::string(product_purpose_name(purpose))
+                        + "`"
                     ));
                 }
 
-                const std::size_t matches =
-                    static_cast<std::size_t>(std::ranges::count_if(products, [&](const BuildProduct& candidate) {
-                        return candidate.name == name && candidate.purpose == purpose;
-                    }));
+                const std::size_t matches = static_cast<std::size_t>(std::ranges::count_if(products, [&](const BuildProduct& candidate) {
+                    return candidate.name == name && candidate.purpose == purpose;
+                }));
                 if (matches > 1) {
-                    return std::unexpected(error(
-                                               std::string(option) + " selected `" + name
-                                               + "`, which is provided by multiple selected packages"
-                    )
-                                               .add_note("narrow the operation with `--package <name>`"));
+                    return std::unexpected(
+                        error(std::string(option) + " selected `" + name + "`, which is provided by multiple selected packages")
+                            .add_note("narrow the operation with `--package <name>`")
+                    );
                 }
 
                 append_product_target(*product, output);
@@ -571,8 +660,10 @@ namespace kaixa::cli {
             return {};
         }
 
-        Result<ResolvedProductSelection>
-        resolve_product_selection(const std::span<const BuildProduct> products, const BuildCommand& command) {
+        Result<ResolvedProductSelection> resolve_product_selection(
+            const std::span<const BuildProduct> products,
+            const BuildCommand& command
+        ) {
             ResolvedProductSelection result;
             if (!command.targets.empty()) {
                 auto valid = validate_build_targets(products, command.targets);
@@ -617,19 +708,25 @@ namespace kaixa::cli {
                 append_products(products, ProductPurpose::benchmark, result.packages);
 
             auto examples = append_named_products(
-                products, command.selection.examples, ProductPurpose::example, "--example", result.packages
+                products,
+                command.selection.examples,
+                ProductPurpose::example,
+                "--example",
+                result.packages
             );
             if (!examples)
                 return std::unexpected(examples.error());
 
-            auto tests = append_named_products(
-                products, command.selection.tests, ProductPurpose::test, "--test", result.packages
-            );
+            auto tests = append_named_products(products, command.selection.tests, ProductPurpose::test, "--test", result.packages);
             if (!tests)
                 return std::unexpected(tests.error());
 
             auto benchmarks = append_named_products(
-                products, command.selection.benchmarks, ProductPurpose::benchmark, "--bench", result.packages
+                products,
+                command.selection.benchmarks,
+                ProductPurpose::benchmark,
+                "--bench",
+                result.packages
             );
             if (!benchmarks)
                 return std::unexpected(benchmarks.error());
@@ -660,11 +757,10 @@ namespace kaixa::cli {
                     else
                         expected = "kaixa run --target " + *requested;
 
-                    return std::unexpected(error(
-                                               "`" + *requested + "` is a "
-                                               + std::string(product_purpose_name(product->purpose)) + " product"
-                    )
-                                               .add_note("select it with `" + expected + "`"));
+                    return std::unexpected(
+                        error("`" + *requested + "` is a " + std::string(product_purpose_name(product->purpose)) + " product")
+                            .add_note("select it with `" + expected + "`")
+                    );
                 }
             }
 
@@ -722,14 +818,21 @@ namespace kaixa::cli {
                     return fail(workspace.error());
 
                 if (command.verbose) {
-                    std::cout << "manifest tree: " << workspace->manifest_tree.documents << " documents, "
-                              << workspace->manifest_tree.packages << " packages, "
-                              << workspace->manifest_tree.package_sets << " package sets, "
-                              << workspace->manifest_tree.target_documents << " target documents\n";
+                    std::cout
+                        << "manifest tree: "
+                        << workspace->manifest_tree.documents
+                        << " documents, "
+                        << workspace->manifest_tree.packages
+                        << " packages, "
+                        << workspace->manifest_tree.package_sets
+                        << " package sets, "
+                        << workspace->manifest_tree.target_documents
+                        << " target documents\n";
                 }
 
                 for (const PackageId root: workspace->graph.roots())
                     print_package(workspace->graph, root, 0, command.verbose);
+
                 return 0;
             }
 
@@ -750,6 +853,11 @@ namespace kaixa::cli {
                 return 0;
             }
 
+            if (command.mode == InspectMode::targets) {
+                auto inspected = inspect_effective_targets(workspace->graph, workspace->environment, command.verbose);
+                return inspected ? 0 : fail(inspected.error());
+            }
+
             auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
             if (!plan)
                 return fail(plan.error());
@@ -759,17 +867,16 @@ namespace kaixa::cli {
                 return 0;
             }
             if (command.mode == InspectMode::actions) {
-                auto printed =
-                    inspect_actions(workspace->graph, *plan, workspace->environment.workspace, command.verbose);
+                auto printed = inspect_actions(workspace->graph, *plan, workspace->environment.workspace, command.verbose);
                 return printed ? 0 : fail(printed.error());
             }
 
             auto state = check(*plan);
             if (!state)
                 return fail(state.error());
+
             if (state->requires_synchronization()) {
-                return fail(error("target information is not synchronized")
-                                .add_note("run `kaixa generate` before inspecting targets"));
+                return fail(error("target information is not synchronized").add_note("run `kaixa generate` before inspecting targets"));
             }
 
             auto products = discover_products(workspace->graph, workspace->registry, workspace->environment);
@@ -797,8 +904,12 @@ namespace kaixa::cli {
                 if (file.state == GeneratedFileState::current)
                     continue;
 
-                std::cout << "generated file: " << state_name(file.state) << ' '
-                          << display_path(file.path, workspace->environment.workspace) << '\n';
+                std::cout
+                    << "generated file: "
+                    << state_name(file.state)
+                    << ' '
+                    << display_path(file.path, workspace->environment.workspace)
+                    << '\n';
             }
             for (const ActionCheck& action: report->actions) {
                 if (action.stage == ActionStage::synchronize && action.state == ActionState::required)
@@ -831,8 +942,14 @@ namespace kaixa::cli {
             if (!report)
                 return fail(report.error());
 
-            std::cout << "workspace synchronized: " << report->written << " file(s) written, " << report->unchanged
-                      << " unchanged, " << report->synchronized << " action(s) run\n";
+            std::cout
+                << "workspace synchronized: "
+                << report->written
+                << " file(s) written, "
+                << report->unchanged
+                << " unchanged, "
+                << report->synchronized
+                << " action(s) run\n";
             return 0;
         }
 
@@ -1009,8 +1126,7 @@ namespace kaixa::cli {
             if (!targets)
                 return fail(targets.error());
 
-            const ProductPurpose purpose =
-                command.examples || command.example ? ProductPurpose::example : ProductPurpose::primary;
+            const ProductPurpose purpose = command.examples || command.example ? ProductPurpose::example : ProductPurpose::primary;
             const std::optional<std::string>& requested = command.example ? command.example : command.target;
             auto category = select_runnable_category(*targets, purpose, requested);
             if (!category)
@@ -1018,8 +1134,7 @@ namespace kaixa::cli {
 
             if (command.list) {
                 if (category->empty()) {
-                    std::cout
-                        << (purpose == ProductPurpose::example ? "no runnable examples\n" : "no runnable targets\n");
+                    std::cout << (purpose == ProductPurpose::example ? "no runnable examples\n" : "no runnable targets\n");
                     return 0;
                 }
 
@@ -1064,8 +1179,7 @@ namespace kaixa::cli {
                     if (!workspace)
                         return fail(workspace.error());
 
-                    auto generated =
-                        plan_clean(workspace->graph, workspace->registry, workspace->environment, CleanRequest{true});
+                    auto generated = plan_clean(workspace->graph, workspace->registry, workspace->environment, CleanRequest{true});
                     if (!generated)
                         return fail(generated.error());
 
@@ -1080,7 +1194,10 @@ namespace kaixa::cli {
                 workspace_directory = workspace->environment.workspace;
                 state_root = workspace->environment.state_root;
                 auto planned = plan_clean(
-                    workspace->graph, workspace->registry, workspace->environment, CleanRequest{command.generated_files}
+                    workspace->graph,
+                    workspace->registry,
+                    workspace->environment,
+                    CleanRequest{command.generated_files}
                 );
                 if (!planned)
                     return fail(planned.error());
@@ -1102,8 +1219,7 @@ namespace kaixa::cli {
             }
 
             for (const std::filesystem::path& path: *existing) {
-                std::cout << (command.dry_run ? "would remove: " : "removed: ")
-                          << display_path(path, workspace_directory) << '\n';
+                std::cout << (command.dry_run ? "would remove: " : "removed: ") << display_path(path, workspace_directory) << '\n';
             }
             if (!command.dry_run) {
                 std::cout << "removed " << report->removed_entries << " filesystem entry(s)\n";
@@ -1119,7 +1235,9 @@ namespace kaixa::cli {
                 return fail(workspace.error());
 
             print_configuration_list(
-                workspace->configuration_sources, workspace->environment.configuration, workspace->environment.workspace
+                workspace->configuration_sources,
+                workspace->environment.configuration,
+                workspace->environment.workspace
             );
             return 0;
         }

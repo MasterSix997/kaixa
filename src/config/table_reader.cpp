@@ -5,17 +5,14 @@
 namespace kaixa {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(
-                std::move(location),
-                "expected " + std::string(expected) + ", found "
-                    + std::string(value_kind_name(found))
-            );
+            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
         }
     }
 
     TableReader::TableReader(const Value& value, std::string path)
-        : m_value(&value), m_path(std::move(path)), m_consumed(value.size(), false) {
-    }
+        : m_value(&value)
+        , m_path(std::move(path))
+        , m_consumed(value.size(), false) {}
 
     Result<TableReader> TableReader::bind(const Value& value, std::string path) {
         if (!value.is_table()) {
@@ -57,9 +54,11 @@ namespace kaixa {
         const Value* value = take(key);
         if (!value)
             return std::nullopt;
+
         const std::string* text = value->as_string();
         if (!text)
             return std::unexpected(wrong_kind(location_of(key), "a string", value->kind()));
+
         return *text;
     }
 
@@ -67,8 +66,10 @@ namespace kaixa {
         const auto value = optional_string(key);
         if (!value)
             return std::unexpected(value.error());
+
         if (!*value)
             return std::unexpected(error_at(location_of(key), "missing required key"));
+
         return **value;
     }
 
@@ -76,6 +77,7 @@ namespace kaixa {
         const Value* value = take(key);
         if (!value)
             return std::unexpected(error_at(location_of(key), "missing required key"));
+
         return bind(*value, join_config_path(m_path, key));
     }
 
@@ -83,9 +85,11 @@ namespace kaixa {
         const Value* value = take(key);
         if (!value)
             return std::nullopt;
+
         auto reader = bind(*value, join_config_path(m_path, key));
         if (!reader)
             return std::unexpected(reader.error());
+
         return std::optional<TableReader>(std::move(*reader));
     }
 
@@ -108,6 +112,7 @@ namespace kaixa {
 
         if (failure)
             return std::unexpected(std::move(*failure));
+
         return {};
     }
 }

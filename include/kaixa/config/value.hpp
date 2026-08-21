@@ -2,9 +2,9 @@
 
 #include <kaixa/foundation/diagnostic.hpp>
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <concepts>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -37,12 +37,12 @@ namespace kaixa {
         Value(std::string value);
         Value(std::string_view value);
 
-        template<typename Integer>
+        template <typename Integer>
             requires std::integral<Integer>
-                && (!std::same_as<std::remove_cv_t<Integer>, bool>)
-                && (!std::same_as<std::remove_cv_t<Integer>, std::int64_t>)
-        Value(const Integer value) : Value(static_cast<std::int64_t>(value)) {
-        }
+            && (!std::same_as<std::remove_cv_t<Integer>, bool>)
+            && (!std::same_as<std::remove_cv_t<Integer>, std::int64_t>)
+        Value(const Integer value)
+            : Value(static_cast<std::int64_t>(value)) {}
 
         ~Value();
         Value(const Value& other);
@@ -55,10 +55,7 @@ namespace kaixa {
         [[nodiscard]] static Value floating(double value, SourceLocation location = {});
         [[nodiscard]] static Value string(std::string value, SourceLocation location = {});
         [[nodiscard]] static Value array(std::vector<Value> values, SourceLocation location = {});
-        [[nodiscard]] static Value table(
-            std::vector<TableEntry> entries,
-            SourceLocation location = {}
-        );
+        [[nodiscard]] static Value table(std::vector<TableEntry> entries, SourceLocation location = {});
 
         [[nodiscard]] ValueKind kind() const noexcept;
         [[nodiscard]] const SourceLocation& location() const noexcept { return m_location; }
@@ -74,15 +71,7 @@ namespace kaixa {
         [[nodiscard]] std::size_t size() const noexcept;
 
     private:
-        using Storage = std::variant<
-            std::monostate,
-            bool,
-            std::int64_t,
-            double,
-            std::string,
-            std::vector<Value>,
-            std::vector<TableEntry>
-        >;
+        using Storage = std::variant<std::monostate, bool, std::int64_t, double, std::string, std::vector<Value>, std::vector<TableEntry>>;
 
         Value(Storage storage, SourceLocation location);
 

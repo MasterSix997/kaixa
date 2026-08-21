@@ -53,20 +53,22 @@ namespace kaixa {
         }
 
         bool valid_identifier_character(const char character) {
-            return (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z')
-                   || (character >= '0' && character <= '9') || character == '-';
+            return (character >= 'a' && character <= 'z')
+                || (character >= 'A' && character <= 'Z')
+                || (character >= '0' && character <= '9')
+                || character == '-';
         }
 
         Result<std::uint64_t> parse_number(
-            const std::string_view text, const SourceLocation& location, const bool reject_leading_zero = true
+            const std::string_view text,
+            const SourceLocation& location,
+            const bool reject_leading_zero = true
         ) {
             if (text.empty())
                 return std::unexpected(error_at(location, "version number cannot be empty"));
 
             if (reject_leading_zero && text.size() > 1 && text.front() == '0') {
-                return std::unexpected(
-                    error_at(location, "version number `" + std::string(text) + "` cannot contain a leading zero")
-                );
+                return std::unexpected(error_at(location, "version number `" + std::string(text) + "` cannot contain a leading zero"));
             }
 
             std::uint64_t result = 0;
@@ -77,21 +79,21 @@ namespace kaixa {
             return result;
         }
 
-        Result<std::vector<PrereleaseIdentifier>>
-        parse_identifiers(const std::string_view text, const SourceLocation& location, const bool prerelease) {
+        Result<std::vector<PrereleaseIdentifier>> parse_identifiers(
+            const std::string_view text,
+            const SourceLocation& location,
+            const bool prerelease
+        ) {
             std::vector<PrereleaseIdentifier> result;
             std::size_t begin = 0;
             while (begin <= text.size()) {
                 const std::size_t end = text.find('.', begin);
-                const std::string_view identifier =
-                    text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin);
+                const std::string_view identifier = text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin);
                 if (identifier.empty())
                     return std::unexpected(error_at(location, "version identifiers cannot be empty"));
 
                 if (!std::ranges::all_of(identifier, valid_identifier_character)) {
-                    return std::unexpected(
-                        error_at(location, "invalid version identifier `" + std::string(identifier) + "`")
-                    );
+                    return std::unexpected(error_at(location, "invalid version identifier `" + std::string(identifier) + "`"));
                 }
 
                 PrereleaseIdentifier parsed{std::string(identifier), std::nullopt};
@@ -133,13 +135,13 @@ namespace kaixa {
             const std::size_t prerelease_separator = without_build.find('-');
             const std::string_view core = without_build.substr(0, prerelease_separator);
             const std::string_view prerelease = prerelease_separator == std::string_view::npos
-                                                    ? std::string_view{}
-                                                    : without_build.substr(prerelease_separator + 1);
+                ? std::string_view{}
+                : without_build.substr(prerelease_separator + 1);
 
             const std::size_t first_dot = core.find('.');
-            const std::size_t second_dot =
-                first_dot == std::string_view::npos ? std::string_view::npos : core.find('.', first_dot + 1);
-            if (first_dot == std::string_view::npos || second_dot == std::string_view::npos
+            const std::size_t second_dot = first_dot == std::string_view::npos ? std::string_view::npos : core.find('.', first_dot + 1);
+            if (first_dot == std::string_view::npos
+                || second_dot == std::string_view::npos
                 || core.find('.', second_dot + 1) != std::string_view::npos) {
                 return std::unexpected(error_at(location, "versions must use `major.minor.patch`"));
             }
@@ -149,8 +151,10 @@ namespace kaixa {
             auto patch = parse_number(core.substr(second_dot + 1), location);
             if (!major)
                 return std::unexpected(major.error());
+
             if (!minor)
                 return std::unexpected(minor.error());
+
             if (!patch)
                 return std::unexpected(patch.error());
 
@@ -167,9 +171,7 @@ namespace kaixa {
             return result;
         }
 
-        int compare_identifiers(
-            const std::vector<PrereleaseIdentifier>& left, const std::vector<PrereleaseIdentifier>& right
-        ) {
+        int compare_identifiers(const std::vector<PrereleaseIdentifier>& left, const std::vector<PrereleaseIdentifier>& right) {
             if (left.empty() || right.empty()) {
                 if (left.empty() == right.empty())
                     return 0;
@@ -184,6 +186,7 @@ namespace kaixa {
                 if (a.number && b.number) {
                     if (*a.number != *b.number)
                         return *a.number < *b.number ? -1 : 1;
+
                 } else if (a.number || b.number) {
                     return a.number ? -1 : 1;
                 } else if (a.text != b.text) {
@@ -199,8 +202,10 @@ namespace kaixa {
         int compare(const SemanticVersion& left, const SemanticVersion& right) {
             if (left.major != right.major)
                 return left.major < right.major ? -1 : 1;
+
             if (left.minor != right.minor)
                 return left.minor < right.minor ? -1 : 1;
+
             if (left.patch != right.patch)
                 return left.patch < right.patch ? -1 : 1;
 
@@ -257,17 +262,17 @@ namespace kaixa {
 
             const std::size_t prerelease_separator = text.find('-');
             const std::string_view core = text.substr(0, prerelease_separator);
-            const std::string_view prerelease = prerelease_separator == std::string_view::npos
-                                                    ? std::string_view{}
-                                                    : text.substr(prerelease_separator + 1);
+            std::string_view prerelease;
+            if (prerelease_separator == std::string_view::npos)
+                prerelease = {};
+            else
+                prerelease = text.substr(prerelease_separator + 1);
 
             std::vector<std::string_view> components;
             std::size_t begin = 0;
             while (begin <= core.size()) {
                 const std::size_t end = core.find('.', begin);
-                components.push_back(
-                    core.substr(begin, end == std::string_view::npos ? core.size() - begin : end - begin)
-                );
+                components.push_back(core.substr(begin, end == std::string_view::npos ? core.size() - begin : end - begin));
                 if (end == std::string_view::npos)
                     break;
 
@@ -331,10 +336,10 @@ namespace kaixa {
             return result;
         }
 
-        Result<std::vector<RequirementTerm>>
-        parse_requirement(const std::string_view text, const SourceLocation& location) {
+        Result<std::vector<RequirementTerm>> parse_requirement(const std::string_view text, const SourceLocation& location) {
             if (trim(text).empty())
                 return std::unexpected(error_at(location, "version requirement cannot be empty"));
+
             if (text.contains("||"))
                 return std::unexpected(error_at(location, "OR version requirements are not supported"));
 
@@ -343,7 +348,8 @@ namespace kaixa {
             while (begin <= text.size()) {
                 const std::size_t end = text.find(',', begin);
                 auto term = parse_requirement_term(
-                    text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin), location
+                    text.substr(begin, end == std::string_view::npos ? text.size() - begin : end - begin),
+                    location
                 );
                 if (!term)
                     return std::unexpected(term.error());
@@ -364,8 +370,10 @@ namespace kaixa {
         SemanticVersion compatible_upper(const RequirementTerm& term) {
             if (!term.minor)
                 return {term.major + 1, 0, 0, {}};
+
             if (term.major > 0)
                 return {term.major + 1, 0, 0, {}};
+
             if (!term.patch || *term.minor > 0)
                 return {0, *term.minor + 1, 0, {}};
 
@@ -390,21 +398,24 @@ namespace kaixa {
             case RequirementKind::equal:
                 if (!term.minor)
                     return version.major == term.major;
+
                 if (!term.patch)
                     return version.major == term.major && version.minor == *term.minor;
+
                 return relation == 0;
             case RequirementKind::greater: return relation > 0;
             case RequirementKind::greater_equal: return relation >= 0;
             case RequirementKind::less: return relation < 0;
             case RequirementKind::less_equal: return relation <= 0;
             case RequirementKind::compatible: return relation >= 0 && compare(version, compatible_upper(term)) < 0;
-            case RequirementKind::patch_compatible:
-                return relation >= 0 && compare(version, patch_compatible_upper(term)) < 0;
+            case RequirementKind::patch_compatible: return relation >= 0 && compare(version, patch_compatible_upper(term)) < 0;
             case RequirementKind::wildcard:
                 if (!term.minor)
                     return version.major == term.major;
+
                 if (!term.patch)
                     return version.major == term.major && version.minor == *term.minor;
+
                 return relation == 0;
             }
             return false;
@@ -443,13 +454,13 @@ namespace kaixa {
             return false;
 
         const bool prerelease_allowed = parsed_version->prerelease.empty()
-                                        || std::ranges::any_of(*parsed_requirement, [&](const RequirementTerm& term) {
-                                               return !term.prerelease.empty() && term.major == parsed_version->major
-                                                      && term.minor == parsed_version->minor
-                                                      && term.patch == parsed_version->patch;
-                                           });
-        return prerelease_allowed && std::ranges::all_of(*parsed_requirement, [&](const RequirementTerm& term) {
-                   return matches_term(term, *parsed_version);
+            || std::ranges::any_of(*parsed_requirement, [&](const RequirementTerm& term) {
+                   return !term.prerelease.empty()
+                       && term.major == parsed_version->major
+                       && term.minor == parsed_version->minor
+                       && term.patch == parsed_version->patch;
                });
+        return prerelease_allowed
+            && std::ranges::all_of(*parsed_requirement, [&](const RequirementTerm& term) { return matches_term(term, *parsed_version); });
     }
 }

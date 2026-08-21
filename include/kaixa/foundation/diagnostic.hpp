@@ -23,8 +23,7 @@ namespace kaixa {
         [[nodiscard]] Diagnostic&& add_note(std::string note) &&;
     };
 
-    template<typename T>
-    using Result = std::expected<T, Diagnostic>;
+    template <typename T> using Result = std::expected<T, Diagnostic>;
 
     [[nodiscard]] Diagnostic error(std::string message);
     [[nodiscard]] Diagnostic error_at(SourceLocation location, std::string message);

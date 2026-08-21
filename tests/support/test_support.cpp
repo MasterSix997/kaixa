@@ -15,26 +15,25 @@ namespace kaixa::testing {
             static std::atomic<unsigned> counter{0};
             const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
 
-            return "kaixa-test-" + std::string(label) + '-'
-                + std::to_string(static_cast<unsigned long long>(ticks)) + '-'
+            return "kaixa-test-"
+                + std::string(label)
+                + '-'
+                + std::to_string(static_cast<unsigned long long>(ticks))
+                + '-'
                 + std::to_string(counter.fetch_add(1));
         }
     }
 
     TestContext::TestContext(const std::string_view name, std::ostream& out)
-        : m_name(name), m_out(&out) {
-    }
+        : m_name(name)
+        , m_out(&out) {}
 
     void TestContext::check(const bool condition, const std::string_view what) {
         if (!condition)
             fail(what);
     }
 
-    void TestContext::check_contains(
-        const std::string_view haystack,
-        const std::string_view needle,
-        const std::string_view what
-    ) {
+    void TestContext::check_contains(const std::string_view haystack, const std::string_view needle, const std::string_view what) {
         if (haystack.contains(needle))
             return;
 
@@ -111,6 +110,7 @@ namespace kaixa::testing {
         const int exit_code = argc >= 3 ? std::atoi(argv[2]) : 0;
         for (int index = 3; index < argc; ++index)
             std::cout << argv[index] << '\n';
+
         return exit_code;
     }
 
@@ -133,19 +133,14 @@ namespace kaixa::testing {
 
     void TempDirectory::copy_from(const std::filesystem::path& source) const {
         std::error_code failure;
-        for (std::filesystem::recursive_directory_iterator iterator(source, failure), end;
-             iterator != end;
-             iterator.increment(failure)) {
+        for (std::filesystem::recursive_directory_iterator iterator(source, failure), end; iterator != end; iterator.increment(failure)) {
             if (failure)
                 throw std::runtime_error("cannot copy test fixture: " + failure.message());
 
-            const std::filesystem::path relative = std::filesystem::relative(
-                iterator->path(),
-                source,
-                failure
-            );
+            const std::filesystem::path relative = std::filesystem::relative(iterator->path(), source, failure);
             if (failure)
                 throw std::runtime_error("cannot resolve test fixture path: " + failure.message());
+
             const std::filesystem::path destination = m_path / relative;
 
             if (iterator->is_directory(failure)) {
@@ -153,12 +148,7 @@ namespace kaixa::testing {
             } else if (iterator->is_regular_file(failure)) {
                 std::filesystem::create_directories(destination.parent_path(), failure);
                 if (!failure) {
-                    std::filesystem::copy_file(
-                        iterator->path(),
-                        destination,
-                        std::filesystem::copy_options::overwrite_existing,
-                        failure
-                    );
+                    std::filesystem::copy_file(iterator->path(), destination, std::filesystem::copy_options::overwrite_existing, failure);
                 }
             }
             if (failure)
@@ -184,6 +174,7 @@ namespace kaixa::testing {
         std::ofstream file(target, std::ios::binary | std::ios::trunc);
         if (!file)
             throw std::runtime_error("cannot open fixture `" + target.string() + "`");
+
         file.write(content.data(), static_cast<std::streamsize>(content.size()));
         if (!file)
             throw std::runtime_error("cannot write fixture `" + target.string() + "`");
