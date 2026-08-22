@@ -20,6 +20,7 @@
 #include <kaixa/services/workflow_service.hpp>
 #include <kaixa/workspace/loader.hpp>
 #include <kaixa/workspace/package_index.hpp>
+#include <kaixa/workspace/resolution_lock.hpp>
 
 #include <string_view>
 

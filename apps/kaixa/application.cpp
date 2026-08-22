@@ -173,7 +173,8 @@ namespace kaixa::cli {
                     {},
                     provider_layers,
                     features && features->settings ? &*features->settings : nullptr,
-                    PolicyContext{configuration->profile, host_target_os()}}
+                    PolicyContext{configuration->profile, host_target_os()},
+                    options.lock_mode}
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
@@ -270,12 +271,13 @@ namespace kaixa::cli {
 
             std::cout << '\n';
             if (verbose && package.source) {
-                std::cout
-                    << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ')
-                    << "source: "
-                    << package.source->locator.driver
-                    << ", authority: "
-                    << package.source->authority;
+                std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ') << "source: ";
+                if (package.source->locator)
+                    std::cout << package.source->locator->driver;
+                else
+                    std::cout << "provider descriptor";
+
+                std::cout << ", authority: " << package.source->authority;
                 if (package.source->provider)
                     std::cout << ", provider: " << *package.source->provider;
 
@@ -375,7 +377,11 @@ namespace kaixa::cli {
                     continue;
                 }
 
-                std::cout << action.description << ": " << format_command(action.argv) << '\n';
+                // Keep the normal command output at the Kaixa action level.  The
+                // concrete argv is available from `inspect actions --verbose`;
+                // printing it here made resolver, CMake and shell diagnostics
+                // appear as one confusing stream.
+                std::cout << action.description << '\n';
             }
 
             std::cout.flush();

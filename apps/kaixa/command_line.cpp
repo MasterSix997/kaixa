@@ -107,6 +107,16 @@ namespace kaixa::cli {
                 return true;
             }
 
+            if (option == "--locked" || option == "--frozen") {
+                parser.take();
+                if (options.lock_mode != LockMode::update) {
+                    return std::unexpected(ParseError{"only one of `--locked` and `--frozen` may be specified"});
+                }
+
+                options.lock_mode = option == "--locked" ? LockMode::locked : LockMode::frozen;
+                return true;
+            }
+
             if (option != "--for")
                 return false;
 
@@ -730,6 +740,7 @@ namespace kaixa::cli {
             << version()
             << "\n\n"
             << "Usage:\n"
+            << "  kaixa --version\n"
             << "  kaixa inspect [packages|targets|outputs|actions|config] [--path path]\n"
             << "        [--verbose] [--profile name] [--config name]...\n\n"
 
@@ -760,10 +771,11 @@ namespace kaixa::cli {
             << "  kaixa config list [--path path]\n"
             << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
             << "        [--config name]... [--for resolver[.scope] <arguments...>]...\n"
-            << "  kaixa config path [--path path]\n"
+            << "  kaixa config path [--path path]\n\n"
+
             << "  Build commands accept --no-default-configs to replace configured defaults.\n"
             << "  Package-resolving commands accept --package name more than once.\n"
-            << "  kaixa --version\n";
+            << "  Use --locked to require Kaixa.lock or --frozen to also forbid source synchronization.";
     }
 
     std::expected<Command, ParseError> parse_command_line(const std::span<const std::string_view> arguments) {

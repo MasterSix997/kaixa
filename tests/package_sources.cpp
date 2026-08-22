@@ -135,7 +135,9 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
         if (origin) {
             context.check(!origin->provider.has_value(), "direct source has no provider instance");
             context.check_equal(origin->authority, std::string("direct"), "direct authority");
-            context.check_equal(origin->locator.driver, std::string("test_source"), "source driver");
+            context.check(origin->locator.has_value(), "source locator is retained");
+            if (origin->locator)
+                context.check_equal(origin->locator->driver, std::string("test_source"), "source driver");
         }
     }
 }
@@ -181,7 +183,9 @@ KAIXA_TEST(path_dependency_opens_a_local_package_set_directly) {
     if (!source)
         return;
 
-    context.check_equal(source->locator.driver, std::string("path"), "path remains observable as a path source");
+    context.check(source->locator.has_value(), "path source locator is retained");
+    if (source->locator)
+        context.check_equal(source->locator->driver, std::string("path"), "path remains observable as a path source");
 }
 
 KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
@@ -235,7 +239,9 @@ KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
         return;
 
     context.check_equal(engine.source->provider.value_or(""), std::string("local-engine"), "configured provider name");
-    context.check_equal(engine.source->locator.driver, std::string("path"), "configured source driver");
+    context.check(engine.source->locator.has_value(), "configured source locator is retained");
+    if (engine.source->locator)
+        context.check_equal(engine.source->locator->driver, std::string("path"), "configured source driver");
 }
 
 KAIXA_TEST(provider_configuration_rejects_an_unknown_driver) {

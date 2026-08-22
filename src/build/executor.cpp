@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <string_view>
 #include <system_error>
 
 namespace kaixa {
@@ -95,14 +96,34 @@ namespace kaixa {
         }
 
         Result<void> execute_action(const Action& action) {
-            const ProcessRequest request{action.argv, action.working_directory, action.environment};
+            const bool capture_output = !action.argv.empty() && action.argv.front() == "cmake";
+            const ProcessRequest request{action.argv, action.working_directory, action.environment, capture_output};
             auto result = run_process(request);
             if (!result) {
                 return std::unexpected(std::move(result).error().add_note("while running `" + format_command(action.argv) + "`"));
             }
             if (!result->succeeded()) {
-                return std::unexpected(error("`" + action.description + "` exited with code " + std::to_string(result->exit_code))
-                        .add_note("command: " + format_command(action.argv)));
+                Diagnostic diagnostic = error(
+                    "action `" + action.description + "` failed (exit code " + std::to_string(result->exit_code) + ")"
+                );
+                if (!result->output.empty()) {
+                    std::string output = "tool output:";
+                    std::size_t start = 0;
+                    while (start < result->output.size()) {
+                        const std::size_t end = result->output.find('\n', start);
+                        const std::string_view line = end == std::string::npos
+                            ? std::string_view(result->output).substr(start)
+                            : std::string_view(result->output).substr(start, end - start);
+                        output += "\n    ";
+                        if (!line.empty() && line.back() == '\r')
+                            output.append(line.substr(0, line.size() - 1));
+                        else
+                            output += line;
+                        start = end == std::string::npos ? result->output.size() : end + 1;
+                    }
+                    diagnostic = std::move(diagnostic).add_note(std::move(output));
+                }
+                return std::unexpected(std::move(diagnostic));
             }
             return {};
         }

@@ -2,6 +2,7 @@
 
 #include <kaixa/config/build_configuration.hpp>
 #include <kaixa/extension/resolver.hpp>
+#include <kaixa/workspace/resolution_lock.hpp>
 
 #include <cstddef>
 #include <expected>
@@ -22,6 +23,7 @@ namespace kaixa::cli {
         std::vector<std::string> configurations;
         std::vector<ResolverArgumentOverride> resolver_arguments;
         bool use_default_configurations = true;
+        LockMode lock_mode = LockMode::update;
     };
 
     struct HelpCommand {};

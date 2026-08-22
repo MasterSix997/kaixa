@@ -19,10 +19,12 @@ namespace kaixa {
         std::vector<std::string> argv;
         std::filesystem::path working_directory;
         std::vector<EnvironmentVariable> environment;
+        bool capture_output = false;
     };
 
     struct ProcessResult {
         int exit_code = 0;
+        std::string output;
 
         [[nodiscard]] bool succeeded() const noexcept { return exit_code == 0; }
     };

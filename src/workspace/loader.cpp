@@ -443,13 +443,17 @@ namespace kaixa {
                 std::filesystem::path source_cache,
                 const std::span<const ProviderLayer> provider_layers,
                 const Value* feature_settings,
-                PolicyContext policy_context
+                PolicyContext policy_context,
+                const LockMode lock_mode,
+                std::filesystem::path lockfile
             )
                 : m_extensions(extensions)
                 , m_source_cache(std::move(source_cache))
                 , m_provider_layers(provider_layers)
                 , m_feature_settings(feature_settings)
-                , m_policy_context(std::move(policy_context)) {}
+                , m_policy_context(std::move(policy_context))
+                , m_lock_mode(lock_mode)
+                , m_lockfile(std::move(lockfile)) {}
 
             Result<PackageResolution> load(
                 const std::filesystem::path& manifest_path,
@@ -474,6 +478,24 @@ namespace kaixa {
                     return std::unexpected(packages.error());
 
                 m_packages = std::move(*packages);
+
+                m_context_manifest = m_packages.context_manifests().empty() ? selected : m_packages.context_manifests().front();
+                m_context_directory = m_context_manifest.parent_path();
+                if (m_lockfile.empty())
+                    m_lockfile = m_context_directory / "Kaixa.lock";
+
+                if (m_lock_mode != LockMode::none) {
+                    auto lock = read_resolution_lock(m_lockfile);
+                    if (!lock)
+                        return std::unexpected(lock.error());
+
+                    if (*lock) {
+                        m_lock = std::move(**lock);
+                    } else if (m_lock_mode == LockMode::locked || m_lock_mode == LockMode::frozen) {
+                        return std::unexpected(error("lockfile does not exist: " + m_lockfile.string())
+                                .add_note("run the command without `--locked` or `--frozen` to create it"));
+                    }
+                }
 
                 auto providers = configure_context_providers();
                 if (!providers)
@@ -501,10 +523,42 @@ namespace kaixa {
                 if (!instances)
                     return std::unexpected(instances.error());
 
+                bool lock_changed = false;
+                if (m_lock_mode != LockMode::none) {
+                    const ResolutionLock current = capture_resolution_lock(m_graph, *instances, m_policy_context, m_context_directory);
+                    if (m_lock_mode == LockMode::locked || m_lock_mode == LockMode::frozen) {
+                        auto valid = validate_resolution_lock(*m_lock, current);
+                        if (!valid)
+                            return std::unexpected(valid.error());
+                    } else {
+                        ResolutionLock merged = m_lock ? merge_resolution_lock(std::move(*m_lock), current) : current;
+                        auto written = write_resolution_lock(m_lockfile, merged);
+                        if (!written)
+                            return std::unexpected(written.error());
+
+                        lock_changed = *written;
+                    }
+                }
+
+                std::vector<std::string> root_names;
+                root_names.reserve(m_graph.roots().size());
+                for (const PackageId root: m_graph.roots())
+                    root_names.push_back(m_graph[root].name);
+
+                std::ranges::sort(root_names);
+                ResolutionContext context{m_context_manifest,
+                    m_context_directory,
+                    m_lockfile,
+                    std::move(root_names),
+                    m_policy_context,
+                    m_lock_mode};
+
                 return PackageResolution{std::move(m_graph),
                     std::move(m_packages),
                     std::move(document->configurations),
                     selected,
+                    std::move(context),
+                    lock_changed,
                     std::move(*manifest_tree),
                     std::move(*instances)};
             }
@@ -881,7 +935,13 @@ namespace kaixa {
                 if (!version)
                     return std::unexpected(version.error());
 
-                m_graph[*loaded].source = PackageSource{std::move(provider), std::move(authority), source, std::move(identity)};
+                const std::optional<Version> resolved_version = m_graph[*loaded].manifest ? m_graph[*loaded].manifest->version
+                                                                                          : expected_version;
+                m_graph[*loaded].source = PackageSource{std::move(provider),
+                    std::move(authority),
+                    resolved_version,
+                    source,
+                    std::move(identity)};
                 return *loaded;
             }
 
@@ -934,7 +994,27 @@ namespace kaixa {
                 if (!candidates)
                     return std::unexpected(candidates.error());
 
+                const ProviderInfo provider_info = provider.info();
+                const LockedPackage* locked = m_lock ? m_lock->find(dependency.request.package) : nullptr;
+                const bool provider_is_locked = locked && locked->provider == provider_info.name;
+                if (locked
+                    && locked->provider
+                    && !provider_is_locked
+                    && (m_lock_mode == LockMode::locked || m_lock_mode == LockMode::frozen)) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "Kaixa.lock routes `"
+                            + dependency.request.package
+                            + "` through provider `"
+                            + *locked->provider
+                            + "`, not `"
+                            + provider_info.name
+                            + "`"
+                    ));
+                }
+
                 std::optional<std::size_t> selected;
+                std::optional<std::size_t> locked_selection;
                 bool ambiguous = false;
                 for (std::size_t index = 0; index < candidates->size(); ++index) {
                     const PackageCandidate& candidate = (*candidates)[index];
@@ -975,6 +1055,20 @@ namespace kaixa {
                         continue;
                     }
 
+                    if (provider_is_locked && locked_candidate_matches(*locked, provider_info.name, candidate, m_context_directory)) {
+                        if (locked_selection) {
+                            return std::unexpected(error_at(
+                                dependency.location,
+                                "provider `"
+                                    + provider_info.name
+                                    + "` returned the locked candidate more than once for `"
+                                    + dependency.request.package
+                                    + "`"
+                            ));
+                        }
+                        locked_selection = index;
+                    }
+
                     if (!selected) {
                         selected = index;
                         ambiguous = false;
@@ -1000,6 +1094,20 @@ namespace kaixa {
                     } else if (relation == 0) {
                         ambiguous = true;
                     }
+                }
+
+                if (locked_selection)
+                    return std::move((*candidates)[*locked_selection]);
+
+                if (provider_is_locked && (m_lock_mode == LockMode::locked || m_lock_mode == LockMode::frozen)) {
+                    return std::unexpected(error_at(
+                        dependency.location,
+                        "provider `"
+                            + provider_info.name
+                            + "` no longer offers the candidate pinned for `"
+                            + dependency.request.package
+                            + "` in Kaixa.lock"
+                    ));
                 }
 
                 if (!selected) {
@@ -1035,8 +1143,19 @@ namespace kaixa {
 
                 const ProviderInfo info = provider.info();
                 if (!candidate->source) {
-                    if (const auto existing = m_graph.find_by_name(candidate->package))
+                    if (const auto existing = m_graph.find_by_name(candidate->package)) {
+                        const std::optional<PackageSource>& resolved = m_graph[*existing].source;
+                        if (!resolved
+                            || resolved->provider != info.name
+                            || resolved->authority != candidate->authority
+                            || resolved->version != candidate->version) {
+                            return std::unexpected(error_at(
+                                dependency.location,
+                                "package `" + candidate->package + "` was already resolved to a different provider candidate"
+                            ));
+                        }
                         return *existing;
+                    }
 
                     return m_graph.add(
                         PackageNode{{},
@@ -1047,7 +1166,7 @@ namespace kaixa {
                             std::nullopt,
                             {},
                             {},
-                            std::nullopt,
+                            PackageSource{info.name, candidate->authority, candidate->version, std::nullopt, std::nullopt},
                             candidate->descriptor}
                     );
                 }
@@ -1273,6 +1392,19 @@ namespace kaixa {
                     return complete(load_managed(candidate->manifest, dependency.request.package, dependency.location));
                 }
 
+                const LockedPackage* locked = m_lock ? m_lock->find(dependency.request.package) : nullptr;
+                if (locked && locked->provider) {
+                    PackageProvider* provider = m_extensions ? m_extensions->find_provider(*locked->provider) : nullptr;
+                    if (provider)
+                        return complete(load_provider_dependency(*provider, source_directory, dependency));
+
+                    if (m_lock_mode == LockMode::locked || m_lock_mode == LockMode::frozen) {
+                        return std::unexpected(
+                            error_at(dependency.location, "provider `" + *locked->provider + "` pinned by Kaixa.lock is not installed")
+                        );
+                    }
+                }
+
                 const auto exact_route = m_routing.find(dependency.request.package);
                 const auto wildcard_route = m_routing.find("*");
                 const auto route = exact_route != m_routing.end() ? exact_route : wildcard_route;
@@ -1351,7 +1483,7 @@ namespace kaixa {
                         std::nullopt,
                         {},
                         {},
-                        PackageSource{std::nullopt, "direct", std::move(source), directory.generic_string()}}
+                        PackageSource{std::nullopt, "direct", std::nullopt, std::move(source), directory.generic_string()}}
                 );
             }
 
@@ -1363,6 +1495,11 @@ namespace kaixa {
             const Value* m_feature_settings = nullptr;
             PolicyContext m_policy_context;
             std::map<std::string, std::string> m_routing;
+            LockMode m_lock_mode = LockMode::none;
+            std::filesystem::path m_lockfile;
+            std::filesystem::path m_context_manifest;
+            std::filesystem::path m_context_directory;
+            std::optional<ResolutionLock> m_lock;
         };
     }
 
@@ -1416,7 +1553,15 @@ namespace kaixa {
         if (!options.source_cache.empty())
             source_cache = options.source_cache;
 
-        WorkspaceLoader loader(options.extensions, source_cache, options.provider_layers, options.feature_settings, options.policy_context);
+        WorkspaceLoader loader(
+            options.extensions,
+            source_cache,
+            options.provider_layers,
+            options.feature_settings,
+            options.policy_context,
+            options.lock_mode,
+            options.lockfile
+        );
         return loader.load(*manifest, options.packages);
     }
 }

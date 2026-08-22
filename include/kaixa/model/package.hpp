@@ -33,7 +33,8 @@ namespace kaixa {
     struct PackageSource {
         std::optional<std::string> provider;
         std::string authority;
-        SourceLocator locator;
+        std::optional<Version> version;
+        std::optional<SourceLocator> locator;
         std::optional<std::string> identity;
     };
 

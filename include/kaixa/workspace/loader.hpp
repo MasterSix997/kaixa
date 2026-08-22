@@ -4,17 +4,30 @@
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/model/graph.hpp>
 #include <kaixa/workspace/package_index.hpp>
+#include <kaixa/workspace/resolution_lock.hpp>
 
 #include <filesystem>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace kaixa {
+    struct ResolutionContext {
+        std::filesystem::path manifest;
+        std::filesystem::path directory;
+        std::filesystem::path lockfile;
+        std::vector<std::string> roots;
+        PolicyContext policy;
+        LockMode lock_mode = LockMode::none;
+    };
+
     struct PackageResolution {
         Graph graph;
         PackageIndex available;
         ConfigurationSet configurations;
         std::filesystem::path manifest;
+        ResolutionContext context;
+        bool lock_changed = false;
         ManifestTree model;
         std::vector<ConfiguredPackageInstance> instances;
     };
@@ -26,6 +39,8 @@ namespace kaixa {
         std::span<const ProviderLayer> provider_layers;
         const Value* feature_settings = nullptr;
         PolicyContext policy_context;
+        LockMode lock_mode = LockMode::none;
+        std::filesystem::path lockfile;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

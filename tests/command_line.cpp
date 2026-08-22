@@ -7,6 +7,28 @@
 #include <utility>
 #include <variant>
 
+KAIXA_TEST(command_line_parses_reproducible_resolution_modes) {
+    constexpr std::array locked_arguments = {std::string_view("check"), std::string_view("--locked")};
+    const auto locked = kaixa::cli::parse_command_line(locked_arguments);
+    context.check(locked.has_value(), "locked command parses");
+    if (locked) {
+        const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*locked);
+        context.check(command && command->workspace.lock_mode == kaixa::LockMode::locked, "locked mode is retained");
+    }
+
+    constexpr std::array frozen_arguments = {std::string_view("build"), std::string_view("--frozen")};
+    const auto frozen = kaixa::cli::parse_command_line(frozen_arguments);
+    context.check(frozen.has_value(), "frozen command parses");
+    if (frozen) {
+        const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*frozen);
+        context.check(command && command->workspace.lock_mode == kaixa::LockMode::frozen, "frozen mode is retained");
+    }
+
+    constexpr std::array conflicting_arguments = {std::string_view("check"), std::string_view("--locked"), std::string_view("--frozen")};
+    const auto conflicting = kaixa::cli::parse_command_line(conflicting_arguments);
+    context.check(!conflicting.has_value(), "lock modes are mutually exclusive");
+}
+
 KAIXA_TEST(command_line_build_keeps_workspace_options) {
     constexpr std::array arguments = {std::string_view("build"),
         std::string_view("--path"),

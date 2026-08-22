@@ -7,6 +7,7 @@
 #include "testing.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
@@ -98,6 +99,26 @@ namespace kaixa::plugin::cmake {
 
             if (label.empty())
                 label = configuration.profile;
+
+            // A command-line profile is the effective build identity.  Keep the
+            // resolver configuration name (it still supplies compiler/generator
+            // settings), but do not put a stale profile such as `clang-debug` in
+            // the output path when `--profile release` was requested.
+            if (configuration.profile_origin.source == "command line" && !configuration.selected.empty()) {
+                constexpr std::array<std::string_view, 4> known_profiles = {"debug", "release", "relwithdebinfo", "minsizerel"};
+                bool replaced = false;
+                for (const std::string_view known: known_profiles) {
+                    const std::string suffix = "-" + std::string(known);
+                    if (label.ends_with(suffix)) {
+                        label.erase(label.size() - suffix.size());
+                        label += "-" + configuration.profile;
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced)
+                    label += "+" + configuration.profile;
+            }
 
             for (char& character: label) {
                 const bool valid = (character >= 'a' && character <= 'z')
