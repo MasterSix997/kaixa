@@ -101,6 +101,152 @@ namespace kaixa {
             return result;
         }
 
+        Result<TaskDeclaration> parse_task_declaration(const Value& value, const std::string& path) {
+            auto table_result = TableReader::bind(value, path);
+            if (!table_result)
+                return std::unexpected(table_result.error());
+
+            TableReader table = std::move(*table_result);
+            TaskDeclaration result;
+            auto name = table.string("name");
+            if (!name)
+                return std::unexpected(name.error());
+
+            if (!is_valid_target_name(*name)) {
+                return std::unexpected(error_at(table.location_of("name"), "`" + *name + "` is not a valid command name"));
+            }
+            result.name = std::move(*name);
+            result.location = table.location_of("name");
+            result.source = result.location.source;
+
+            const Value* run = table.take("run");
+            if (run) {
+                auto arguments = read_string_array_value(*run, "command run");
+                if (!arguments)
+                    return std::unexpected(arguments.error());
+
+                result.run = std::move(*arguments);
+            }
+
+            auto tool = table.optional_string("tool");
+            if (!tool)
+                return std::unexpected(tool.error());
+
+            auto script = table.optional_string("script");
+            if (!script)
+                return std::unexpected(script.error());
+
+            if (run && (*tool || *script)) {
+                return std::unexpected(
+                    error_at(value.location(), "command `" + result.name + "` cannot combine `run` with `tool` or `script`")
+                );
+            }
+            if (run) {
+                if (result.run.empty())
+                    return std::unexpected(error_at(run->location(), "command `run` cannot be empty"));
+
+            } else {
+                if (!*tool || !*script) {
+                    return std::unexpected(
+                        error_at(value.location(), "command `" + result.name + "` requires either `run` or both `tool` and `script`")
+                    );
+                }
+                if ((*tool)->empty() || (*script)->empty()) {
+                    return std::unexpected(error_at(value.location(), "command `tool` and `script` cannot be empty"));
+                }
+                result.run = {std::move(**tool), std::move(**script)};
+            }
+
+            auto working_directory = table.optional_string("working-directory");
+            if (!working_directory)
+                return std::unexpected(working_directory.error());
+
+            if (*working_directory) {
+                if ((*working_directory)->empty()) {
+                    return std::unexpected(error_at(table.location_of("working-directory"), "command working directory cannot be empty"));
+                }
+                result.working_directory = std::move(**working_directory);
+            }
+
+            auto environment_result = table.optional_table("environment");
+            if (!environment_result)
+                return std::unexpected(environment_result.error());
+
+            if (*environment_result) {
+                TableReader environment = std::move(**environment_result);
+                for (const TableEntry& entry: environment.entries()) {
+                    if (entry.key.empty() || entry.key.contains('=')) {
+                        return std::unexpected(
+                            error_at(entry.value.location(), "invalid command environment variable name `" + entry.key + "`")
+                        );
+                    }
+                    const std::string* environment_value = entry.value.as_string();
+                    if (!environment_value) {
+                        return std::unexpected(error_at(entry.value.location(), "command environment values must be strings"));
+                    }
+                    result.environment.emplace(entry.key, *environment_value);
+                }
+                environment.take_all();
+            }
+
+            auto inputs = read_string_array(table, "inputs");
+            if (!inputs)
+                return std::unexpected(inputs.error());
+
+            for (std::string& input: *inputs)
+                result.inputs.emplace_back(std::move(input));
+
+            auto outputs = read_string_array(table, "outputs");
+            if (!outputs)
+                return std::unexpected(outputs.error());
+
+            for (std::string& output: *outputs)
+                result.outputs.emplace_back(std::move(output));
+
+            auto after = read_string_array(table, "after");
+            if (!after)
+                return std::unexpected(after.error());
+
+            result.after = std::move(*after);
+            auto finished = table.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+
+            return result;
+        }
+
+        Result<std::vector<TaskDeclaration>> read_task_declarations(TableReader& table) {
+            const Value* commands = table.take("command");
+            if (!commands)
+                return std::vector<TaskDeclaration>{};
+
+            std::vector<const Value*> values;
+            if (const std::vector<Value>* array = commands->as_array()) {
+                values.reserve(array->size());
+                for (const Value& value: *array)
+                    values.push_back(&value);
+
+            } else if (commands->is_table()) {
+                values.push_back(commands);
+            } else {
+                return std::unexpected(error_at(commands->location(), "commands must be a table or an array of tables"));
+            }
+
+            std::vector<TaskDeclaration> result;
+            result.reserve(values.size());
+            for (std::size_t index = 0; index < values.size(); ++index) {
+                auto command = parse_task_declaration(*values[index], "command." + std::to_string(index));
+                if (!command)
+                    return std::unexpected(command.error());
+
+                if (std::ranges::any_of(result, [&](const TaskDeclaration& existing) { return existing.name == command->name; })) {
+                    return std::unexpected(error_at(command->location, "command `" + command->name + "` is declared more than once"));
+                }
+                result.push_back(std::move(*command));
+            }
+            return result;
+        }
+
         Result<bool> read_boolean(TableReader& table, const std::string_view key, const bool default_value = false) {
             const Value* value = table.take(key);
             if (!value)
@@ -844,6 +990,12 @@ namespace kaixa {
             if (!products)
                 return std::unexpected(products.error());
 
+            auto commands = read_task_declarations(member);
+            if (!commands)
+                return std::unexpected(commands.error());
+
+            manifest.commands = std::move(*commands);
+
             if (!manifest.resolver.empty()) {
                 if (const Value* options = member.take(manifest.resolver)) {
                     if (!options->is_table()) {
@@ -949,6 +1101,21 @@ namespace kaixa {
                 std::make_move_iterator(configurations->definitions.begin()),
                 std::make_move_iterator(configurations->definitions.end())
             );
+
+            auto commands = read_task_declarations(root);
+            if (!commands)
+                return std::unexpected(commands.error());
+
+            if (!commands->empty()) {
+                if (!document.package) {
+                    return std::unexpected(error_at(commands->front().location, "commands require a package in the importing manifest"));
+                }
+                document.package->commands.insert(
+                    document.package->commands.end(),
+                    std::make_move_iterator(commands->begin()),
+                    std::make_move_iterator(commands->end())
+                );
+            }
 
             auto finished = root.finish();
             if (!finished)
@@ -1181,19 +1348,15 @@ namespace kaixa {
         for (std::string& import: *imports)
             result.imports.emplace_back(std::move(import));
 
-        const Value* commands = root.take("command");
-        if (commands) {
-            if (const std::vector<Value>* values = commands->as_array()) {
-                if (result.package)
-                    result.package->actions = *values;
+        auto commands = read_task_declarations(root);
+        if (!commands)
+            return std::unexpected(commands.error());
 
-            } else if (commands->is_table()) {
-                if (result.package)
-                    result.package->actions.push_back(*commands);
+        if (!commands->empty()) {
+            if (!result.package)
+                return std::unexpected(error_at(commands->front().location, "commands require a package"));
 
-            } else {
-                return std::unexpected(error_at(commands->location(), "commands must be a table or an array of tables"));
-            }
+            result.package->commands = std::move(*commands);
         }
 
         auto root_finished = root.finish();
@@ -1310,21 +1473,9 @@ namespace kaixa {
             return std::unexpected(error_at(document->location(), "referenced target manifest declares no targets"));
         }
 
-        std::vector<Value> actions;
-        if (const Value* commands = root.take("command")) {
-            if (const std::vector<Value>* values = commands->as_array()) {
-                actions = *values;
-            } else if (commands->is_table()) {
-                actions.push_back(*commands);
-            } else {
-                return std::unexpected(error_at(commands->location(), "commands must be a table or an array of tables"));
-            }
-            for (const Value& action: actions) {
-                if (!action.is_table()) {
-                    return std::unexpected(error_at(action.location(), "commands must contain tables"));
-                }
-            }
-        }
+        auto commands = read_task_declarations(root);
+        if (!commands)
+            return std::unexpected(commands.error());
 
         auto finished = root.finish();
         if (!finished)
@@ -1332,7 +1483,7 @@ namespace kaixa {
 
         for (PackageTarget& target: targets) {
             target.source = path;
-            target.actions = actions;
+            target.commands = *commands;
         }
 
         return targets;

@@ -10,9 +10,15 @@
 #include <vector>
 
 namespace kaixa {
+    struct EnvironmentVariable {
+        std::string name;
+        std::string value;
+    };
+
     struct ProcessRequest {
         std::vector<std::string> argv;
         std::filesystem::path working_directory;
+        std::vector<EnvironmentVariable> environment;
     };
 
     struct ProcessResult {

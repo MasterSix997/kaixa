@@ -460,6 +460,16 @@ namespace kaixa {
             target.skip_reasons.push_back(std::move(reason));
         }
 
+        std::string inactive_feature_reason(const std::string_view package_name, const std::string_view feature) {
+            std::string reason;
+            reason.reserve(package_name.size() + feature.size() + 15);
+            reason.append(package_name);
+            reason.push_back('/');
+            reason.append(feature);
+            reason.append(" is not active");
+            return reason;
+        }
+
         EffectiveTarget realize_target(const Graph& graph, const PackageNode& owner, const PackageTarget& target) {
             EffectiveTarget result;
             result.target = target;
@@ -469,14 +479,14 @@ namespace kaixa {
                 const std::string feature = separator == std::string::npos ? required : required.substr(separator + 1);
                 const auto package = graph.find_by_name(package_name);
                 if (!package || std::ranges::find(graph[*package].active_features, feature) == graph[*package].active_features.end()) {
-                    add_skip_reason(result, package_name + "/" + feature + " is not active");
+                    add_skip_reason(result, inactive_feature_reason(package_name, feature));
                 }
             }
             for (const auto& [package_name, features]: target.required_dependency_features) {
                 const auto package = graph.find_by_name(package_name);
                 for (const std::string& feature: features) {
                     if (!package || std::ranges::find(graph[*package].active_features, feature) == graph[*package].active_features.end()) {
-                        add_skip_reason(result, package_name + "/" + feature + " is not active");
+                        add_skip_reason(result, inactive_feature_reason(package_name, feature));
                     }
                 }
             }

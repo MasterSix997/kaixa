@@ -27,6 +27,22 @@ generation = "state"
 msvc-runtime = "static"
 output = { runtime = "bin", library = "lib", archive = "lib" }
 
+[[command]]
+name = "quality"
+run = ["python", "tools/quality.py", "rules", "format", "complexity"]
+inputs = ["tools/quality.py", "tools/complexity-baseline.txt"]
+
+[[command]]
+name = "format-check"
+run = ["python", "tools/quality.py", "format", "--all-files"]
+inputs = ["tools/quality.py"]
+
+[[command]]
+name = "tidy"
+after = ["build"]
+run = ["python", "tools/quality.py", "tidy", "--compile-commands", "${build-dir}"]
+inputs = ["tools/quality.py"]
+
 [[config]]
 name = "quality"
 

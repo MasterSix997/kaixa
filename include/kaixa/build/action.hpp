@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kaixa/foundation/process.hpp>
 #include <kaixa/model/package.hpp>
 
 #include <filesystem>
@@ -18,6 +19,7 @@ namespace kaixa {
     enum class ActionStage {
         synchronize,
         build,
+        task,
         test
     };
 
@@ -46,6 +48,7 @@ namespace kaixa {
         std::filesystem::path working_directory;
         std::vector<std::filesystem::path> inputs;
         std::vector<std::filesystem::path> outputs;
+        std::vector<EnvironmentVariable> environment;
         std::optional<ActionState> checked_state;
         std::optional<PackageId> package;
         std::optional<std::string> configured_artifact;

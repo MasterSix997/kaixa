@@ -125,16 +125,13 @@ endforeach()
     Result<void> plan_tests(
         const Options& options,
         const PackageNode& package,
-        const std::filesystem::path& build_directory,
-        const std::string_view configuration,
+        const TestPlanRoute& route,
         const TestRequest& request,
-        const std::span<const std::string> selected_targets,
-        const std::string_view configured_artifact,
         BuildPlan& plan
     ) {
         std::vector<std::string> build_targets;
-        if (!selected_targets.empty()) {
-            build_targets.assign(selected_targets.begin(), selected_targets.end());
+        if (!route.selected_targets.empty()) {
+            build_targets.assign(route.selected_targets.begin(), route.selected_targets.end());
             for (const std::string& selected: build_targets) {
                 if (std::ranges::none_of(options.tests, [&](const TestOptions& test) { return test.target == selected; })) {
                     return std::unexpected(error("CMake target `" + selected + "` does not declare tests"));
@@ -160,7 +157,7 @@ endforeach()
         }
 
         if (!build_targets.empty()) {
-            auto build = find_build_action(plan, package, configured_artifact);
+            auto build = find_build_action(plan, package, route.configured_artifact);
             if (!build)
                 return std::unexpected(build.error());
 
@@ -171,7 +168,7 @@ endforeach()
         const bool list = request.mode == TestMode::list;
         Action action;
         action.description = list ? "list tests " + package.name : "test " + package.name;
-        action.argv = {"ctest", "--test-dir", build_directory.string(), "--build-config", std::string(configuration)};
+        action.argv = {"ctest", "--test-dir", route.build_directory.string(), "--build-config", std::string(route.configuration)};
         action.argv.push_back(list ? "--show-only" : "--output-on-failure");
         if (request.filter) {
             action.argv.push_back("--tests-regex");
@@ -197,7 +194,7 @@ endforeach()
         }
         action.working_directory = package.directory;
         action.package = package.id;
-        action.configured_artifact = std::string(configured_artifact);
+        action.configured_artifact = std::string(route.configured_artifact);
         action.stage = ActionStage::test;
         plan.add(std::move(action));
         return {};

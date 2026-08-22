@@ -1,10 +1,13 @@
 #include <kaixa/foundation/process.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cerrno>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
 #include <limits>
+#include <span>
 #include <system_error>
 
 #ifdef _WIN32
@@ -77,6 +80,66 @@ namespace kaixa {
         std::string windows_error(const DWORD code) {
             return std::system_category().message(static_cast<int>(code));
         }
+
+        std::wstring_view environment_name(const std::wstring_view entry) {
+            const std::size_t start = entry.starts_with(L'=') ? 1 : 0;
+            const std::size_t separator = entry.find(L'=', start);
+            return separator == std::wstring_view::npos ? entry : entry.substr(0, separator);
+        }
+
+        bool equal_environment_name(const std::wstring_view left, const std::wstring_view right) {
+            return CompareStringOrdinal(left.data(), static_cast<int>(left.size()), right.data(), static_cast<int>(right.size()), TRUE)
+                == CSTR_EQUAL;
+        }
+
+        Result<std::vector<wchar_t>> windows_environment(const std::span<const EnvironmentVariable> overrides) {
+            if (overrides.empty())
+                return std::vector<wchar_t>{};
+
+            LPWCH inherited = GetEnvironmentStringsW();
+            if (!inherited)
+                return std::unexpected(error("cannot read the process environment: " + windows_error(GetLastError())));
+
+            std::vector<std::wstring> entries;
+            for (const wchar_t* entry = inherited; *entry != L'\0'; entry += std::wcslen(entry) + 1)
+                entries.emplace_back(entry);
+
+            FreeEnvironmentStringsW(inherited);
+            for (const EnvironmentVariable& override_value: overrides) {
+                if (override_value.name.empty() || override_value.name.contains('=')) {
+                    return std::unexpected(error("invalid environment variable name `" + override_value.name + "`"));
+                }
+
+                auto name = widen(override_value.name);
+                if (!name)
+                    return std::unexpected(name.error());
+
+                auto value = widen(override_value.value);
+                if (!value)
+                    return std::unexpected(value.error());
+
+                const auto existing = std::ranges::find_if(entries, [&](const std::wstring& entry) {
+                    return equal_environment_name(environment_name(entry), *name);
+                });
+                std::wstring combined = *name + L'=' + *value;
+                if (existing == entries.end())
+                    entries.push_back(std::move(combined));
+                else
+                    *existing = std::move(combined);
+            }
+
+            std::ranges::sort(entries, [](const std::wstring& left, const std::wstring& right) {
+                return CompareStringOrdinal(left.c_str(), -1, right.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+            });
+
+            std::vector<wchar_t> block;
+            for (const std::wstring& entry: entries) {
+                block.insert(block.end(), entry.begin(), entry.end());
+                block.push_back(L'\0');
+            }
+            block.push_back(L'\0');
+            return block;
+        }
 #endif
     }
 
@@ -120,6 +183,10 @@ namespace kaixa {
 
         std::wstring command = *wide_command_result;
 
+        auto environment = windows_environment(request.environment);
+        if (!environment)
+            return std::unexpected(environment.error());
+
         std::wstring working_directory;
         if (!request.working_directory.empty()) {
             const auto directory_result = widen(request.working_directory.string());
@@ -139,8 +206,8 @@ namespace kaixa {
             nullptr,
             nullptr,
             TRUE,
-            0,
-            nullptr,
+            environment->empty() ? 0 : CREATE_UNICODE_ENVIRONMENT,
+            environment->empty() ? nullptr : environment->data(),
             working_directory.empty() ? nullptr : working_directory.c_str(),
             &startup,
             &process
@@ -169,6 +236,12 @@ namespace kaixa {
         if (child == 0) {
             if (!request.working_directory.empty() && chdir(request.working_directory.c_str()) != 0)
                 _exit(126);
+
+            for (const EnvironmentVariable& variable: request.environment) {
+                if (variable.name.empty() || variable.name.contains('=') || setenv(variable.name.c_str(), variable.value.c_str(), 1) != 0) {
+                    _exit(126);
+                }
+            }
 
             std::vector<char*> arguments;
             arguments.reserve(request.argv.size() + 1);

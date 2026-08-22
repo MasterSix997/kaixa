@@ -274,6 +274,34 @@ KAIXA_TEST(command_line_run_separates_program_arguments) {
     context.check_equal(command->workspace.configurations.front(), std::string("clang"), "run configuration");
 }
 
+KAIXA_TEST(command_line_task_lists_or_forwards_arguments) {
+    constexpr std::array selected_arguments = {std::string_view("task"),
+        std::string_view("lint"),
+        std::string_view("--path"),
+        std::string_view("project"),
+        std::string_view("--"),
+        std::string_view("--fix")};
+    const auto selected = kaixa::cli::parse_command_line(selected_arguments);
+    context.check(selected.has_value(), "task command parses");
+    if (selected) {
+        const auto* command = std::get_if<kaixa::cli::TaskCommand>(&*selected);
+        context.check(command != nullptr, "task keeps its command type");
+        if (command) {
+            context.check_equal(command->name.value_or(""), std::string("lint"), "task name is retained");
+            context.check_equal(command->workspace.path.generic_string(), std::string("project"), "task workspace is retained");
+            context.check_equal(command->arguments.front(), std::string("--fix"), "task arguments are forwarded");
+        }
+    }
+
+    constexpr std::array list_arguments = {std::string_view("task"), std::string_view("--list")};
+    const auto listed = kaixa::cli::parse_command_line(list_arguments);
+    context.check(listed.has_value(), "task list parses");
+    if (listed) {
+        const auto* command = std::get_if<kaixa::cli::TaskCommand>(&*listed);
+        context.check(command != nullptr && command->list, "task list mode is retained");
+    }
+}
+
 KAIXA_TEST(command_line_bench_selects_a_target_and_forwards_arguments) {
     constexpr std::array arguments = {std::string_view("bench"),
         std::string_view("--target"),

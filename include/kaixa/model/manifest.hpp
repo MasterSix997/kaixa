@@ -78,6 +78,18 @@ namespace kaixa {
         SourceLocation location;
     };
 
+    struct TaskDeclaration {
+        std::string name;
+        std::vector<std::string> run;
+        std::optional<std::filesystem::path> working_directory;
+        std::map<std::string, std::string> environment;
+        std::vector<std::filesystem::path> inputs;
+        std::vector<std::filesystem::path> outputs;
+        std::vector<std::string> after;
+        std::filesystem::path source;
+        SourceLocation location;
+    };
+
     struct PackageSet {
         std::string name;
         std::vector<std::string> members;
@@ -120,7 +132,7 @@ namespace kaixa {
         std::optional<Value> resolver_options;
         std::optional<Value> matrix;
         std::vector<Value> resources;
-        std::vector<Value> actions;
+        std::vector<TaskDeclaration> commands;
         std::filesystem::path source;
         SourceLocation location;
     };
@@ -138,7 +150,7 @@ namespace kaixa {
         std::vector<PackageTarget> resolved_targets;
         ConfigurationSet configurations;
         std::optional<Value> resolver_options;
-        std::vector<Value> actions;
+        std::vector<TaskDeclaration> commands;
         std::filesystem::path source;
         SourceLocation location;
 

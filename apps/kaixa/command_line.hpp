@@ -98,6 +98,13 @@ namespace kaixa::cli {
         bool examples = false;
     };
 
+    struct TaskCommand {
+        WorkspaceOptions workspace;
+        std::optional<std::string> name;
+        std::vector<std::string> arguments;
+        bool list = false;
+    };
+
     struct CleanCommand {
         WorkspaceOptions workspace;
         bool all = false;
@@ -128,6 +135,7 @@ namespace kaixa::cli {
         TestCommand,
         BenchCommand,
         RunCommand,
+        TaskCommand,
         CleanCommand,
         ConfigListCommand,
         ConfigShowCommand,

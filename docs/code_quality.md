@@ -14,8 +14,8 @@ python -m pip install -r tools/quality-requirements.txt
 Run all checks:
 
 ```sh
-kaixa generate --config quality
-python tools/quality.py
+kaixa task quality
+kaixa task tidy --config quality
 ```
 
 ## Checks
@@ -28,20 +28,20 @@ python tools/quality.py
 Run selected checks:
 
 ```sh
-python tools/quality.py rules format complexity
-python tools/quality.py tidy --compile-commands .kaixa/build/cmake/clang-debug+quality/kaixa
+kaixa task quality
+kaixa task tidy --config quality
 ```
 
 Format changed files:
 
 ```sh
-python tools/quality.py format --fix
+kaixa task format-check -- --fix
 ```
 
 Audit all files:
 
 ```sh
-python tools/quality.py format --all-files
+kaixa task format-check
 ```
 
 ## Complexity limits

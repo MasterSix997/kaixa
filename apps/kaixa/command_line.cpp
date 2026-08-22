@@ -155,6 +155,47 @@ namespace kaixa::cli {
             return options;
         }
 
+        std::expected<TaskCommand, ParseError> parse_task(Parser& parser) {
+            TaskCommand command;
+            if (!parser.done() && !parser.peek().starts_with("--"))
+                command.name = parser.take();
+
+            while (!parser.done()) {
+                if (parser.peek() == "--") {
+                    parser.take();
+                    while (!parser.done())
+                        command.arguments.emplace_back(parser.take());
+
+                    break;
+                }
+                if (parser.peek() == "--list") {
+                    parser.take();
+                    command.list = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected task argument `" + std::string(parser.take()) + "`"});
+            }
+
+            if (command.list && command.name)
+                return std::unexpected(ParseError{"task name cannot be combined with --list"});
+
+            if (!command.name)
+                command.list = true;
+
+            if (!command.arguments.empty() && !command.name)
+                return std::unexpected(ParseError{"task arguments require a task name"});
+
+            return command;
+        }
+
         std::expected<TestCommand, ParseError> parse_test(Parser& parser) {
             TestCommand command;
             while (!parser.done()) {
@@ -675,6 +716,8 @@ namespace kaixa::cli {
             << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
             << "  kaixa run [--list] [--target name] [--example name] [--examples] [--path path]\n"
             << "        [--profile name]\n"
+            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
+            << "  kaixa task [name|--list] [--path path] [--package name]... [--profile name]\n"
             << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n\n"
 
             << "  kaixa clean [--path path] [--profile name] [--config name]...\n"
@@ -728,6 +771,14 @@ namespace kaixa::cli {
 
         if (name == "run") {
             auto command = parse_run(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "task") {
+            auto command = parse_task(parser);
             if (!command)
                 return std::unexpected(command.error());
 

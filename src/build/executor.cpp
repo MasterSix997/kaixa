@@ -95,7 +95,7 @@ namespace kaixa {
         }
 
         Result<void> execute_action(const Action& action) {
-            const ProcessRequest request{action.argv, action.working_directory};
+            const ProcessRequest request{action.argv, action.working_directory, action.environment};
             auto result = run_process(request);
             if (!result) {
                 return std::unexpected(std::move(result).error().add_note("while running `" + format_command(action.argv) + "`"));
@@ -188,6 +188,15 @@ namespace kaixa {
             if (action.stage != stage)
                 continue;
 
+            if (stage == ActionStage::task) {
+                auto state = action_state(action);
+                if (!state)
+                    return std::unexpected(state.error());
+
+                if (*state == ActionState::current)
+                    continue;
+            }
+
             auto executed = execute_action(action);
             if (!executed)
                 return std::unexpected(executed.error());
@@ -206,6 +215,11 @@ namespace kaixa {
         if (!built)
             return std::unexpected(built.error());
 
+        auto tasks = execute_actions(plan, ActionStage::task);
+        if (!tasks)
+            return std::unexpected(tasks.error());
+
+        built->executed += tasks->executed;
         built->executed += generated->synchronized;
         return built;
     }

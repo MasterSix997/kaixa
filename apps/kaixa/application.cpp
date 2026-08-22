@@ -303,6 +303,7 @@ namespace kaixa::cli {
             switch (stage) {
             case ActionStage::synchronize: return "synchronize";
             case ActionStage::build: return "build";
+            case ActionStage::task: return "task";
             case ActionStage::test: return "test";
             }
             return "action";
@@ -340,7 +341,8 @@ namespace kaixa::cli {
                 if (synchronization_only && action.stage != ActionStage::synchronize)
                     continue;
 
-                if (action.stage == ActionStage::synchronize && state->actions[index].state == ActionState::current) {
+                if ((action.stage == ActionStage::synchronize || action.stage == ActionStage::task)
+                    && state->actions[index].state == ActionState::current) {
                     continue;
                 }
 
@@ -1184,6 +1186,67 @@ namespace kaixa::cli {
                 return fail(selected.error());
 
             return build_and_run_target(*workspace, std::move(*selected), command.arguments, "running");
+        }
+
+        int run(const TaskCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            auto tasks = discover_tasks(workspace->graph);
+            if (!tasks)
+                return fail(tasks.error());
+
+            if (command.list) {
+                if (tasks->empty()) {
+                    std::cout << "no custom tasks\n";
+                    return 0;
+                }
+                for (const TaskDefinition& task: *tasks)
+                    std::cout << task.qualified_name << '\n';
+
+                return 0;
+            }
+
+            auto preparation = prepare_task(workspace->graph, *command.name);
+            if (!preparation)
+                return fail(preparation.error());
+
+            std::vector<BuildProduct> products;
+            if (preparation->requires_products) {
+                auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment, preparation->build);
+                if (!synchronization)
+                    return fail(synchronization.error());
+
+                auto printed = print_actions(*synchronization, true);
+                if (!printed)
+                    return fail(printed.error());
+
+                auto generated = generate(*synchronization);
+                if (!generated)
+                    return fail(generated.error());
+
+                auto discovered = discover_products(workspace->graph, workspace->registry, workspace->environment);
+                if (!discovered)
+                    return fail(discovered.error());
+
+                products = std::move(*discovered);
+            }
+
+            auto plan = plan_task(workspace->graph, workspace->registry, workspace->environment, *preparation, products, command.arguments);
+            if (!plan)
+                return fail(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
+            auto report = kaixa::execute(*plan);
+            if (!report)
+                return fail(report.error());
+
+            std::cout << "task completed: " << report->executed << " action(s) run\n";
+            return 0;
         }
 
         int run(const CleanCommand& command) {

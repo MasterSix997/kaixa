@@ -131,7 +131,7 @@ namespace kaixa {
                 target.matrix = layer.matrix;
 
             target.resources.insert(target.resources.end(), layer.resources.begin(), layer.resources.end());
-            target.actions.insert(target.actions.end(), layer.actions.begin(), layer.actions.end());
+            target.commands.insert(target.commands.end(), layer.commands.begin(), layer.commands.end());
             if (!layer.sources.include.empty()) {
                 target.sources = layer.sources;
                 target.source = layer.source;
