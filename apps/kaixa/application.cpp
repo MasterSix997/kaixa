@@ -56,6 +56,8 @@ namespace kaixa::cli {
             std::vector<ConfigurationSet>& layers,
             std::vector<ConfigurationSource>& sources,
             std::vector<ProviderLayer>& provider_layers,
+            std::vector<AutomationDocument>& automation_layers,
+            const bool allow_automation,
             std::string name,
             const std::filesystem::path& path
         ) {
@@ -83,6 +85,18 @@ namespace kaixa::cli {
             if (!document->providers.empty()) {
                 provider_layers.push_back({std::move(document->providers), ProviderContext{path.parent_path()}});
             }
+            if (!document->automation.commands.empty() || !document->automation.workflows.empty()) {
+                if (!allow_automation) {
+                    const SourceLocation& location = !document->automation.commands.empty()
+                        ? document->automation.commands.front().location
+                        : document->automation.workflows.front().location;
+                    return std::unexpected(
+                        error_at(location, "local commands and workflows are supported only in workspace `Kaixa.user.toml`")
+                    );
+                }
+                automation_layers.push_back(std::move(document->automation));
+            }
+
             return {};
         }
 
@@ -101,8 +115,17 @@ namespace kaixa::cli {
             std::vector<ConfigurationSet> external_layers;
             std::vector<ConfigurationSource> external_sources;
             std::vector<ProviderLayer> provider_layers;
+            std::vector<AutomationDocument> automation_layers;
             if (const auto user = user_configuration_path()) {
-                auto loaded = append_configuration_file(external_layers, external_sources, provider_layers, "user", *user);
+                auto loaded = append_configuration_file(
+                    external_layers,
+                    external_sources,
+                    provider_layers,
+                    automation_layers,
+                    false,
+                    "user",
+                    *user
+                );
                 if (!loaded)
                     return std::unexpected(loaded.error());
             }
@@ -111,6 +134,8 @@ namespace kaixa::cli {
                 external_layers,
                 external_sources,
                 provider_layers,
+                automation_layers,
+                true,
                 "local",
                 directory / "Kaixa.user.toml"
             );
@@ -152,6 +177,10 @@ namespace kaixa::cli {
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
+
+            auto automation = apply_automation_layers(resolved->graph, std::move(automation_layers));
+            if (!automation)
+                return std::unexpected(automation.error());
 
             for (const ResolverArgumentOverride& override: options.resolver_arguments) {
                 if (!resolver_is_active(resolved->graph, override.resolver)) {
@@ -786,7 +815,7 @@ namespace kaixa::cli {
             const std::span<const std::string> arguments,
             const std::string_view operation
         ) {
-            auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, selected.name);
+            auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, selected.name, selected.package);
             if (!plan)
                 return fail(plan.error());
 
@@ -807,6 +836,160 @@ namespace kaixa::cli {
                 return fail(result.error());
 
             return result->exit_code;
+        }
+
+        Result<std::size_t> execute_task_preparation(
+            const Workspace& workspace,
+            const TaskPreparation& preparation,
+            const std::span<const std::string> arguments = {}
+        ) {
+            std::vector<BuildProduct> products;
+            if (preparation.requires_products) {
+                auto synchronization = plan_build(workspace.graph, workspace.registry, workspace.environment, preparation.build);
+                if (!synchronization)
+                    return std::unexpected(synchronization.error());
+
+                auto printed = print_actions(*synchronization, true);
+                if (!printed)
+                    return std::unexpected(printed.error());
+
+                auto generated = generate(*synchronization);
+                if (!generated)
+                    return std::unexpected(generated.error());
+
+                auto discovered = discover_products(workspace.graph, workspace.registry, workspace.environment);
+                if (!discovered)
+                    return std::unexpected(discovered.error());
+
+                products = std::move(*discovered);
+            }
+
+            auto plan = plan_task(workspace.graph, workspace.registry, workspace.environment, preparation, products, arguments);
+            if (!plan)
+                return std::unexpected(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return std::unexpected(printed.error());
+
+            auto report = kaixa::execute(*plan);
+            if (!report)
+                return std::unexpected(report.error());
+
+            return report->executed;
+        }
+
+        Result<std::size_t> execute_workflow_generate(const Workspace& workspace) {
+            auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment);
+            if (!plan)
+                return std::unexpected(plan.error());
+
+            auto printed = print_actions(*plan, true);
+            if (!printed)
+                return std::unexpected(printed.error());
+
+            auto report = generate(*plan);
+            if (!report)
+                return std::unexpected(report.error());
+
+            return report->synchronized;
+        }
+
+        Result<std::size_t> execute_workflow_build(const Workspace& workspace) {
+            BuildRequest request;
+            request.build_default = true;
+            auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment, request);
+            if (!plan)
+                return std::unexpected(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return std::unexpected(printed.error());
+
+            auto report = kaixa::execute(*plan);
+            if (!report)
+                return std::unexpected(report.error());
+
+            return report->executed;
+        }
+
+        Result<std::size_t> execute_workflow_tests(const Workspace& workspace) {
+            auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, TestRequest{});
+            if (!plan)
+                return std::unexpected(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return std::unexpected(printed.error());
+
+            auto report = test(*plan);
+            if (!report)
+                return std::unexpected(report.error());
+
+            return report->executed;
+        }
+
+        Result<std::size_t> execute_workflow_benchmarks(const Workspace& workspace) {
+            auto synchronized = execute_workflow_generate(workspace);
+            if (!synchronized)
+                return std::unexpected(synchronized.error());
+
+            auto targets = discover_executable_targets(workspace.graph, workspace.registry, workspace.environment);
+            if (!targets)
+                return std::unexpected(targets.error());
+
+            std::vector<RunTarget> benchmarks;
+            for (const RunTarget& target: *targets) {
+                if (target.purpose == ProductPurpose::benchmark)
+                    benchmarks.push_back(target);
+            }
+            if (benchmarks.empty())
+                return std::unexpected(error("workflow benchmark step found no runnable benchmarks"));
+
+            std::size_t executed = *synchronized;
+            for (RunTarget& benchmark: benchmarks) {
+                auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, benchmark.name, benchmark.package);
+                if (!plan)
+                    return std::unexpected(plan.error());
+
+                auto printed = print_actions(*plan);
+                if (!printed)
+                    return std::unexpected(printed.error());
+
+                auto built = kaixa::execute(*plan);
+                if (!built)
+                    return std::unexpected(built.error());
+
+                executed += built->executed;
+                std::cout << "benchmarking: " << format_command(benchmark.process.argv) << '\n';
+                std::cout.flush();
+                auto result = run_process(benchmark.process);
+                if (!result)
+                    return std::unexpected(result.error());
+
+                if (!result->succeeded()) {
+                    return std::unexpected(
+                        error("benchmark `" + benchmark.name + "` exited with code " + std::to_string(result->exit_code))
+                    );
+                }
+                ++executed;
+            }
+            return executed;
+        }
+
+        Result<std::size_t> execute_workflow_step(const Workspace& workspace, const PreparedWorkflowStep& step) {
+            switch (step.kind) {
+            case WorkflowStepKind::generate: return execute_workflow_generate(workspace);
+            case WorkflowStepKind::build: return execute_workflow_build(workspace);
+            case WorkflowStepKind::test: return execute_workflow_tests(workspace);
+            case WorkflowStepKind::bench: return execute_workflow_benchmarks(workspace);
+            case WorkflowStepKind::task:
+                if (!step.task)
+                    return std::unexpected(error("prepared workflow task has no task plan"));
+
+                return execute_task_preparation(workspace, *step.task);
+            }
+            return std::unexpected(error("unknown workflow step kind"));
         }
 
         int run(const HelpCommand&) {
@@ -1212,40 +1395,65 @@ namespace kaixa::cli {
             if (!preparation)
                 return fail(preparation.error());
 
-            std::vector<BuildProduct> products;
-            if (preparation->requires_products) {
-                auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment, preparation->build);
-                if (!synchronization)
-                    return fail(synchronization.error());
-
-                auto printed = print_actions(*synchronization, true);
-                if (!printed)
-                    return fail(printed.error());
-
-                auto generated = generate(*synchronization);
-                if (!generated)
-                    return fail(generated.error());
-
-                auto discovered = discover_products(workspace->graph, workspace->registry, workspace->environment);
-                if (!discovered)
-                    return fail(discovered.error());
-
-                products = std::move(*discovered);
-            }
-
-            auto plan = plan_task(workspace->graph, workspace->registry, workspace->environment, *preparation, products, command.arguments);
-            if (!plan)
-                return fail(plan.error());
-
-            auto printed = print_actions(*plan);
-            if (!printed)
-                return fail(printed.error());
-
-            auto report = kaixa::execute(*plan);
+            auto report = execute_task_preparation(*workspace, *preparation, command.arguments);
             if (!report)
                 return fail(report.error());
 
-            std::cout << "task completed: " << report->executed << " action(s) run\n";
+            std::cout << "task completed: " << *report << " action(s) run\n";
+            return 0;
+        }
+
+        int run(const WorkflowCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            auto workflows = discover_workflows(workspace->graph);
+            if (!workflows)
+                return fail(workflows.error());
+
+            if (command.list) {
+                if (workflows->empty()) {
+                    std::cout << "no workflows\n";
+                    return 0;
+                }
+                for (const WorkflowDefinition& workflow: *workflows)
+                    std::cout << workflow.qualified_name << '\n';
+
+                return 0;
+            }
+
+            auto preparation = prepare_workflow(workspace->graph, *command.name);
+            if (!preparation)
+                return fail(preparation.error());
+
+            std::size_t executed = 0;
+            for (std::size_t index = 0; index < preparation->steps.size(); ++index) {
+                const PreparedWorkflowStep& step = preparation->steps[index];
+                std::cout
+                    << "workflow "
+                    << preparation->workflow.qualified_name
+                    << ": step "
+                    << index + 1
+                    << '/'
+                    << preparation->steps.size()
+                    << ' '
+                    << step.name
+                    << '\n';
+                std::cout.flush();
+
+                auto result = execute_workflow_step(*workspace, step);
+                if (!result) {
+                    return fail(
+                        std::move(result).error().add_note(
+                            "workflow `" + preparation->workflow.qualified_name + "` failed at step `" + step.name + "`"
+                        )
+                    );
+                }
+                executed += *result;
+            }
+
+            std::cout << "workflow completed: " << preparation->steps.size() << " step(s), " << executed << " action(s) run\n";
             return 0;
         }
 

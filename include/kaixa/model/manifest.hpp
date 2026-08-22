@@ -2,6 +2,7 @@
 
 #include <kaixa/config/build_configuration.hpp>
 #include <kaixa/config/value.hpp>
+#include <kaixa/model/automation.hpp>
 #include <kaixa/model/file_set.hpp>
 #include <kaixa/model/version.hpp>
 
@@ -78,18 +79,6 @@ namespace kaixa {
         SourceLocation location;
     };
 
-    struct TaskDeclaration {
-        std::string name;
-        std::vector<std::string> run;
-        std::optional<std::filesystem::path> working_directory;
-        std::map<std::string, std::string> environment;
-        std::vector<std::filesystem::path> inputs;
-        std::vector<std::filesystem::path> outputs;
-        std::vector<std::string> after;
-        std::filesystem::path source;
-        SourceLocation location;
-    };
-
     struct PackageSet {
         std::string name;
         std::vector<std::string> members;
@@ -151,6 +140,7 @@ namespace kaixa {
         ConfigurationSet configurations;
         std::optional<Value> resolver_options;
         std::vector<TaskDeclaration> commands;
+        std::vector<WorkflowDeclaration> workflows;
         std::filesystem::path source;
         SourceLocation location;
 
@@ -193,6 +183,7 @@ namespace kaixa {
     [[nodiscard]] bool is_valid_package_name(std::string_view name) noexcept;
     [[nodiscard]] bool is_valid_target_name(std::string_view name) noexcept;
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document(const Value& document);
+    [[nodiscard]] Result<AutomationDocument> read_automation_document(TableReader& root, bool allow_package_scope = false);
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document_file(const std::filesystem::path& path);
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document_string(std::string_view text, std::string_view source_name);
     [[nodiscard]] Result<Manifest> parse_manifest(const Value& document);

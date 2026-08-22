@@ -1,5 +1,7 @@
 #include <kaixa/config/build_configuration.hpp>
 
+#include <kaixa/model/manifest.hpp>
+
 #include <kaixa/config/parser.hpp>
 
 #include <algorithm>
@@ -272,11 +274,15 @@ namespace kaixa {
         if (!providers)
             return std::unexpected(providers.error());
 
+        auto automation = read_automation_document(root, true);
+        if (!automation)
+            return std::unexpected(automation.error());
+
         auto finished = root.finish();
         if (!finished)
             return std::unexpected(finished.error());
 
-        return ConfigurationDocument{std::move(*configurations), std::move(*providers)};
+        return ConfigurationDocument{std::move(*configurations), std::move(*providers), std::move(*automation)};
     }
 
     Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path) {

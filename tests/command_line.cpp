@@ -302,6 +302,34 @@ KAIXA_TEST(command_line_task_lists_or_forwards_arguments) {
     }
 }
 
+KAIXA_TEST(command_line_workflow_selects_or_lists_workflows) {
+    constexpr std::array selected_arguments = {std::string_view("workflow"),
+        std::string_view("ci"),
+        std::string_view("--path"),
+        std::string_view("project"),
+        std::string_view("--config"),
+        std::string_view("quality")};
+    const auto selected = kaixa::cli::parse_command_line(selected_arguments);
+    context.check(selected.has_value(), "workflow command parses");
+    if (selected) {
+        const auto* command = std::get_if<kaixa::cli::WorkflowCommand>(&*selected);
+        context.check(command != nullptr, "workflow keeps its command type");
+        if (command) {
+            context.check_equal(command->name.value_or(""), std::string("ci"), "workflow name is retained");
+            context.check_equal(command->workspace.path.generic_string(), std::string("project"), "workflow workspace is retained");
+            context.check_equal(command->workspace.configurations.front(), std::string("quality"), "workflow configuration is retained");
+        }
+    }
+
+    constexpr std::array list_arguments = {std::string_view("workflow"), std::string_view("--list")};
+    const auto listed = kaixa::cli::parse_command_line(list_arguments);
+    context.check(listed.has_value(), "workflow list parses");
+    if (listed) {
+        const auto* command = std::get_if<kaixa::cli::WorkflowCommand>(&*listed);
+        context.check(command != nullptr && command->list, "workflow list mode is retained");
+    }
+}
+
 KAIXA_TEST(command_line_bench_selects_a_target_and_forwards_arguments) {
     constexpr std::array arguments = {std::string_view("bench"),
         std::string_view("--target"),

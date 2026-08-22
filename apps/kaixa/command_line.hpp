@@ -105,6 +105,12 @@ namespace kaixa::cli {
         bool list = false;
     };
 
+    struct WorkflowCommand {
+        WorkspaceOptions workspace;
+        std::optional<std::string> name;
+        bool list = false;
+    };
+
     struct CleanCommand {
         WorkspaceOptions workspace;
         bool all = false;
@@ -136,6 +142,7 @@ namespace kaixa::cli {
         BenchCommand,
         RunCommand,
         TaskCommand,
+        WorkflowCommand,
         CleanCommand,
         ConfigListCommand,
         ConfigShowCommand,

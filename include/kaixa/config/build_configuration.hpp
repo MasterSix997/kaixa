@@ -4,6 +4,7 @@
 #include <kaixa/config/table_reader.hpp>
 #include <kaixa/config/value.hpp>
 #include <kaixa/foundation/diagnostic.hpp>
+#include <kaixa/model/automation.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -34,6 +35,7 @@ namespace kaixa {
     struct ConfigurationDocument {
         ConfigurationSet configurations;
         std::vector<ProviderDefinition> providers;
+        AutomationDocument automation;
     };
 
     struct ResolverArgumentOverride {

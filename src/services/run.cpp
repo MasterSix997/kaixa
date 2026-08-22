@@ -21,9 +21,12 @@ namespace kaixa {
             if (product.kind != ProductKind::executable || !product.artifact)
                 continue;
 
-            targets.push_back(
-                {product.name, product.purpose, ProcessRequest{{product.artifact->string()}, graph[product.package].directory}}
-            );
+            targets.push_back({
+                product.name,
+                product.purpose,
+                ProcessRequest{{product.artifact->string()}, graph[product.package].directory},
+                product.package
+            });
         }
         return targets;
     }
@@ -102,11 +105,16 @@ namespace kaixa {
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        std::string target
+        std::string target,
+        const std::optional<PackageId> package
     ) {
         BuildRequest request;
-        request.targets.push_back(std::move(target));
         request.build_default = false;
+        if (package)
+            request.packages.push_back({*package, {std::move(target)}, false});
+        else
+            request.targets.push_back(std::move(target));
+
         return plan_build(graph, registry, environment, request);
     }
 }

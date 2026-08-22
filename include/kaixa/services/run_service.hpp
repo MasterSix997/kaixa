@@ -35,6 +35,7 @@ namespace kaixa {
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        std::string target
+        std::string target,
+        std::optional<PackageId> package = std::nullopt
     );
 }

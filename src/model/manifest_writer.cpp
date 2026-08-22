@@ -84,6 +84,15 @@ namespace kaixa {
             output += "]\n";
         }
 
+        std::vector<std::string> path_strings(const std::vector<std::filesystem::path>& paths) {
+            std::vector<std::string> result;
+            result.reserve(paths.size());
+            for (const std::filesystem::path& path: paths)
+                result.push_back(path.generic_string());
+
+            return result;
+        }
+
         Result<std::string> format_value(const Value& value) {
             if (const bool* boolean = value.as_boolean())
                 return *boolean ? "true" : "false";
@@ -425,6 +434,94 @@ namespace kaixa {
             output += "]]\n";
         }
 
+        void append_task(std::string& output, const TaskDeclaration& task) {
+            append_header(output, {"command", task.name});
+            append_strings(output, "run", task.run);
+            if (task.working_directory)
+                output += "working-directory = " + toml_string(task.working_directory->generic_string()) + '\n';
+
+            if (!task.inputs.empty())
+                append_strings(output, "inputs", path_strings(task.inputs));
+
+            if (!task.outputs.empty())
+                append_strings(output, "outputs", path_strings(task.outputs));
+
+            if (!task.after.empty())
+                append_strings(output, "after", task.after);
+
+            if (!task.environment.empty()) {
+                output += "environment = { ";
+                bool first = true;
+                for (const auto& [name, value]: task.environment) {
+                    if (!first)
+                        output += ", ";
+
+                    output += key(name) + " = " + toml_string(value);
+                    first = false;
+                }
+                output += " }\n";
+            }
+        }
+
+        void append_workflow(std::string& output, const WorkflowDeclaration& workflow) {
+            append_header(output, {"workflow", workflow.name});
+            append_strings(output, "steps", workflow.steps);
+        }
+
+        Result<void> validate_tasks(const std::vector<TaskDeclaration>& tasks) {
+            for (std::size_t index = 0; index < tasks.size(); ++index) {
+                const TaskDeclaration& task = tasks[index];
+                if (!is_valid_target_name(task.name))
+                    return std::unexpected(error("invalid command name `" + task.name + "`"));
+
+                if (task.package)
+                    return std::unexpected(error("manifest command `" + task.name + "` cannot select a package"));
+
+                if (task.run.empty())
+                    return std::unexpected(error("command `" + task.name + "` has an empty run vector"));
+
+                if (std::ranges::any_of(task.run, &std::string::empty))
+                    return std::unexpected(error("command `" + task.name + "` has an empty argument"));
+
+                const auto duplicate = std::ranges::find(
+                    tasks.begin(),
+                    tasks.begin() + static_cast<std::ptrdiff_t>(index),
+                    task.name,
+                    &TaskDeclaration::name
+                );
+                if (duplicate != tasks.begin() + static_cast<std::ptrdiff_t>(index))
+                    return std::unexpected(error("duplicate command `" + task.name + "`"));
+            }
+            return {};
+        }
+
+        Result<void> validate_workflows(const std::vector<WorkflowDeclaration>& workflows) {
+            for (std::size_t index = 0; index < workflows.size(); ++index) {
+                const WorkflowDeclaration& workflow = workflows[index];
+                if (!is_valid_target_name(workflow.name))
+                    return std::unexpected(error("invalid workflow name `" + workflow.name + "`"));
+
+                if (workflow.package)
+                    return std::unexpected(error("manifest workflow `" + workflow.name + "` cannot select a package"));
+
+                if (workflow.steps.empty())
+                    return std::unexpected(error("workflow `" + workflow.name + "` has no steps"));
+
+                if (std::ranges::any_of(workflow.steps, &std::string::empty))
+                    return std::unexpected(error("workflow `" + workflow.name + "` has an empty step"));
+
+                const auto duplicate = std::ranges::find(
+                    workflows.begin(),
+                    workflows.begin() + static_cast<std::ptrdiff_t>(index),
+                    workflow.name,
+                    &WorkflowDeclaration::name
+                );
+                if (duplicate != workflows.begin() + static_cast<std::ptrdiff_t>(index))
+                    return std::unexpected(error("duplicate workflow `" + workflow.name + "`"));
+            }
+            return {};
+        }
+
         Result<void> validate_manifest(const Manifest& manifest) {
             if (!is_valid_package_name(manifest.name))
                 return std::unexpected(error("invalid package name `" + manifest.name + "`"));
@@ -480,6 +577,14 @@ namespace kaixa {
             }
             if (manifest.resolver_options && !manifest.resolver_options->is_table())
                 return std::unexpected(error("manifest resolver options must be a table"));
+
+            auto tasks = validate_tasks(manifest.commands);
+            if (!tasks)
+                return std::unexpected(tasks.error());
+
+            auto workflows = validate_workflows(manifest.workflows);
+            if (!workflows)
+                return std::unexpected(workflows.error());
 
             for (const PackageTargetReference& reference: manifest.target_references) {
                 if (reference.path.empty())
@@ -618,6 +723,13 @@ namespace kaixa {
             if (!appended)
                 return std::unexpected(appended.error());
         }
+
+        for (const TaskDeclaration& task: manifest.commands)
+            append_task(output, task);
+
+        for (const WorkflowDeclaration& workflow: manifest.workflows)
+            append_workflow(output, workflow);
+
         return output;
     }
 

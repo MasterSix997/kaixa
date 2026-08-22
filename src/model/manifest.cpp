@@ -101,23 +101,34 @@ namespace kaixa {
             return result;
         }
 
-        Result<TaskDeclaration> parse_task_declaration(const Value& value, const std::string& path) {
+        Result<TaskDeclaration> parse_task_declaration(
+            const Value& value,
+            const std::string& path,
+            const std::string& name,
+            const bool allow_package_scope
+        ) {
             auto table_result = TableReader::bind(value, path);
             if (!table_result)
                 return std::unexpected(table_result.error());
 
             TableReader table = std::move(*table_result);
             TaskDeclaration result;
-            auto name = table.string("name");
-            if (!name)
-                return std::unexpected(name.error());
-
-            if (!is_valid_target_name(*name)) {
-                return std::unexpected(error_at(table.location_of("name"), "`" + *name + "` is not a valid command name"));
-            }
-            result.name = std::move(*name);
-            result.location = table.location_of("name");
+            result.name = name;
+            result.location = value.location();
             result.source = result.location.source;
+
+            if (allow_package_scope) {
+                auto package = table.optional_string("package");
+                if (!package)
+                    return std::unexpected(package.error());
+
+                if (*package) {
+                    if (!is_valid_package_name(**package)) {
+                        return std::unexpected(error_at(table.location_of("package"), "`" + **package + "` is not a valid package name"));
+                    }
+                    result.package = std::move(**package);
+                }
+            }
 
             const Value* run = table.take("run");
             if (run) {
@@ -215,35 +226,89 @@ namespace kaixa {
             return result;
         }
 
-        Result<std::vector<TaskDeclaration>> read_task_declarations(TableReader& table) {
-            const Value* commands = table.take("command");
-            if (!commands)
+        Result<std::vector<TaskDeclaration>> read_task_declarations(TableReader& table, const bool allow_package_scope = false) {
+            auto commands_result = table.optional_table("command");
+            if (!commands_result)
+                return std::unexpected(commands_result.error());
+
+            if (!*commands_result)
                 return std::vector<TaskDeclaration>{};
 
-            std::vector<const Value*> values;
-            if (const std::vector<Value>* array = commands->as_array()) {
-                values.reserve(array->size());
-                for (const Value& value: *array)
-                    values.push_back(&value);
-
-            } else if (commands->is_table()) {
-                values.push_back(commands);
-            } else {
-                return std::unexpected(error_at(commands->location(), "commands must be a table or an array of tables"));
-            }
-
+            TableReader commands = std::move(**commands_result);
             std::vector<TaskDeclaration> result;
-            result.reserve(values.size());
-            for (std::size_t index = 0; index < values.size(); ++index) {
-                auto command = parse_task_declaration(*values[index], "command." + std::to_string(index));
+            result.reserve(commands.entries().size());
+            for (const TableEntry& entry: commands.entries()) {
+                if (!is_valid_target_name(entry.key)) {
+                    return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid command name"));
+                }
+
+                auto command = parse_task_declaration(
+                    entry.value,
+                    join_config_path(commands.path(), entry.key),
+                    entry.key,
+                    allow_package_scope
+                );
                 if (!command)
                     return std::unexpected(command.error());
 
-                if (std::ranges::any_of(result, [&](const TaskDeclaration& existing) { return existing.name == command->name; })) {
-                    return std::unexpected(error_at(command->location, "command `" + command->name + "` is declared more than once"));
-                }
                 result.push_back(std::move(*command));
             }
+            commands.take_all();
+            return result;
+        }
+
+        Result<std::vector<WorkflowDeclaration>> read_workflow_declarations(TableReader& table, const bool allow_package_scope = false) {
+            auto workflows_result = table.optional_table("workflow");
+            if (!workflows_result)
+                return std::unexpected(workflows_result.error());
+
+            if (!*workflows_result)
+                return std::vector<WorkflowDeclaration>{};
+
+            TableReader workflows = std::move(**workflows_result);
+            std::vector<WorkflowDeclaration> result;
+            result.reserve(workflows.entries().size());
+            for (const TableEntry& entry: workflows.entries()) {
+                if (!is_valid_target_name(entry.key)) {
+                    return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid workflow name"));
+                }
+
+                auto declaration_result = TableReader::bind(entry.value, join_config_path(workflows.path(), entry.key));
+                if (!declaration_result)
+                    return std::unexpected(declaration_result.error());
+
+                TableReader declaration = std::move(*declaration_result);
+                std::optional<std::string> package;
+                if (allow_package_scope) {
+                    auto selected_package = declaration.optional_string("package");
+                    if (!selected_package)
+                        return std::unexpected(selected_package.error());
+
+                    if (*selected_package) {
+                        if (!is_valid_package_name(**selected_package)) {
+                            return std::unexpected(
+                                error_at(declaration.location_of("package"), "`" + **selected_package + "` is not a valid package name")
+                            );
+                        }
+                        package = std::move(**selected_package);
+                    }
+                }
+
+                auto steps = read_string_array(declaration, "steps");
+                if (!steps)
+                    return std::unexpected(steps.error());
+
+                if (steps->empty()) {
+                    return std::unexpected(error_at(entry.value.location(), "workflow `" + entry.key + "` requires at least one step"));
+                }
+
+                auto finished = declaration.finish();
+                if (!finished)
+                    return std::unexpected(finished.error());
+
+                result.push_back({entry.key, std::move(package), std::move(*steps), entry.value.location().source, entry.value.location()});
+            }
+            workflows.take_all();
             return result;
         }
 
@@ -996,6 +1061,12 @@ namespace kaixa {
 
             manifest.commands = std::move(*commands);
 
+            auto workflows = read_workflow_declarations(member);
+            if (!workflows)
+                return std::unexpected(workflows.error());
+
+            manifest.workflows = std::move(*workflows);
+
             if (!manifest.resolver.empty()) {
                 if (const Value* options = member.take(manifest.resolver)) {
                     if (!options->is_table()) {
@@ -1117,6 +1188,24 @@ namespace kaixa {
                 );
             }
 
+            auto workflows = read_workflow_declarations(root);
+            if (!workflows)
+                return std::unexpected(workflows.error());
+
+            if (!workflows->empty()) {
+                if (!document.package) {
+                    return std::unexpected(error_at(workflows->front().location, "workflows require a package in the importing manifest"));
+                }
+                for (WorkflowDeclaration& workflow: *workflows) {
+                    if (std::ranges::any_of(document.package->workflows, [&](const WorkflowDeclaration& existing) {
+                            return existing.name == workflow.name;
+                        })) {
+                        return std::unexpected(error_at(workflow.location, "workflow `" + workflow.name + "` is declared more than once"));
+                    }
+                    document.package->workflows.push_back(std::move(workflow));
+                }
+            }
+
             auto finished = root.finish();
             if (!finished)
                 return std::unexpected(finished.error());
@@ -1165,6 +1254,18 @@ namespace kaixa {
                 || character == '-'
                 || character == '.';
         });
+    }
+
+    Result<AutomationDocument> read_automation_document(TableReader& root, const bool allow_package_scope) {
+        auto commands = read_task_declarations(root, allow_package_scope);
+        if (!commands)
+            return std::unexpected(commands.error());
+
+        auto workflows = read_workflow_declarations(root, allow_package_scope);
+        if (!workflows)
+            return std::unexpected(workflows.error());
+
+        return AutomationDocument{std::move(*commands), std::move(*workflows)};
     }
 
     Result<ManifestDocument> parse_manifest_document(const Value& document) {
@@ -1357,6 +1458,17 @@ namespace kaixa {
                 return std::unexpected(error_at(commands->front().location, "commands require a package"));
 
             result.package->commands = std::move(*commands);
+        }
+
+        auto workflows = read_workflow_declarations(root);
+        if (!workflows)
+            return std::unexpected(workflows.error());
+
+        if (!workflows->empty()) {
+            if (!result.package)
+                return std::unexpected(error_at(workflows->front().location, "workflows require a package"));
+
+            result.package->workflows = std::move(*workflows);
         }
 
         auto root_finished = root.finish();

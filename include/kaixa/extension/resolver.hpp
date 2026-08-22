@@ -48,6 +48,7 @@ namespace kaixa {
         std::string name;
         ProductPurpose purpose = ProductPurpose::primary;
         ProcessRequest process;
+        std::optional<PackageId> package;
     };
 
     struct CleanRequest {

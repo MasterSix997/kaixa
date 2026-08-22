@@ -27,7 +27,11 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<std::vector<TaskDefinition>> discover_tasks(const Graph& graph);
-    [[nodiscard]] Result<TaskPreparation> prepare_task(const Graph& graph, std::string_view requested);
+    [[nodiscard]] Result<TaskPreparation> prepare_task(
+        const Graph& graph,
+        std::string_view requested,
+        std::optional<PackageId> relative_package = std::nullopt
+    );
     [[nodiscard]] Result<BuildPlan> plan_task(
         const Graph& graph,
         const ExtensionRegistry& registry,

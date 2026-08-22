@@ -27,21 +27,27 @@ generation = "state"
 msvc-runtime = "static"
 output = { runtime = "bin", library = "lib", archive = "lib" }
 
-[[command]]
-name = "quality"
+[command.quality]
 run = ["python", "tools/quality.py", "rules", "format", "complexity"]
 inputs = ["tools/quality.py", "tools/complexity-baseline.txt"]
 
-[[command]]
-name = "format-check"
+[command.format-check]
 run = ["python", "tools/quality.py", "format", "--all-files"]
 inputs = ["tools/quality.py"]
 
-[[command]]
-name = "tidy"
+[command.tidy]
 after = ["build"]
 run = ["python", "tools/quality.py", "tidy", "--compile-commands", "${build-dir}"]
 inputs = ["tools/quality.py"]
+
+[workflow.dev]
+steps = ["generate", "quality", "build", "test"]
+
+[workflow.ci]
+steps = ["generate", "quality", "build", "test", "tidy"]
+
+[workflow.performance]
+steps = ["generate", "build", "bench"]
 
 [[config]]
 name = "quality"

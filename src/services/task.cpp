@@ -211,12 +211,16 @@ namespace kaixa {
             return {};
         }
 
-        Result<TaskAnalysis> analyze_task(const Graph& graph, const std::string_view requested) {
+        Result<TaskAnalysis> analyze_task(
+            const Graph& graph,
+            const std::string_view requested,
+            const std::optional<PackageId> relative_package
+        ) {
             auto tasks = discover_tasks(graph);
             if (!tasks)
                 return std::unexpected(tasks.error());
 
-            auto selected = resolve_task(*tasks, graph, requested, std::nullopt);
+            auto selected = resolve_task(*tasks, graph, requested, relative_package);
             if (!selected)
                 return std::unexpected(selected.error());
 
@@ -576,8 +580,12 @@ namespace kaixa {
         return result;
     }
 
-    Result<TaskPreparation> prepare_task(const Graph& graph, const std::string_view requested) {
-        auto analysis = analyze_task(graph, requested);
+    Result<TaskPreparation> prepare_task(
+        const Graph& graph,
+        const std::string_view requested,
+        const std::optional<PackageId> relative_package
+    ) {
+        auto analysis = analyze_task(graph, requested, relative_package);
         if (!analysis)
             return std::unexpected(analysis.error());
 
