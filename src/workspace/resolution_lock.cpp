@@ -362,6 +362,7 @@ namespace kaixa {
             auto source_driver = package.optional_string("source-driver");
             const Value* source_options = package.take("source-options");
             auto source_identity = package.optional_string("source-identity");
+            auto source_integrity = package.optional_string("source-integrity");
             auto resolutions = parse_resolutions(package);
             if (!name)
                 return std::unexpected(name.error());
@@ -383,6 +384,9 @@ namespace kaixa {
 
             if (!source_identity)
                 return std::unexpected(source_identity.error());
+
+            if (!source_integrity)
+                return std::unexpected(source_integrity.error());
 
             if (!resolutions)
                 return std::unexpected(resolutions.error());
@@ -409,6 +413,7 @@ namespace kaixa {
                 std::move(*source_driver),
                 source_options ? std::optional<Value>{*source_options} : std::nullopt,
                 std::move(*source_identity),
+                std::move(*source_integrity),
                 std::move(*resolutions)};
         }
 
@@ -466,6 +471,7 @@ namespace kaixa {
                 && left.authority == right.authority
                 && left.source_driver == right.source_driver
                 && left.source_identity == right.source_identity
+                && left.source_integrity == right.source_integrity
                 && left.source_options.has_value() == right.source_options.has_value()
                 && (!left.source_options || canonical_value(*left.source_options) == canonical_value(*right.source_options));
         }
@@ -591,6 +597,9 @@ namespace kaixa {
             if (package->source_identity)
                 output += "source-identity = " + toml_string(*package->source_identity) + '\n';
 
+            if (package->source_integrity)
+                output += "source-integrity = " + toml_string(*package->source_integrity) + '\n';
+
             output += "resolutions = [\n";
             for (const LockedPackageResolution& resolution: package->resolutions)
                 output += "    " + resolution_value(resolution) + ",\n";
@@ -670,6 +679,7 @@ namespace kaixa {
                     locked.source_options = normalized_source_options(*package.source->locator, context_directory);
                 }
                 locked.source_identity = normalized_identity(*package.source, context_directory);
+                locked.source_integrity = package.source->integrity;
             }
 
             LockedPackageResolution resolution;
@@ -814,15 +824,14 @@ namespace kaixa {
         if (locked.version != version)
             return false;
 
-        const std::optional<std::string> source_driver = candidate.source ? std::optional<std::string>{candidate.source->driver}
-                                                                          : std::nullopt;
+        const std::optional<SourceLocator>& source = candidate.source ? candidate.source : candidate.artifact;
+        const std::optional<std::string> source_driver = source ? std::optional<std::string>{source->driver} : std::nullopt;
         if (locked.source_driver != source_driver)
             return false;
 
-        if (locked.source_options.has_value() != candidate.source.has_value())
+        if (locked.source_options.has_value() != source.has_value())
             return false;
 
-        return !candidate.source
-            || canonical_value(*locked.source_options) == canonical_value(normalized_source_options(*candidate.source, context_directory));
+        return !source || canonical_value(*locked.source_options) == canonical_value(normalized_source_options(*source, context_directory));
     }
 }

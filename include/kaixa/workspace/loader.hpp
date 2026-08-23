@@ -7,6 +7,7 @@
 #include <kaixa/workspace/resolution_lock.hpp>
 
 #include <filesystem>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -41,6 +42,11 @@ namespace kaixa {
         PolicyContext policy_context;
         LockMode lock_mode = LockMode::none;
         std::filesystem::path lockfile;
+        std::span<const std::string> unlocked_packages;
+        bool unlock_all = false;
+        bool write_lock = true;
+        bool refresh_sources = true;
+        std::function<void(std::string_view)> source_progress;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

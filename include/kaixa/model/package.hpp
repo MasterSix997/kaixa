@@ -36,6 +36,7 @@ namespace kaixa {
         std::optional<Version> version;
         std::optional<SourceLocator> locator;
         std::optional<std::string> identity;
+        std::optional<std::string> integrity;
     };
 
     struct PackageNode {

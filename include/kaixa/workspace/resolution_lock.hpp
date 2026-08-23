@@ -46,6 +46,7 @@ namespace kaixa {
         std::optional<std::string> source_driver;
         std::optional<Value> source_options;
         std::optional<std::string> source_identity;
+        std::optional<std::string> source_integrity;
         std::vector<LockedPackageResolution> resolutions;
     };
 

@@ -1,5 +1,7 @@
 #include <kaixa/workspace/loader.hpp>
 
+#include <kaixa/source/cache.hpp>
+
 #include <kaixa/config/parser.hpp>
 #include <kaixa/model/file_set.hpp>
 #include <kaixa/model/manifest.hpp>
@@ -438,22 +440,19 @@ namespace kaixa {
 
         class WorkspaceLoader {
         public:
-            WorkspaceLoader(
-                ExtensionRegistry* extensions,
-                std::filesystem::path source_cache,
-                const std::span<const ProviderLayer> provider_layers,
-                const Value* feature_settings,
-                PolicyContext policy_context,
-                const LockMode lock_mode,
-                std::filesystem::path lockfile
-            )
-                : m_extensions(extensions)
+            WorkspaceLoader(const ResolutionOptions& options, std::filesystem::path source_cache)
+                : m_extensions(options.extensions)
                 , m_source_cache(std::move(source_cache))
-                , m_provider_layers(provider_layers)
-                , m_feature_settings(feature_settings)
-                , m_policy_context(std::move(policy_context))
-                , m_lock_mode(lock_mode)
-                , m_lockfile(std::move(lockfile)) {}
+                , m_provider_layers(options.provider_layers)
+                , m_feature_settings(options.feature_settings)
+                , m_policy_context(options.policy_context)
+                , m_lock_mode(options.lock_mode)
+                , m_lockfile(options.lockfile)
+                , m_unlocked_packages(options.unlocked_packages)
+                , m_unlock_all(options.unlock_all)
+                , m_write_lock(options.write_lock)
+                , m_refresh_sources(options.refresh_sources)
+                , m_source_progress(options.source_progress) {}
 
             Result<PackageResolution> load(
                 const std::filesystem::path& manifest_path,
@@ -532,11 +531,23 @@ namespace kaixa {
                             return std::unexpected(valid.error());
                     } else {
                         ResolutionLock merged = m_lock ? merge_resolution_lock(std::move(*m_lock), current) : current;
-                        auto written = write_resolution_lock(m_lockfile, merged);
-                        if (!written)
-                            return std::unexpected(written.error());
+                        if (m_write_lock) {
+                            auto written = write_resolution_lock(m_lockfile, merged);
+                            if (!written)
+                                return std::unexpected(written.error());
 
-                        lock_changed = *written;
+                            lock_changed = *written;
+                        } else {
+                            auto before = m_lock ? format_resolution_lock(*m_lock) : Result<std::string>{std::string{}};
+                            auto after = format_resolution_lock(merged);
+                            if (!before)
+                                return std::unexpected(before.error());
+
+                            if (!after)
+                                return std::unexpected(after.error());
+
+                            lock_changed = *before != *after;
+                        }
                     }
                 }
 
@@ -611,10 +622,19 @@ namespace kaixa {
                         m_routing[package] = provider;
 
                     if (!document->providers.empty()) {
-                        layers.push_back({std::move(document->providers), ProviderContext{manifest.parent_path()}});
+                        layers.push_back(
+                            {std::move(document->providers),
+                                ProviderContext{manifest.parent_path(), m_source_cache, m_lock_mode == LockMode::frozen}}
+                        );
                     }
                 }
                 layers.insert(layers.end(), m_provider_layers.begin(), m_provider_layers.end());
+                for (ProviderLayer& layer: layers) {
+                    if (layer.context.cache.empty())
+                        layer.context.cache = m_source_cache;
+
+                    layer.context.offline = layer.context.offline || m_lock_mode == LockMode::frozen;
+                }
                 if (layers.empty())
                     return {};
 
@@ -890,14 +910,19 @@ namespace kaixa {
                 return {};
             }
 
+            struct SourcePackageResolution {
+                std::optional<std::string> provider;
+                std::string authority;
+                std::optional<std::string> identity;
+                std::optional<Version> expected_version;
+                std::optional<std::string> integrity;
+            };
+
             Result<PackageId> load_package_from_source(
                 const std::filesystem::path& directory,
                 const SourceLocator& source,
                 const DependencyBinding& dependency,
-                std::optional<std::string> provider,
-                std::string authority,
-                std::optional<std::string> identity,
-                const std::optional<Version>& expected_version = std::nullopt
+                SourcePackageResolution resolution
             ) {
                 const std::filesystem::path manifest_path = directory / "Kaixa.toml";
                 auto document = parse_manifest_document_file(manifest_path);
@@ -931,17 +956,18 @@ namespace kaixa {
                 if (!loaded)
                     return std::unexpected(loaded.error());
 
-                auto version = validate_resolved_version(*loaded, dependency.request, expected_version, dependency.location);
+                auto version = validate_resolved_version(*loaded, dependency.request, resolution.expected_version, dependency.location);
                 if (!version)
                     return std::unexpected(version.error());
 
                 const std::optional<Version> resolved_version = m_graph[*loaded].manifest ? m_graph[*loaded].manifest->version
-                                                                                          : expected_version;
-                m_graph[*loaded].source = PackageSource{std::move(provider),
-                    std::move(authority),
+                                                                                          : resolution.expected_version;
+                m_graph[*loaded].source = PackageSource{std::move(resolution.provider),
+                    std::move(resolution.authority),
                     resolved_version,
                     source,
-                    std::move(identity)};
+                    std::move(resolution.identity),
+                    std::move(resolution.integrity)};
                 return *loaded;
             }
 
@@ -958,14 +984,17 @@ namespace kaixa {
                     return std::unexpected(error_at(dependency.location, "source driver `" + source.driver + "` is not installed"));
                 }
 
-                auto located = driver->locate(source, SourceContext{requester, m_source_cache});
+                auto located = driver->materialize(source, source_context(requester, dependency.request.package));
                 if (!located)
                     return std::unexpected(located.error());
 
                 if (!*located) {
                     return std::unexpected(
                         error_at(dependency.location, "source for package `" + dependency.request.package + "` is not available locally")
-                            .add_note("source synchronization has not been implemented yet")
+                            .add_note(
+                                m_lock_mode == LockMode::frozen ? "frozen mode does not access the network"
+                                                                : "check the locator and source-driver configuration"
+                            )
                     );
                 }
                 if (!(**located).directory.is_absolute()) {
@@ -982,10 +1011,11 @@ namespace kaixa {
                     *directory,
                     source,
                     dependency,
-                    std::move(provider),
-                    std::move(authority),
-                    (**located).identity,
-                    expected_version
+                    SourcePackageResolution{std::move(provider),
+                        std::move(authority),
+                        (**located).identity,
+                        expected_version,
+                        (**located).integrity}
                 );
             }
 
@@ -995,7 +1025,8 @@ namespace kaixa {
                     return std::unexpected(candidates.error());
 
                 const ProviderInfo provider_info = provider.info();
-                const LockedPackage* locked = m_lock ? m_lock->find(dependency.request.package) : nullptr;
+                const bool unlocked = package_is_unlocked(dependency.request.package);
+                const LockedPackage* locked = m_lock && !unlocked ? m_lock->find(dependency.request.package) : nullptr;
                 const bool provider_is_locked = locked && locked->provider == provider_info.name;
                 if (locked
                     && locked->provider
@@ -1036,7 +1067,8 @@ namespace kaixa {
                             "provider `" + provider.info().name + "` returned a candidate without an authority"
                         ));
                     }
-                    if (candidate.source && candidate.source->driver.empty()) {
+                    if ((candidate.source && candidate.source->driver.empty())
+                        || (candidate.artifact && candidate.artifact->driver.empty())) {
                         return std::unexpected(error_at(
                             dependency.location,
                             "provider `" + provider.info().name + "` returned a candidate without a source driver"
@@ -1157,16 +1189,52 @@ namespace kaixa {
                         return *existing;
                     }
 
+                    std::filesystem::path artifact_directory;
+                    std::optional<std::string> artifact_identity;
+                    std::optional<std::string> artifact_integrity;
+                    if (candidate->artifact) {
+                        SourceDriver* driver = m_extensions ? m_extensions->find_source_driver(candidate->artifact->driver) : nullptr;
+                        if (!driver) {
+                            return std::unexpected(error_at(
+                                dependency.location,
+                                "artifact source driver `" + candidate->artifact->driver + "` is not installed"
+                            ));
+                        }
+
+                        auto materialized = driver->materialize(
+                            *candidate->artifact,
+                            source_context(requester, dependency.request.package)
+                        );
+                        if (!materialized)
+                            return std::unexpected(materialized.error());
+
+                        if (!*materialized)
+                            return std::unexpected(error_at(dependency.location, "prebuilt artifact is not available"));
+
+                        auto canonical = canonical_directory((**materialized).directory, dependency.location);
+                        if (!canonical)
+                            return std::unexpected(canonical.error());
+
+                        artifact_directory = std::move(*canonical);
+                        artifact_identity = (**materialized).identity;
+                        artifact_integrity = (**materialized).integrity;
+                    }
+
                     return m_graph.add(
                         PackageNode{{},
                             candidate->package,
-                            {},
+                            std::move(artifact_directory),
                             PackageKind::opaque,
                             candidate->resolver.value_or(std::string{}),
                             std::nullopt,
                             {},
                             {},
-                            PackageSource{info.name, candidate->authority, candidate->version, std::nullopt, std::nullopt},
+                            PackageSource{info.name,
+                                candidate->authority,
+                                candidate->version,
+                                candidate->artifact,
+                                std::move(artifact_identity),
+                                std::move(artifact_integrity)},
                             candidate->descriptor}
                     );
                 }
@@ -1194,6 +1262,21 @@ namespace kaixa {
                     }
                 }
                 return selected;
+            }
+
+            [[nodiscard]] bool package_is_unlocked(const std::string_view package) const {
+                return m_unlock_all || std::ranges::find(m_unlocked_packages, package) != m_unlocked_packages.end();
+            }
+
+            [[nodiscard]] SourceContext source_context(const std::filesystem::path& requester, const std::string_view package) const {
+                const LockedPackage* locked = m_lock && !package_is_unlocked(package) ? m_lock->find(package) : nullptr;
+                return SourceContext{requester,
+                    m_source_cache,
+                    m_lock_mode == LockMode::frozen,
+                    package_is_unlocked(package) && m_refresh_sources,
+                    locked ? locked->source_identity : std::nullopt,
+                    locked ? locked->source_integrity : std::nullopt,
+                    m_source_progress};
             }
 
             Result<void> activate_features(
@@ -1443,7 +1526,12 @@ namespace kaixa {
                 const std::filesystem::path manifest = directory / "Kaixa.toml";
                 std::error_code failure;
                 if (std::filesystem::is_regular_file(manifest, failure)) {
-                    return load_package_from_source(directory, source, dependency, std::nullopt, "direct", directory.generic_string());
+                    return load_package_from_source(
+                        directory,
+                        source,
+                        dependency,
+                        SourcePackageResolution{std::nullopt, "direct", directory.generic_string()}
+                    );
                 }
 
                 if (const auto existing = m_graph.find_by_directory(directory)) {
@@ -1500,6 +1588,11 @@ namespace kaixa {
             std::filesystem::path m_context_manifest;
             std::filesystem::path m_context_directory;
             std::optional<ResolutionLock> m_lock;
+            std::span<const std::string> m_unlocked_packages;
+            bool m_unlock_all = false;
+            bool m_write_lock = true;
+            bool m_refresh_sources = true;
+            std::function<void(std::string_view)> m_source_progress;
         };
     }
 
@@ -1549,19 +1642,11 @@ namespace kaixa {
         if (!manifest)
             return std::unexpected(manifest.error());
 
-        std::filesystem::path source_cache = manifest->parent_path() / ".kaixa" / "sources";
+        std::filesystem::path source_cache = default_source_cache();
         if (!options.source_cache.empty())
             source_cache = options.source_cache;
 
-        WorkspaceLoader loader(
-            options.extensions,
-            source_cache,
-            options.provider_layers,
-            options.feature_settings,
-            options.policy_context,
-            options.lock_mode,
-            options.lockfile
-        );
+        WorkspaceLoader loader(options, source_cache);
         return loader.load(*manifest, options.packages);
     }
 }

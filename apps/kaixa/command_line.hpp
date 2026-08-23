@@ -126,6 +126,50 @@ namespace kaixa::cli {
         bool dry_run = false;
     };
 
+    struct SearchCommand {
+        WorkspaceOptions workspace;
+        std::string query;
+        std::optional<std::string> provider;
+        std::optional<std::string> resolver;
+        std::optional<std::string> capability;
+        std::optional<std::string> tag;
+        std::size_t limit = 100;
+    };
+
+    struct InfoCommand {
+        WorkspaceOptions workspace;
+        std::string package;
+        std::optional<std::string> provider;
+    };
+
+    struct AddCommand {
+        WorkspaceOptions workspace;
+        std::string package;
+        std::optional<std::string> version;
+        std::optional<std::string> provider;
+        bool dry_run = false;
+    };
+
+    struct RemoveCommand {
+        WorkspaceOptions workspace;
+        std::string package;
+        bool dry_run = false;
+    };
+
+    struct UpdateCommand {
+        WorkspaceOptions workspace;
+        std::vector<std::string> dependencies;
+        bool dry_run = false;
+    };
+
+    struct PublishCommand {
+        WorkspaceOptions workspace;
+        std::string registry;
+        std::optional<std::filesystem::path> prebuilt;
+        std::optional<std::string> token_environment;
+        bool dry_run = false;
+    };
+
     struct ConfigListCommand {
         std::filesystem::path path = ".";
     };
@@ -152,6 +196,12 @@ namespace kaixa::cli {
         TaskCommand,
         WorkflowCommand,
         CleanCommand,
+        SearchCommand,
+        InfoCommand,
+        AddCommand,
+        RemoveCommand,
+        UpdateCommand,
+        PublishCommand,
         ConfigListCommand,
         ConfigShowCommand,
         ConfigPathCommand

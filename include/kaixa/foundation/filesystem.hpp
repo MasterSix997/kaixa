@@ -9,4 +9,5 @@
 namespace kaixa {
     [[nodiscard]] Result<std::string> read_file(const std::filesystem::path& path);
     [[nodiscard]] Result<void> write_file(const std::filesystem::path& path, std::string_view contents);
+    [[nodiscard]] Result<void> write_file_atomic(const std::filesystem::path& path, std::string_view contents);
 }

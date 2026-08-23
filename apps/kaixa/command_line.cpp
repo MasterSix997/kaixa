@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <concepts>
 #include <ostream>
 #include <utility>
 
@@ -755,6 +756,197 @@ namespace kaixa::cli {
             return command;
         }
 
+        template <typename CommandType>
+        std::expected<CommandType, ParseError> parse_catalog_command(Parser& parser, const bool require_package) {
+            CommandType command;
+            if (!parser.done() && !parser.peek().starts_with("--")) {
+                if constexpr (std::same_as<CommandType, SearchCommand>)
+                    command.query = parser.take();
+                else
+                    command.package = parser.take();
+            }
+            while (!parser.done()) {
+                const std::string_view option = parser.peek();
+                if (option == "--provider" || option == "--resolver" || option == "--capability" || option == "--tag") {
+                    parser.take();
+                    auto value = parser.value(option);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    if (option == "--provider")
+                        command.provider = *value;
+                    else if constexpr (std::same_as<CommandType, SearchCommand>) {
+                        if (option == "--resolver")
+                            command.resolver = *value;
+                        else if (option == "--capability")
+                            command.capability = *value;
+                        else
+                            command.tag = *value;
+                    } else {
+                        return std::unexpected(ParseError{"unknown info option `" + std::string(option) + "`"});
+                    }
+                    continue;
+                }
+                if constexpr (std::same_as<CommandType, SearchCommand>) {
+                    if (option == "--limit") {
+                        parser.take();
+                        auto value = parser.value(option);
+                        if (!value)
+                            return std::unexpected(value.error());
+
+                        const char* begin = value->data();
+                        const char* end = begin + value->size();
+                        const auto parsed = std::from_chars(begin, end, command.limit);
+                        if (parsed.ec != std::errc{} || parsed.ptr != end || command.limit == 0)
+                            return std::unexpected(ParseError{"--limit requires a positive integer"});
+
+                        continue;
+                    }
+                }
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected catalog argument `" + std::string(parser.take()) + "`"});
+            }
+            if constexpr (!std::same_as<CommandType, SearchCommand>) {
+                if (require_package && command.package.empty())
+                    return std::unexpected(ParseError{"info requires a package name"});
+            }
+            return command;
+        }
+
+        std::expected<AddCommand, ParseError> parse_add(Parser& parser) {
+            AddCommand command;
+            if (!parser.done() && !parser.peek().starts_with("--"))
+                command.package = parser.take();
+
+            while (!parser.done()) {
+                const std::string_view option = parser.peek();
+                if (option == "--version" || option == "--provider") {
+                    parser.take();
+                    auto value = parser.value(option);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    if (option == "--version")
+                        command.version = *value;
+                    else
+                        command.provider = *value;
+
+                    continue;
+                }
+                if (option == "--dry-run") {
+                    parser.take();
+                    command.dry_run = true;
+                    continue;
+                }
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected add argument `" + std::string(parser.take()) + "`"});
+            }
+            if (command.package.empty())
+                return std::unexpected(ParseError{"add requires a package name"});
+
+            return command;
+        }
+
+        std::expected<RemoveCommand, ParseError> parse_remove(Parser& parser) {
+            RemoveCommand command;
+            if (!parser.done() && !parser.peek().starts_with("--"))
+                command.package = parser.take();
+
+            while (!parser.done()) {
+                if (parser.peek() == "--dry-run") {
+                    parser.take();
+                    command.dry_run = true;
+                    continue;
+                }
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected remove argument `" + std::string(parser.take()) + "`"});
+            }
+            if (command.package.empty())
+                return std::unexpected(ParseError{"remove requires a package name"});
+
+            return command;
+        }
+
+        std::expected<UpdateCommand, ParseError> parse_update(Parser& parser) {
+            UpdateCommand command;
+            while (!parser.done()) {
+                if (parser.peek() == "--dry-run") {
+                    parser.take();
+                    command.dry_run = true;
+                    continue;
+                }
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                if (parser.peek().starts_with("--"))
+                    return std::unexpected(ParseError{"unexpected update argument `" + std::string(parser.take()) + "`"});
+
+                command.dependencies.emplace_back(parser.take());
+            }
+            return command;
+        }
+
+        std::expected<PublishCommand, ParseError> parse_publish(Parser& parser) {
+            PublishCommand command;
+            while (!parser.done()) {
+                const std::string_view option = parser.peek();
+                if (option == "--registry" || option == "--prebuilt" || option == "--token-env") {
+                    parser.take();
+                    auto value = parser.value(option);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    if (option == "--registry")
+                        command.registry = *value;
+                    else if (option == "--prebuilt")
+                        command.prebuilt = std::filesystem::path(*value);
+                    else
+                        command.token_environment = *value;
+
+                    continue;
+                }
+                if (option == "--dry-run") {
+                    parser.take();
+                    command.dry_run = true;
+                    continue;
+                }
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected publish argument `" + std::string(parser.take()) + "`"});
+            }
+            if (command.registry.empty())
+                return std::unexpected(ParseError{"publish requires --registry <directory>"});
+
+            return command;
+        }
+
         std::expected<Command, ParseError> parse_config(Parser& parser) {
             if (parser.done())
                 return std::unexpected(ParseError{"config requires list, show or path"});
@@ -816,6 +1008,15 @@ namespace kaixa::cli {
             << "  kaixa clean [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
             << "  kaixa clean [--path path] --all [--generated-files] [--dry-run]\n\n"
+
+            << "  kaixa search [query] [--provider name] [--resolver name] [--capability name]\n"
+            << "        [--tag name] [--limit count] [--path path]\n"
+            << "  kaixa info package [--provider name] [--path path]\n"
+            << "  kaixa add package [--version requirement] [--provider name] [--dry-run] [--path path]\n"
+            << "  kaixa remove package [--dry-run] [--path path]\n"
+            << "  kaixa update [package...] [--dry-run] [--path path]\n"
+            << "  kaixa publish --registry directory-or-url [--prebuilt directory] [--token-env name]\n"
+            << "        [--dry-run] [--path path]\n\n"
 
             << "  kaixa config list [--path path]\n"
             << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
@@ -889,6 +1090,54 @@ namespace kaixa::cli {
 
         if (name == "clean") {
             auto command = parse_clean(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "search") {
+            auto command = parse_catalog_command<SearchCommand>(parser, false);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "info") {
+            auto command = parse_catalog_command<InfoCommand>(parser, true);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "add") {
+            auto command = parse_add(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "remove") {
+            auto command = parse_remove(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "update") {
+            auto command = parse_update(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "publish") {
+            auto command = parse_publish(parser);
             if (!command)
                 return std::unexpected(command.error());
 

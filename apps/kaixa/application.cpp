@@ -1,9 +1,11 @@
 #include "application.hpp"
 #include "configuration_output.hpp"
 
+#include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/foundation/process.hpp>
 #include <kaixa/kaixa.hpp>
 #include <kaixa/model/effective_product.hpp>
+#include <kaixa/package/manager.hpp>
 #include <kaixa/plugin/bundle.hpp>
 
 #include <algorithm>
@@ -26,6 +28,7 @@ namespace kaixa::cli {
             BuildEnvironment environment;
             ExtensionRegistry registry;
             std::vector<ConfigurationSource> configuration_sources;
+            bool lock_changed = false;
         };
 
         int fail(const Diagnostic& diagnostic) {
@@ -39,6 +42,11 @@ namespace kaixa::cli {
                 return 1;
             }
             return fail(diagnostic);
+        }
+
+        void print_source_progress(const std::string_view message) {
+            std::cout << "source: " << message << '\n';
+            std::cout.flush();
         }
 
         std::optional<std::filesystem::path> user_configuration_path() {
@@ -114,7 +122,13 @@ namespace kaixa::cli {
             });
         }
 
-        Result<Workspace> open_workspace(const WorkspaceOptions& options) {
+        Result<Workspace> open_workspace(
+            const WorkspaceOptions& options,
+            const std::span<const std::string> unlocked_packages = {},
+            const bool unlock_all = false,
+            const bool write_lock = true,
+            const bool refresh_sources = true
+        ) {
             auto manifest = find_manifest(options.path);
             if (!manifest)
                 return std::unexpected(manifest.error());
@@ -182,7 +196,13 @@ namespace kaixa::cli {
                     provider_layers,
                     features && features->settings ? &*features->settings : nullptr,
                     PolicyContext{configuration->profile, host_target_os()},
-                    options.lock_mode}
+                    options.lock_mode,
+                    {},
+                    unlocked_packages,
+                    unlock_all,
+                    write_lock,
+                    refresh_sources,
+                    print_source_progress}
             );
             if (!resolved)
                 return std::unexpected(resolved.error());
@@ -202,7 +222,77 @@ namespace kaixa::cli {
                 std::move(resolved->instances),
                 BuildEnvironment{directory, directory / ".kaixa", std::move(*configuration)},
                 std::move(registry),
-                std::move(sources)};
+                std::move(sources),
+                resolved->lock_changed};
+        }
+
+        Result<std::filesystem::path> selected_manifest(const WorkspaceOptions& options) {
+            auto manifest = find_manifest(options.path);
+            if (!manifest)
+                return std::unexpected(manifest.error());
+
+            auto document = parse_manifest_document_file(*manifest);
+            if (!document)
+                return std::unexpected(document.error());
+
+            if (options.packages.size() > 1)
+                return std::unexpected(error("package editing accepts at most one `--package` selection"));
+
+            if (options.packages.empty()) {
+                if (document->package)
+                    return *manifest;
+
+                return std::unexpected(error("package editing requires `--package <name>` for a package set"));
+            }
+            const std::string& name = options.packages.front();
+            if (document->package && document->package->name == name)
+                return *manifest;
+
+            auto packages = PackageIndex::discover(*manifest, *document);
+            if (!packages)
+                return std::unexpected(packages.error());
+
+            const auto candidate = std::ranges::find(packages->candidates(), name, &LocalPackageCandidate::name);
+            if (candidate == packages->candidates().end())
+                return std::unexpected(error("package `" + name + "` is not available for editing"));
+
+            return candidate->manifest;
+        }
+
+        void print_edit(const ManifestEdit& edit) {
+            std::cout << "--- " << edit.path.string() << '\n' << "+++ " << edit.path.string() << '\n';
+            const auto lines = [](const std::string& contents) {
+                std::vector<std::string_view> result;
+                std::size_t begin = 0;
+                while (begin < contents.size()) {
+                    const std::size_t end = contents.find('\n', begin);
+                    result.emplace_back(contents.data() + begin, (end == std::string::npos ? contents.size() : end) - begin);
+                    if (end == std::string::npos)
+                        break;
+
+                    begin = end + 1;
+                }
+                return result;
+            };
+            const std::vector<std::string_view> before = lines(edit.before);
+            const std::vector<std::string_view> after = lines(edit.after);
+            std::size_t prefix = 0;
+            while (prefix < before.size() && prefix < after.size() && before[prefix] == after[prefix])
+                ++prefix;
+
+            std::size_t suffix = 0;
+            while (
+                suffix + prefix < before.size()
+                && suffix + prefix < after.size()
+                && before[before.size() - suffix - 1] == after[after.size() - suffix - 1]
+            ) {
+                ++suffix;
+            }
+            for (std::size_t index = prefix; index < before.size() - suffix; ++index)
+                std::cout << '-' << before[index] << '\n';
+
+            for (std::size_t index = prefix; index < after.size() - suffix; ++index)
+                std::cout << '+' << after[index] << '\n';
         }
 
         Result<PackageId> require_single_root(const Graph& graph, const std::string_view operation) {
@@ -1498,6 +1588,324 @@ namespace kaixa::cli {
             }
 
             std::cout << "workflow completed: " << preparation->steps.size() << " step(s), " << executed << " action(s) run\n";
+            return 0;
+        }
+
+        Result<const PackageProvider*> select_catalog_provider(
+            const ExtensionRegistry& registry,
+            const std::optional<std::string>& requested
+        ) {
+            if (requested) {
+                const PackageProvider* provider = registry.find_provider(*requested);
+                if (!provider)
+                    return std::unexpected(error("package provider `" + *requested + "` is not configured"));
+
+                return provider;
+            }
+
+            const PackageProvider* selected = nullptr;
+            for (const auto& provider: registry.providers()) {
+                if (provider->info().is_default)
+                    selected = provider.get();
+            }
+            if (selected)
+                return selected;
+
+            if (registry.providers().size() == 1)
+                return registry.providers().front().get();
+
+            return std::unexpected(error("no default package provider is configured").add_note("select one with `--provider <name>`"));
+        }
+
+        Result<PackageCandidate> select_add_candidate(
+            const PackageProvider& provider,
+            const std::string& package,
+            const std::optional<std::string>& requirement
+        ) {
+            std::optional<VersionRequirement> parsed_requirement;
+            if (requirement) {
+                auto parsed = parse_version_requirement(*requirement);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                parsed_requirement = std::move(*parsed);
+            }
+            auto candidates = provider.candidates(PackageRequest{package, parsed_requirement});
+            if (!candidates)
+                return std::unexpected(candidates.error());
+
+            std::optional<std::size_t> selected;
+            for (std::size_t index = 0; index < candidates->size(); ++index) {
+                const PackageCandidate& candidate = (*candidates)[index];
+                if (!candidate.version || parsed_requirement && !matches(*parsed_requirement, *candidate.version))
+                    continue;
+
+                if (!selected || compare_versions(*candidate.version, *(*candidates)[*selected].version) > 0)
+                    selected = index;
+            }
+            if (!selected) {
+                return std::unexpected(error("provider `" + provider.info().name + "` has no compatible version of `" + package + "`"));
+            }
+            return std::move((*candidates)[*selected]);
+        }
+
+        int run(const SearchCommand& command) {
+            WorkspaceOptions options = command.workspace;
+            options.lock_mode = LockMode::none;
+            auto workspace = open_workspace(options);
+            if (!workspace)
+                return fail(workspace.error());
+
+            PackageQuery query{command.query, command.resolver, command.capability, command.tag, command.limit};
+            std::vector<PackageSummary> results;
+            for (const auto& provider: workspace->registry.providers()) {
+                if (command.provider && provider->info().name != *command.provider)
+                    continue;
+
+                auto found = provider->query(query);
+                if (!found)
+                    return fail(found.error());
+
+                results.insert(results.end(), found->begin(), found->end());
+            }
+            std::ranges::sort(results, [](const PackageSummary& left, const PackageSummary& right) {
+                if (left.name != right.name)
+                    return left.name < right.name;
+
+                if (left.provider != right.provider)
+                    return left.provider < right.provider;
+
+                return compare_versions(left.version, right.version) > 0;
+            });
+            if (results.empty()) {
+                std::cout << "no packages found\n";
+                return 0;
+            }
+            for (const PackageSummary& package: results) {
+                std::cout << package.name << ' ' << package.version.text << " [" << package.provider << ']';
+                if (!package.description.empty())
+                    std::cout << " - " << package.description;
+
+                std::cout << '\n';
+            }
+            return 0;
+        }
+
+        int run(const InfoCommand& command) {
+            WorkspaceOptions options = command.workspace;
+            options.lock_mode = LockMode::none;
+            auto workspace = open_workspace(options);
+            if (!workspace)
+                return fail(workspace.error());
+
+            PackageQuery query{command.package};
+            bool found = false;
+            for (const auto& provider: workspace->registry.providers()) {
+                if (command.provider && provider->info().name != *command.provider)
+                    continue;
+
+                auto packages = provider->query(query);
+                if (!packages)
+                    return fail(packages.error());
+
+                for (const PackageSummary& package: *packages) {
+                    if (package.name != command.package)
+                        continue;
+
+                    found = true;
+                    std::cout
+                        << package.name
+                        << ' '
+                        << package.version.text
+                        << "\n  provider: "
+                        << package.provider
+                        << "\n  authority: "
+                        << package.authority;
+                    if (package.resolver)
+                        std::cout << "\n  resolver: " << *package.resolver;
+
+                    if (!package.description.empty())
+                        std::cout << "\n  description: " << package.description;
+
+                    if (!package.capabilities.empty()) {
+                        std::cout << "\n  capabilities: ";
+                        for (std::size_t index = 0; index < package.capabilities.size(); ++index) {
+                            if (index != 0)
+                                std::cout << ", ";
+
+                            std::cout << package.capabilities[index];
+                        }
+                    }
+                    if (!package.tags.empty()) {
+                        std::cout << "\n  tags: ";
+                        for (std::size_t index = 0; index < package.tags.size(); ++index) {
+                            if (index != 0)
+                                std::cout << ", ";
+
+                            std::cout << package.tags[index];
+                        }
+                    }
+                    std::cout << '\n';
+                }
+            }
+            if (!found)
+                return fail(error("package `" + command.package + "` was not found in the selected catalogs"));
+
+            return 0;
+        }
+
+        int run(const AddCommand& command) {
+            WorkspaceOptions catalog_options = command.workspace;
+            catalog_options.lock_mode = LockMode::none;
+            auto workspace = open_workspace(catalog_options);
+            if (!workspace)
+                return fail(workspace.error());
+
+            auto provider = select_catalog_provider(workspace->registry, command.provider);
+            if (!provider)
+                return fail(provider.error());
+
+            auto candidate = select_add_candidate(**provider, command.package, command.version);
+            if (!candidate)
+                return fail(candidate.error());
+
+            auto manifest = selected_manifest(command.workspace);
+            if (!manifest)
+                return fail(manifest.error());
+
+            const std::string requirement = command.version.value_or("^" + candidate->version->text);
+            const std::optional<std::string> from = command.provider || !(*provider)->info().is_default
+                ? std::optional<std::string>{(*provider)->info().name}
+                : std::nullopt;
+            auto edit = add_manifest_dependency(*manifest, command.package, requirement, from);
+            if (!edit)
+                return fail(edit.error());
+
+            print_edit(*edit);
+            if (command.dry_run)
+                return 0;
+
+            auto applied = apply_manifest_edit(*edit);
+            if (!applied)
+                return fail(applied.error());
+
+            auto resolved = open_workspace(command.workspace);
+            if (!resolved) {
+                auto restored = write_file_atomic(edit->path, edit->before);
+                Diagnostic diagnostic = resolved.error();
+                diagnostic = std::move(diagnostic).add_note("manifest edit was rolled back");
+                if (!restored)
+                    diagnostic = std::move(diagnostic).add_note("rollback failed: " + format_diagnostic(restored.error()));
+
+                return fail(diagnostic);
+            }
+            std::cout << "added " << command.package << ' ' << requirement << " from " << (*provider)->info().name << '\n';
+            return 0;
+        }
+
+        int run(const RemoveCommand& command) {
+            auto manifest = selected_manifest(command.workspace);
+            if (!manifest)
+                return fail(manifest.error());
+
+            auto edit = remove_manifest_dependency(*manifest, command.package);
+            if (!edit)
+                return fail(edit.error());
+
+            print_edit(*edit);
+            if (command.dry_run)
+                return 0;
+
+            auto applied = apply_manifest_edit(*edit);
+            if (!applied)
+                return fail(applied.error());
+
+            auto resolved = open_workspace(command.workspace);
+            if (!resolved) {
+                auto restored = write_file_atomic(edit->path, edit->before);
+                Diagnostic diagnostic = resolved.error();
+                diagnostic = std::move(diagnostic).add_note("manifest edit was rolled back");
+                if (!restored)
+                    diagnostic = std::move(diagnostic).add_note("rollback failed: " + format_diagnostic(restored.error()));
+
+                return fail(diagnostic);
+            }
+            std::cout << "removed " << command.package << '\n';
+            return 0;
+        }
+
+        int run(const UpdateCommand& command) {
+            if (command.workspace.lock_mode == LockMode::locked || command.workspace.lock_mode == LockMode::frozen)
+                return fail(error("update cannot be combined with `--locked` or `--frozen`"));
+
+            auto workspace = open_workspace(
+                command.workspace,
+                command.dependencies,
+                command.dependencies.empty(),
+                !command.dry_run,
+                !command.dry_run
+            );
+            if (!workspace)
+                return fail(workspace.error());
+
+            if (!workspace->lock_changed) {
+                std::cout << "all selected dependencies are current\n";
+                return 0;
+            }
+            std::cout << (command.dry_run ? "Kaixa.lock would be updated\n" : "Kaixa.lock updated\n");
+            for (const PackageNode& package: workspace->graph.nodes()) {
+                if (!package.source || !package.source->version)
+                    continue;
+
+                if (!command.dependencies.empty() && std::ranges::find(command.dependencies, package.name) == command.dependencies.end()) {
+                    continue;
+                }
+                std::cout << "  " << package.name << ' ' << package.source->version->text << '\n';
+            }
+            return 0;
+        }
+
+        int run(const PublishCommand& command) {
+            auto manifest = selected_manifest(command.workspace);
+            if (!manifest)
+                return fail(manifest.error());
+
+            std::filesystem::path registry;
+            std::optional<std::string> endpoint;
+            if (command.registry.contains("://")) {
+                endpoint = command.registry;
+            } else {
+                registry = command.registry;
+                if (registry.is_relative())
+                    registry = std::filesystem::absolute(command.workspace.path / registry).lexically_normal();
+            }
+
+            std::optional<std::filesystem::path> prebuilt = command.prebuilt;
+            if (prebuilt && prebuilt->is_relative())
+                *prebuilt = std::filesystem::absolute(command.workspace.path / *prebuilt).lexically_normal();
+
+            auto published = publish_package(
+                {manifest->parent_path(),
+                    std::move(registry),
+                    std::move(endpoint),
+                    command.token_environment,
+                    std::move(prebuilt),
+                    command.dry_run}
+            );
+            if (!published)
+                return fail(published.error());
+
+            std::cout
+                << (command.dry_run ? "would publish " : "published ")
+                << published->package
+                << ' '
+                << published->version.text
+                << (published->prebuilt ? " prebuilt" : " source")
+                << "\n  archive: "
+                << published->archive
+                << "\n  sha256: "
+                << published->integrity
+                << '\n';
             return 0;
         }
 
