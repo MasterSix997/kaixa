@@ -33,6 +33,14 @@ namespace kaixa::cli {
             return 1;
         }
 
+        int fail(const Diagnostic& diagnostic, const DiagnosticFormat format) {
+            if (format == DiagnosticFormat::short_form) {
+                std::cerr << format_diagnostic_short(diagnostic) << '\n';
+                return 1;
+            }
+            return fail(diagnostic);
+        }
+
         std::optional<std::filesystem::path> user_configuration_path() {
 #ifdef _WIN32
             const std::optional<std::string> base = environment_variable("APPDATA");
@@ -340,10 +348,14 @@ namespace kaixa::cli {
             return "action";
         }
 
+        bool is_inside(const std::filesystem::path& path, const std::filesystem::path& directory) {
+            const std::filesystem::path relative = path.lexically_relative(directory);
+            return !relative.empty() && !relative.is_absolute() && *relative.begin() != "..";
+        }
+
         std::string display_path(const std::filesystem::path& path, const std::filesystem::path& workspace) {
-            const std::filesystem::path relative = path.lexically_relative(workspace);
-            if (!relative.empty() && !relative.is_absolute() && *relative.begin() != "..") {
-                return relative.generic_string();
+            if (is_inside(path, workspace)) {
+                return path.lexically_relative(workspace).generic_string();
             }
 
             return path.string();
@@ -1103,21 +1115,35 @@ namespace kaixa::cli {
         }
 
         int run(const CheckCommand& command) {
+            const DiagnosticFormat format = command.format;
             auto workspace = open_workspace(command.workspace);
             if (!workspace)
-                return fail(workspace.error());
+                return fail(workspace.error(), format);
 
             auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
             if (!plan)
-                return fail(plan.error());
+                return fail(plan.error(), format);
 
             auto report = check(*plan);
             if (!report)
-                return fail(report.error());
+                return fail(report.error(), format);
 
+            bool reported = false;
             for (const GeneratedFileCheck& file: report->generated_files) {
                 if (file.state == GeneratedFileState::current)
                     continue;
+
+                if (format == DiagnosticFormat::short_form) {
+                    if (!is_inside(file.path, workspace->environment.state_root)) {
+                        std::cout
+                            << file.path.string()
+                            << ":1:1: warning: generated file is "
+                            << state_name(file.state)
+                            << "; run `kaixa generate`\n";
+                        reported = true;
+                    }
+                    continue;
+                }
 
                 std::cout
                     << "generated file: "
@@ -1126,6 +1152,18 @@ namespace kaixa::cli {
                     << display_path(file.path, workspace->environment.workspace)
                     << '\n';
             }
+            if (format == DiagnosticFormat::short_form) {
+                if (!report->requires_synchronization())
+                    return 0;
+
+                if (!reported) {
+                    std::cout
+                        << (workspace->environment.workspace / "Kaixa.toml").string()
+                        << ":1:1: warning: workspace requires synchronization; run `kaixa generate`\n";
+                }
+                return 1;
+            }
+
             for (const ActionCheck& action: report->actions) {
                 if (action.stage == ActionStage::synchronize && action.state == ActionState::required)
                     std::cout << "required synchronization: " << action.description << '\n';

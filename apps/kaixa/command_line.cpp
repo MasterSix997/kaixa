@@ -165,6 +165,54 @@ namespace kaixa::cli {
             return options;
         }
 
+        std::expected<CheckCommand, ParseError> parse_check(Parser& parser) {
+            CheckCommand command;
+            bool selected_format = false;
+            while (!parser.done()) {
+                const std::string_view option = parser.peek();
+                if (option.starts_with("--format")) {
+                    parser.take();
+                    if (selected_format) {
+                        return std::unexpected(ParseError{"--format was specified more than once"});
+                    }
+
+                    std::string_view value = option.substr(std::string_view("--format").size());
+                    if (value.starts_with('=')) {
+                        value.remove_prefix(1);
+                    } else if (value.empty()) {
+                        auto separate = parser.value("--format");
+                        if (!separate)
+                            return std::unexpected(separate.error());
+
+                        value = *separate;
+                    } else {
+                        return std::unexpected(ParseError{"unknown option `" + std::string(option) + "`"});
+                    }
+
+                    if (value == "short") {
+                        command.format = DiagnosticFormat::short_form;
+                    } else if (value == "human") {
+                        command.format = DiagnosticFormat::human;
+                    } else {
+                        return std::unexpected(ParseError{"unknown diagnostic format `" + std::string(value) + "`"});
+                    }
+
+                    selected_format = true;
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
+            }
+            return command;
+        }
+
         std::expected<TaskCommand, ParseError> parse_task(Parser& parser) {
             TaskCommand command;
             if (!parser.done() && !parser.peek().starts_with("--"))
@@ -746,6 +794,7 @@ namespace kaixa::cli {
 
             << "  kaixa <check|generate> [--path path] [--profile name] [--config name]...\n"
             << "        [--for resolver <arguments...>]...\n"
+            << "  kaixa check [--format human|short]\n"
             << "  kaixa build [--path path] [--list] [--target name]... [--jobs count]\n"
             << "        [--example name]... [--examples] [--test name]... [--tests]\n"
             << "        [--bench name]... [--benchmarks] [--all-targets]\n"
@@ -857,16 +906,21 @@ namespace kaixa::cli {
             return Command{std::move(*command)};
         }
 
-        if (name != "check" && name != "generate") {
+        if (name == "check") {
+            auto command = parse_check(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name != "generate") {
             return std::unexpected(ParseError{"unknown command `" + std::string(name) + "`", true});
         }
 
         auto workspace = parse_workspace(parser);
         if (!workspace)
             return std::unexpected(workspace.error());
-
-        if (name == "check")
-            return Command{CheckCommand{std::move(*workspace)}};
 
         return Command{GenerateCommand{std::move(*workspace)}};
     }

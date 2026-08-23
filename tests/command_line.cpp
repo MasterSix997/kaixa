@@ -533,3 +533,47 @@ KAIXA_TEST(command_line_workspace_commands_require_the_path_option) {
     const auto positional = kaixa::cli::parse_command_line(positional_arguments);
     context.check(!positional.has_value(), "generate rejects a positional workspace path");
 }
+
+KAIXA_TEST(command_line_check_selects_the_diagnostic_format) {
+    constexpr std::array joined_arguments = {std::string_view("check"), std::string_view("--format=short")};
+    const auto joined = kaixa::cli::parse_command_line(joined_arguments);
+    context.check(joined.has_value(), "check accepts --format=short");
+    if (joined) {
+        const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*joined);
+        context.check(command && command->format == kaixa::cli::DiagnosticFormat::short_form, "joined format is retained");
+    }
+
+    constexpr std::array separate_arguments = {std::string_view("check"),
+        std::string_view("--format"),
+        std::string_view("short"),
+        std::string_view("--path"),
+        std::string_view("project")};
+    const auto separate = kaixa::cli::parse_command_line(separate_arguments);
+    context.check(separate.has_value(), "check accepts a separate format value");
+    if (separate) {
+        const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*separate);
+        context.check(command && command->format == kaixa::cli::DiagnosticFormat::short_form, "separate format is retained");
+        if (command) {
+            context.check_equal(command->workspace.path.generic_string(), std::string("project"), "check workspace path");
+        }
+    }
+
+    constexpr std::array default_arguments = {std::string_view("check")};
+    const auto defaulted = kaixa::cli::parse_command_line(default_arguments);
+    context.check(defaulted.has_value(), "check parses without a format");
+    if (defaulted) {
+        const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*defaulted);
+        context.check(command && command->format == kaixa::cli::DiagnosticFormat::human, "human format is the default");
+    }
+
+    constexpr std::array unknown_arguments = {std::string_view("check"), std::string_view("--format=xml")};
+    context.check(!kaixa::cli::parse_command_line(unknown_arguments).has_value(), "unknown formats are rejected");
+
+    constexpr std::array repeated_arguments = {std::string_view("check"),
+        std::string_view("--format=short"),
+        std::string_view("--format=human")};
+    context.check(!kaixa::cli::parse_command_line(repeated_arguments).has_value(), "--format cannot be repeated");
+
+    constexpr std::array generate_arguments = {std::string_view("generate"), std::string_view("--format=short")};
+    context.check(!kaixa::cli::parse_command_line(generate_arguments).has_value(), "generate does not accept --format");
+}

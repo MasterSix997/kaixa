@@ -28,4 +28,5 @@ namespace kaixa {
     [[nodiscard]] Diagnostic error(std::string message);
     [[nodiscard]] Diagnostic error_at(SourceLocation location, std::string message);
     [[nodiscard]] std::string format_diagnostic(const Diagnostic& diagnostic);
+    [[nodiscard]] std::string format_diagnostic_short(const Diagnostic& diagnostic);
 }

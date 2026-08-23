@@ -43,8 +43,14 @@ namespace kaixa::cli {
         bool verbose = false;
     };
 
+    enum class DiagnosticFormat {
+        human,
+        short_form
+    };
+
     struct CheckCommand {
         WorkspaceOptions workspace;
+        DiagnosticFormat format = DiagnosticFormat::human;
     };
 
     struct GenerateCommand {

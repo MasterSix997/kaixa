@@ -57,4 +57,33 @@ namespace kaixa {
         }
         return text;
     }
+
+    std::string format_diagnostic_short(const Diagnostic& diagnostic) {
+        std::string prefix;
+        if (diagnostic.location && !diagnostic.location->source.empty()) {
+            const SourceLocation& location = *diagnostic.location;
+            prefix += location.source;
+            prefix += ':';
+            prefix += std::to_string(location.line == 0 ? 1 : location.line);
+            prefix += ':';
+            prefix += std::to_string(location.column == 0 ? 1 : location.column);
+            prefix += ": ";
+        }
+
+        std::string text = prefix + "error: " + diagnostic.message;
+        if (diagnostic.location
+            && !diagnostic.location->config_path.empty()
+            && diagnostic.message.find(diagnostic.location->config_path) == std::string::npos) {
+            text += " (";
+            text += diagnostic.location->config_path;
+            text += ')';
+        }
+        for (const std::string& note: diagnostic.notes) {
+            text += '\n';
+            text += prefix;
+            text += "note: ";
+            text += note;
+        }
+        return text;
+    }
 }
