@@ -97,7 +97,7 @@ namespace kaixa {
 
         Result<void> execute_action(const Action& action) {
             const bool capture_output = !action.argv.empty() && action.argv.front() == "cmake";
-            const ProcessRequest request{action.argv, action.working_directory, action.environment, capture_output};
+            const ProcessRequest request{action.argv, action.working_directory, action.environment, capture_output, capture_output};
             auto result = run_process(request);
             if (!result) {
                 return std::unexpected(std::move(result).error().add_note("while running `" + format_command(action.argv) + "`"));
@@ -106,7 +106,7 @@ namespace kaixa {
                 Diagnostic diagnostic = error(
                     "action `" + action.description + "` failed (exit code " + std::to_string(result->exit_code) + ")"
                 );
-                if (!result->output.empty()) {
+                if (!capture_output && !result->output.empty()) {
                     std::string output = "tool output:";
                     std::size_t start = 0;
                     while (start < result->output.size()) {

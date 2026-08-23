@@ -3,14 +3,18 @@
 #include <algorithm>
 #include <cctype>
 #include <cerrno>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <cwchar>
+#include <iostream>
 #include <limits>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -85,6 +89,48 @@ namespace kaixa {
             result.append(slashes * 2, '\\');
             result += '"';
             return result;
+        }
+
+        void forward_progress_line(std::string_view line) {
+            if (!line.empty() && line.back() == '\r')
+                line.remove_suffix(1);
+            const bool windows_command = line.contains("cmd.exe /C") || line.contains("cmd.exe /c");
+            const bool windows_tool_invocation = line.size() > 2 && line[1] == ':' && (line.contains(".EXE") || line.contains(".exe"));
+            if (line.empty() || windows_command || windows_tool_invocation)
+                return;
+
+            std::cout << "  " << line << '\n';
+            std::cout.flush();
+        }
+
+        void forward_capture(std::FILE* capture, std::size_t& offset, std::string& pending, const bool final) {
+            if (!capture)
+                return;
+
+            std::fflush(capture);
+            if (std::fseek(capture, static_cast<long>(offset), SEEK_SET) != 0)
+                return;
+
+            char buffer[4096];
+            while (const std::size_t count = std::fread(buffer, 1, sizeof(buffer), capture)) {
+                offset += count;
+                pending.append(buffer, count);
+            }
+
+            std::size_t start = 0;
+            for (;;) {
+                const std::size_t end = pending.find('\n', start);
+                if (end == std::string::npos)
+                    break;
+                forward_progress_line(std::string_view(pending).substr(start, end - start));
+                start = end + 1;
+            }
+            if (start != 0)
+                pending.erase(0, start);
+            if (final && !pending.empty()) {
+                forward_progress_line(pending);
+                pending.clear();
+            }
         }
 
 #ifdef _WIN32
@@ -217,7 +263,14 @@ namespace kaixa {
             if (!created)
                 return std::unexpected(error("cannot start `" + request.argv.front() + "`: " + windows_error(GetLastError())));
 
-            const DWORD wait_result = WaitForSingleObject(process.hProcess, INFINITE);
+            std::size_t offset = 0;
+            std::string pending;
+            DWORD wait_result = WAIT_TIMEOUT;
+            while (wait_result == WAIT_TIMEOUT) {
+                wait_result = WaitForSingleObject(process.hProcess, request.stream_output ? 100 : INFINITE);
+                if (request.stream_output)
+                    forward_capture(capture, offset, pending, wait_result != WAIT_TIMEOUT);
+            }
             DWORD exit_code = 0;
             const BOOL read_exit_code = GetExitCodeProcess(process.hProcess, &exit_code);
             CloseHandle(process.hThread);
@@ -261,9 +314,25 @@ namespace kaixa {
             }
 
             int status = 0;
-            while (waitpid(child, &status, 0) < 0) {
-                if (errno != EINTR)
-                    return std::unexpected(error(std::string("cannot wait for child process: ") + std::strerror(errno)));
+            if (request.stream_output) {
+                std::size_t offset = 0;
+                std::string pending;
+                for (;;) {
+                    const pid_t waited = waitpid(child, &status, WNOHANG);
+                    if (waited == child)
+                        break;
+                    if (waited < 0 && errno != EINTR)
+                        return std::unexpected(error(std::string("cannot wait for child process: ") + std::strerror(errno)));
+
+                    forward_capture(capture, offset, pending, false);
+                    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+                }
+                forward_capture(capture, offset, pending, true);
+            } else {
+                while (waitpid(child, &status, 0) < 0) {
+                    if (errno != EINTR)
+                        return std::unexpected(error(std::string("cannot wait for child process: ") + std::strerror(errno)));
+                }
             }
 
             std::string output = read_capture(capture);

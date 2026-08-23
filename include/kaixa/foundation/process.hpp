@@ -20,6 +20,7 @@ namespace kaixa {
         std::filesystem::path working_directory;
         std::vector<EnvironmentVariable> environment;
         bool capture_output = false;
+        bool stream_output = false;
     };
 
     struct ProcessResult {
