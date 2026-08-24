@@ -3,7 +3,9 @@
 #include <kaixa/extension/provider.hpp>
 #include <kaixa/extension/resolver.hpp>
 #include <kaixa/extension/source.hpp>
+#include <kaixa/test/adapter.hpp>
 
+#include <algorithm>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -20,6 +22,8 @@ namespace kaixa {
         void add(std::unique_ptr<PackageProvider> provider) { m_providers.push_back(std::move(provider)); }
 
         void add(std::unique_ptr<ProviderDriver> driver) { m_provider_drivers.push_back(std::move(driver)); }
+
+        void add(TestAdapterInfo adapter) { m_test_adapters.push_back(std::move(adapter)); }
 
         [[nodiscard]] Resolver* find_resolver(std::string_view name) const {
             for (const auto& resolver: m_resolvers) {
@@ -51,6 +55,11 @@ namespace kaixa {
                     return driver.get();
             }
             return nullptr;
+        }
+
+        [[nodiscard]] const TestAdapterInfo* find_test_adapter(std::string_view name) const noexcept {
+            const auto adapter = std::ranges::find(m_test_adapters, name, &TestAdapterInfo::name);
+            return adapter == m_test_adapters.end() ? nullptr : &*adapter;
         }
 
         Result<void> configure_provider(const ProviderDefinition& definition, const ProviderContext& context) {
@@ -93,11 +102,14 @@ namespace kaixa {
 
         [[nodiscard]] std::span<const std::unique_ptr<ProviderDriver>> provider_drivers() const noexcept { return m_provider_drivers; }
 
+        [[nodiscard]] std::span<const TestAdapterInfo> test_adapters() const noexcept { return m_test_adapters; }
+
     private:
         std::vector<std::unique_ptr<Resolver>> m_resolvers;
         std::vector<std::unique_ptr<SourceDriver>> m_source_drivers;
         std::vector<std::unique_ptr<PackageProvider>> m_providers;
         std::vector<std::unique_ptr<ProviderDriver>> m_provider_drivers;
+        std::vector<TestAdapterInfo> m_test_adapters;
     };
 
 }

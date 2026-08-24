@@ -53,8 +53,8 @@ KAIXA_TEST(dependencies_normalize_versions_aliases_and_source_drivers) {
     context.check_equal(manifest->dependencies[0].request.version->text, std::string("0.4"), "compact version");
     context.check_equal(*manifest->dependencies[1].alias, std::string("physics"), "inline alias");
     context.check_equal(manifest->dependencies[1].local_name(), std::string_view("physics"), "local binding name");
-    context.check_equal(manifest->dependencies[2].selection.source->driver, std::string("git"), "source driver");
-    context.check(manifest->dependencies[2].selection.source->options.find("url") != nullptr, "source options remain opaque");
+    context.check_equal(manifest->dependencies[2].selection.source()->driver, std::string("git"), "source driver");
+    context.check(manifest->dependencies[2].selection.source()->options.find("url") != nullptr, "source options remain opaque");
 
     const auto formatted = kaixa::format_manifest(*manifest);
     context.check(formatted.has_value(), "normalized dependencies format");

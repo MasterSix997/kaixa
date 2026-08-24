@@ -1,5 +1,7 @@
 #include "configuration.hpp"
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/config/value_operations.hpp>
+#include <kaixa/extension/registry.hpp>
 #include <kaixa/model/effective_product.hpp>
 #include <kaixa/model/file_set.hpp>
 #include <kaixa/model/policy.hpp>
@@ -13,7 +15,7 @@
 namespace kaixa::plugin::cmake::detail {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
+            return wrong_value_kind(std::move(location), expected, found);
         }
 
         Result<std::vector<std::string>> string_array(TableReader& table, const std::string_view key) {
@@ -209,11 +211,9 @@ namespace kaixa::plugin::cmake::detail {
                 discover_enabled = *enabled;
             }
 
-            auto adapter = test_adapter(discover_enabled ? "kaixa" : "executable", PackageTargetKind::test, test.location_of("target"));
-            if (!adapter)
-                return std::unexpected(adapter.error());
-
-            result.adapter = std::move(*adapter);
+            result.adapter = discover_enabled
+                ? TestAdapterInfo{"kaixa", TestAdapterPurpose::test, {}, {}, {"--kaixa-test-list"}, "--kaixa-test-run", {}, {}, true}
+                : TestAdapterInfo{"executable", TestAdapterPurpose::test};
 
             return result;
         }
@@ -1027,6 +1027,7 @@ namespace kaixa::plugin::cmake::detail {
 
         struct AssociatedTargetContext {
             const Graph& graph;
+            const ExtensionRegistry& registry;
             const PackageNode& package;
             const EffectivePackage& effective_package;
             const PolicyContext& policy_context;
@@ -1092,18 +1093,24 @@ namespace kaixa::plugin::cmake::detail {
                 if (declared.kind != PackageTargetKind::test && declared.kind != PackageTargetKind::benchmark)
                     continue;
 
-                const std::string_view framework = declared.framework
-                    ? std::string_view(*declared.framework)
-                    : (declared.discover ? std::string_view{"kaixa"} : std::string_view{"executable"});
-                auto adapter = test_adapter(framework, declared.kind, declared.location);
-                if (!adapter)
-                    return std::unexpected(adapter.error());
+                TestAdapterInfo adapter;
+                if (declared.adapter) {
+                    adapter = *declared.adapter;
+                } else {
+                    const std::string_view framework = declared.framework ? std::string_view(*declared.framework)
+                                                                          : default_test_adapter(declared.kind, declared.discover);
+                    auto resolved = test_adapter(context.registry, framework, declared.kind, declared.location);
+                    if (!resolved)
+                        return std::unexpected(resolved.error());
 
-                if (!adapter->main_product.empty())
-                    result.targets.back().link_libraries.push_back(adapter->main_product);
+                    adapter = std::move(*resolved);
+                }
+
+                if (!adapter.main_product.empty())
+                    result.targets.back().link_libraries.push_back(adapter.main_product);
 
                 result.tests.push_back(
-                    {declared.display_name.value_or(*declared.name), *declared.name, declared.arguments, std::move(*adapter)}
+                    {declared.display_name.value_or(*declared.name), *declared.name, declared.arguments, std::move(adapter)}
                 );
             }
             return {};
@@ -1153,6 +1160,7 @@ namespace kaixa::plugin::cmake::detail {
 
     Result<Options> read_options(
         const Graph& graph,
+        const ExtensionRegistry& registry,
         const PackageNode& package,
         const ProductRealizationContext& realization,
         const EffectivePolicy* policy_override,
@@ -1207,8 +1215,14 @@ namespace kaixa::plugin::cmake::detail {
         if (!declared_tests)
             return std::unexpected(declared_tests.error());
 
-        const AssociatedTargetContext
-            target_context{graph, package, *effective_package, policy_context, policy_override, configured_context, default_standard};
+        const AssociatedTargetContext target_context{graph,
+            registry,
+            package,
+            *effective_package,
+            policy_context,
+            policy_override,
+            configured_context,
+            default_standard};
         auto associated_targets = append_associated_targets(result, target_context);
         if (!associated_targets)
             return std::unexpected(associated_targets.error());

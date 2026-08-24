@@ -1,33 +1,16 @@
 #include <kaixa/package/manager.hpp>
 
 #include <kaixa/config/parser.hpp>
+#include <kaixa/config/value_operations.hpp>
 #include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/foundation/hash.hpp>
-#include <kaixa/foundation/process.hpp>
 
 #include <algorithm>
 #include <chrono>
-#include <regex>
 #include <thread>
 
 namespace kaixa {
     namespace {
-        std::string toml_string(const std::string_view value) {
-            std::string result{"\""};
-            for (const char character: value) {
-                switch (character) {
-                case '\\': result += "\\\\"; break;
-                case '"': result += "\\\""; break;
-                case '\n': result += "\\n"; break;
-                case '\r': result += "\\r"; break;
-                case '\t': result += "\\t"; break;
-                default: result += character; break;
-                }
-            }
-            result += '"';
-            return result;
-        }
-
         std::string dependency_line(
             const std::string_view package,
             const std::string_view requirement,
@@ -81,13 +64,20 @@ namespace kaixa {
             if (section.header == std::string::npos)
                 return std::nullopt;
 
-            const std::regex declaration("^[ \\t]*" + std::string(package) + "[ \\t]*=");
             std::size_t line = section.content;
             while (line < section.end) {
                 const std::size_t next = contents.find('\n', line);
                 const std::size_t physical_end = next == std::string::npos ? contents.size() : next + 1;
-                const std::string text = contents.substr(line, (next == std::string::npos ? contents.size() : next) - line);
-                if (std::regex_search(text, declaration))
+                std::string_view text(contents.data() + line, (next == std::string::npos ? contents.size() : next) - line);
+                const std::size_t value = text.find('=');
+                std::string_view key = value == std::string_view::npos ? std::string_view{} : text.substr(0, value);
+                while (!key.empty() && (key.front() == ' ' || key.front() == '\t'))
+                    key.remove_prefix(1);
+
+                while (!key.empty() && (key.back() == ' ' || key.back() == '\t'))
+                    key.remove_suffix(1);
+
+                if (key == package || key == toml_string(package))
                     return std::pair{line, physical_end};
 
                 if (next == std::string::npos)
@@ -165,17 +155,6 @@ namespace kaixa {
                 if (failure)
                     return std::unexpected(error("cannot stage package entry `" + relative.generic_string() + "`: " + failure.message()));
             }
-            return {};
-        }
-
-        Result<void> create_archive(const std::filesystem::path& directory, const std::filesystem::path& archive) {
-            auto process = run_process({{"cmake", "-E", "tar", "czf", archive.string(), "--format=gnutar", "."}, directory, {}, true});
-            if (!process)
-                return std::unexpected(process.error());
-
-            if (!process->succeeded())
-                return std::unexpected(error("cannot create package archive").add_note(process->output));
-
             return {};
         }
 
@@ -307,6 +286,7 @@ namespace kaixa {
 
     Result<PublishResult> publish_remote_package(
         const PublishRequest& request,
+        const PublicationBackend& backend,
         const Manifest& manifest,
         const std::filesystem::path& staging,
         const std::filesystem::path& archive,
@@ -333,74 +313,18 @@ namespace kaixa {
         if (!metadata_written)
             return std::unexpected(metadata_written.error());
 
-        std::vector<std::string> arguments{
-            "curl",
-            "--fail",
-            "--silent",
-            "--show-error",
-            "--request",
-            "POST",
-            "--form",
-            "metadata=@" + (staging / "metadata.toml").string() + ";type=application/toml",
-            "--form",
-            "package=@" + archive.string() + ";type=application/gzip",
-        };
-        std::optional<std::filesystem::path> credential_file;
-        if (request.token_environment) {
-            const auto token = environment_variable(*request.token_environment);
-            if (!token)
-                return std::unexpected(error("credential environment variable `" + *request.token_environment + "` is not set"));
-
-            if (token->contains('\n') || token->contains('\r'))
-                return std::unexpected(error("credential environment variable contains a newline"));
-
-            std::string escaped;
-            for (const char character: *token) {
-                if (character == '\\' || character == '"')
-                    escaped += '\\';
-
-                escaped += character;
-            }
-            credential_file = staging / ".curl-config";
-            auto written = write_file(*credential_file, "header = \"Authorization: Bearer " + escaped + "\"\n");
-            if (!written)
-                return std::unexpected(written.error());
-
-#ifndef _WIN32
-            std::error_code permission_failure;
-            std::filesystem::permissions(
-                *credential_file,
-                std::filesystem::perms::owner_read | std::filesystem::perms::owner_write,
-                std::filesystem::perm_options::replace,
-                permission_failure
-            );
-            if (permission_failure)
-                return std::unexpected(error("cannot protect the temporary credential file: " + permission_failure.message()));
-#endif
-
-            arguments.emplace_back("--config");
-            arguments.emplace_back(credential_file->string());
-        }
         const std::string publish_url = endpoint + "/api/v1/packages";
-        arguments.push_back(publish_url);
-        auto uploaded = run_process({std::move(arguments), request.package, {}, true});
-        if (credential_file) {
-            std::error_code ignored;
-            std::filesystem::remove(*credential_file, ignored);
-        }
+        auto uploaded = backend.upload({publish_url, request.token_environment, staging / "metadata.toml", archive, request.package});
         if (!uploaded)
             return std::unexpected(uploaded.error());
-
-        if (!uploaded->succeeded()) {
-            return std::unexpected(
-                error("registry rejected publication of `" + manifest.name + "` with exit code " + std::to_string(uploaded->exit_code))
-                    .add_note(uploaded->output)
-            );
-        }
         return PublishResult{manifest.name, *manifest.version, publish_url, integrity, request.prebuilt.has_value()};
     }
 
     Result<PublishResult> publish_package(const PublishRequest& request) {
+        return publish_package(request, command_publication_backend());
+    }
+
+    Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend& backend) {
         auto manifest = parse_manifest_file(request.package / "Kaixa.toml");
         if (!manifest)
             return std::unexpected(manifest.error());
@@ -409,8 +333,8 @@ namespace kaixa {
             return std::unexpected(error_at(manifest->location, "published packages must declare a version"));
 
         for (const DependencyBinding& dependency: manifest->dependencies) {
-            const bool local_path = dependency.selection.path
-                || dependency.selection.source && dependency.selection.source->driver == "path";
+            const SourceLocator* source = dependency.selection.source();
+            const bool local_path = dependency.selection.path() || source && source->driver == "path";
             if (local_path) {
                 return std::unexpected(
                     error_at(dependency.location, "published dependency `" + dependency.request.package + "` cannot use a local path")
@@ -457,7 +381,7 @@ namespace kaixa {
 
         std::filesystem::create_directories(staging, failure);
         const std::filesystem::path temporary_archive = staging / "package.tar.gz";
-        auto archived = create_archive(staging / "contents", temporary_archive);
+        auto archived = backend.create_archive(staging / "contents", temporary_archive);
         if (!archived)
             return std::unexpected(archived.error());
 
@@ -466,7 +390,7 @@ namespace kaixa {
             return std::unexpected(integrity.error());
 
         if (request.endpoint)
-            return publish_remote_package(request, *manifest, staging, temporary_archive, *integrity);
+            return publish_remote_package(request, backend, *manifest, staging, temporary_archive, *integrity);
 
         const std::filesystem::path archive = request.registry / relative / (*integrity + ".tar.gz");
         std::filesystem::create_directories(archive.parent_path(), failure);

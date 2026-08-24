@@ -113,6 +113,7 @@ namespace kaixa::plugin::cmake::detail {
 
     [[nodiscard]] Result<Options> read_options(
         const Graph& graph,
+        const ExtensionRegistry& registry,
         const PackageNode& package,
         const ProductRealizationContext& realization = {},
         const EffectivePolicy* policy_override = nullptr,

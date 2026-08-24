@@ -569,7 +569,7 @@ namespace kaixa {
                 if (!appended)
                     return std::unexpected(appended.error());
             }
-            for (const PackageTarget& target: package.manifest->resolved_targets) {
+            for (const PackageTarget& target: package.targets) {
                 for (const TaskDeclaration& declaration: target.commands) {
                     auto appended = append_task(result, graph, package, declaration, target.name);
                     if (!appended)

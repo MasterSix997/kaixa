@@ -3,6 +3,7 @@
 #include <kaixa/kaixa.hpp>
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <concepts>
 #include <ostream>
@@ -1010,6 +1011,52 @@ namespace kaixa::cli {
 
             return Command{ConfigPathCommand{std::move(*path)}};
         }
+
+        template <typename CommandType> std::expected<Command, ParseError> into_command(std::expected<CommandType, ParseError> parsed) {
+            if (!parsed)
+                return std::unexpected(parsed.error());
+
+            return Command{std::move(*parsed)};
+        }
+
+        std::expected<Command, ParseError> parse_generate(Parser& parser) {
+            auto workspace = parse_workspace(parser);
+            if (!workspace)
+                return std::unexpected(workspace.error());
+
+            return Command{GenerateCommand{std::move(*workspace)}};
+        }
+
+        using CommandParser = std::expected<Command, ParseError> (*)(Parser&);
+
+        struct NamedCommandParser {
+            std::string_view name;
+            CommandParser parse;
+        };
+
+        constexpr std::array command_parsers{
+            NamedCommandParser{"--help", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }},
+            NamedCommandParser{"-h", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }},
+            NamedCommandParser{"--version", [](Parser&) -> std::expected<Command, ParseError> { return VersionCommand{}; }},
+            NamedCommandParser{"inspect", [](Parser& parser) { return into_command(parse_inspect(parser)); }},
+            NamedCommandParser{"test", [](Parser& parser) { return into_command(parse_test(parser)); }},
+            NamedCommandParser{"bench", [](Parser& parser) { return into_command(parse_bench(parser)); }},
+            NamedCommandParser{"run", [](Parser& parser) { return into_command(parse_run(parser)); }},
+            NamedCommandParser{"task", [](Parser& parser) { return into_command(parse_task(parser)); }},
+            NamedCommandParser{"workflow", [](Parser& parser) { return into_command(parse_workflow(parser)); }},
+            NamedCommandParser{"clean", [](Parser& parser) { return into_command(parse_clean(parser)); }},
+            NamedCommandParser{"search", [](Parser& parser) { return into_command(parse_catalog_command<SearchCommand>(parser, false)); }},
+            NamedCommandParser{"info", [](Parser& parser) { return into_command(parse_catalog_command<InfoCommand>(parser, true)); }},
+            NamedCommandParser{"add", [](Parser& parser) { return into_command(parse_add(parser)); }},
+            NamedCommandParser{"remove", [](Parser& parser) { return into_command(parse_remove(parser)); }},
+            NamedCommandParser{"update", [](Parser& parser) { return into_command(parse_update(parser)); }},
+            NamedCommandParser{"publish", [](Parser& parser) { return into_command(parse_publish(parser)); }},
+            NamedCommandParser{"config", parse_config},
+            NamedCommandParser{"build", [](Parser& parser) { return into_command(parse_build(parser)); }},
+            NamedCommandParser{"install", [](Parser& parser) { return into_command(parse_install(parser)); }},
+            NamedCommandParser{"check", [](Parser& parser) { return into_command(parse_check(parser)); }},
+            NamedCommandParser{"generate", parse_generate},
+        };
     }
 
     void print_usage(std::ostream& out) {
@@ -1073,151 +1120,10 @@ namespace kaixa::cli {
 
         Parser parser(arguments);
         const std::string_view name = parser.take();
-        if (name == "--help" || name == "-h")
-            return HelpCommand{};
-
-        if (name == "--version")
-            return VersionCommand{};
-
-        if (name == "inspect") {
-            auto command = parse_inspect(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "test") {
-            auto command = parse_test(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "bench") {
-            auto command = parse_bench(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "run") {
-            auto command = parse_run(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "task") {
-            auto command = parse_task(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "workflow") {
-            auto command = parse_workflow(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "clean") {
-            auto command = parse_clean(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "search") {
-            auto command = parse_catalog_command<SearchCommand>(parser, false);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "info") {
-            auto command = parse_catalog_command<InfoCommand>(parser, true);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "add") {
-            auto command = parse_add(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "remove") {
-            auto command = parse_remove(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "update") {
-            auto command = parse_update(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "publish") {
-            auto command = parse_publish(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "config")
-            return parse_config(parser);
-
-        if (name == "build") {
-            auto command = parse_build(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "install") {
-            auto command = parse_install(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name == "check") {
-            auto command = parse_check(parser);
-            if (!command)
-                return std::unexpected(command.error());
-
-            return Command{std::move(*command)};
-        }
-
-        if (name != "generate") {
+        const auto selected = std::ranges::find(command_parsers, name, &NamedCommandParser::name);
+        if (selected == command_parsers.end())
             return std::unexpected(ParseError{"unknown command `" + std::string(name) + "`", true});
-        }
 
-        auto workspace = parse_workspace(parser);
-        if (!workspace)
-            return std::unexpected(workspace.error());
-
-        return Command{GenerateCommand{std::move(*workspace)}};
+        return selected->parse(parser);
     }
 }

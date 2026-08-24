@@ -52,6 +52,7 @@ namespace kaixa {
         std::optional<Value> descriptor;
         std::vector<std::string> active_features;
         std::vector<Value> policy_layers;
+        std::vector<PackageTarget> targets;
     };
 
     struct ConfiguredPackageInstance {

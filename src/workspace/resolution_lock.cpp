@@ -2,6 +2,7 @@
 
 #include <kaixa/config/parser.hpp>
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/config/value_operations.hpp>
 #include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/model/policy.hpp>
 
@@ -34,114 +35,8 @@ namespace kaixa {
 #endif
         }
 
-        bool is_bare_key(const std::string_view key) {
-            return !key.empty() && std::ranges::all_of(key, [](const char character) {
-                return (character >= 'a' && character <= 'z')
-                    || (character >= 'A' && character <= 'Z')
-                    || (character >= '0' && character <= '9')
-                    || character == '_'
-                    || character == '-';
-            });
-        }
-
-        std::string toml_string(const std::string_view text) {
-            constexpr char hexadecimal[] = "0123456789ABCDEF";
-            std::string result{"\""};
-            for (const char character: text) {
-                switch (character) {
-                case '\b': result += "\\b"; break;
-                case '\t': result += "\\t"; break;
-                case '\n': result += "\\n"; break;
-                case '\f': result += "\\f"; break;
-                case '\r': result += "\\r"; break;
-                case '"': result += "\\\""; break;
-                case '\\': result += "\\\\"; break;
-                default: {
-                    const auto byte = static_cast<unsigned char>(character);
-                    if (byte < 0x20U || byte == 0x7FU) {
-                        result += "\\u00";
-                        result.push_back(hexadecimal[byte >> 4U]);
-                        result.push_back(hexadecimal[byte & 0x0FU]);
-                    } else {
-                        result.push_back(character);
-                    }
-                }
-                }
-            }
-            result.push_back('"');
-            return result;
-        }
-
-        std::string toml_key(const std::string_view key) {
-            return is_bare_key(key) ? std::string(key) : toml_string(key);
-        }
-
         Result<std::string> format_value(const Value& value) {
-            if (const bool* boolean = value.as_boolean())
-                return *boolean ? "true" : "false";
-
-            if (const std::int64_t* integer = value.as_integer())
-                return std::to_string(*integer);
-
-            if (const double* floating = value.as_floating()) {
-                if (std::isnan(*floating))
-                    return "nan";
-
-                if (std::isinf(*floating))
-                    return std::signbit(*floating) ? "-inf" : "inf";
-
-                std::ostringstream output;
-                output.imbue(std::locale::classic());
-                output << std::setprecision(std::numeric_limits<double>::max_digits10) << *floating;
-                std::string result = output.str();
-                if (!result.contains('.') && !result.contains('e') && !result.contains('E'))
-                    result += ".0";
-
-                return result;
-            }
-            if (const std::string* string = value.as_string())
-                return toml_string(*string);
-
-            if (const std::vector<Value>* array = value.as_array()) {
-                std::string output{"["};
-                for (std::size_t index = 0; index < array->size(); ++index) {
-                    auto formatted = format_value((*array)[index]);
-                    if (!formatted)
-                        return std::unexpected(formatted.error());
-
-                    if (index != 0)
-                        output += ", ";
-
-                    output += *formatted;
-                }
-                output += ']';
-                return output;
-            }
-            if (const std::vector<TableEntry>* table = value.as_table()) {
-                std::vector<const TableEntry*> entries;
-                entries.reserve(table->size());
-                for (const TableEntry& entry: *table)
-                    entries.push_back(&entry);
-
-                std::ranges::sort(entries, {}, [](const TableEntry* entry) { return entry->key; });
-                std::string output{"{ "};
-                for (std::size_t index = 0; index < entries.size(); ++index) {
-                    if (index != 0 && entries[index - 1]->key == entries[index]->key) {
-                        return std::unexpected(error("duplicate lock value key `" + entries[index]->key + "`"));
-                    }
-                    if (index != 0)
-                        output += ", ";
-
-                    auto formatted = format_value(entries[index]->value);
-                    if (!formatted)
-                        return std::unexpected(formatted.error());
-
-                    output += toml_key(entries[index]->key) + " = " + *formatted;
-                }
-                output += " }";
-                return output;
-            }
-            return std::unexpected(error("cannot write an empty lock value"));
+            return format_inline_toml(value, TomlTableOrder::sorted);
         }
 
         void append_size(std::string& output, const std::size_t size) {

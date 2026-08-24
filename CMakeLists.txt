@@ -81,6 +81,10 @@ set_target_properties(kaixa_plugins PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(kaixa
     [[apps/kaixa/application.cpp]]
+    [[apps/kaixa/application_build.cpp]]
+    [[apps/kaixa/application_catalog.cpp]]
+    [[apps/kaixa/application_output.cpp]]
+    [[apps/kaixa/application_workspace.cpp]]
     [[apps/kaixa/command_line.cpp]]
     [[apps/kaixa/configuration_output.cpp]]
     [[apps/kaixa/main.cpp]]

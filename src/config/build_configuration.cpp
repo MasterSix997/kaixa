@@ -3,6 +3,7 @@
 #include <kaixa/model/manifest.hpp>
 
 #include <kaixa/config/parser.hpp>
+#include <kaixa/config/value_operations.hpp>
 
 #include <algorithm>
 #include <utility>
@@ -10,7 +11,7 @@
 namespace kaixa {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
+            return wrong_value_kind(std::move(location), expected, found);
         }
 
         Result<std::vector<std::string>> optional_string_array(TableReader& table, const std::string_view key) {
@@ -106,24 +107,6 @@ namespace kaixa {
                 return std::unexpected(finished.error());
 
             return result;
-        }
-
-        Value merge_values(const Value& base, const Value& overlay) {
-            const std::vector<TableEntry>* base_table = base.as_table();
-            const std::vector<TableEntry>* overlay_table = overlay.as_table();
-            if (!base_table || !overlay_table)
-                return overlay;
-
-            std::vector<TableEntry> merged = *base_table;
-            for (const TableEntry& incoming: *overlay_table) {
-                const auto existing = std::ranges::find_if(merged, [&](const TableEntry& entry) { return entry.key == incoming.key; });
-                if (existing == merged.end()) {
-                    merged.push_back(incoming);
-                } else {
-                    existing->value = merge_values(existing->value, incoming.value);
-                }
-            }
-            return Value::table(std::move(merged), overlay.location());
         }
 
         Value merge_feature_settings(const Value& base, const Value& overlay) {

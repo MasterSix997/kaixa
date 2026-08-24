@@ -18,6 +18,7 @@ namespace kaixa::plugin {
         registry.add(path::make_package_map_provider_driver());
         registry.add(path::make_system_packages_provider_driver());
         registry.add(kaixa::plugin::registry::make_provider_driver());
+        add_standard_test_adapters(registry);
         return registry;
     }
 }

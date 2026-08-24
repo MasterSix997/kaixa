@@ -1,11 +1,12 @@
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/config/value_operations.hpp>
 
 #include <utility>
 
 namespace kaixa {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
+            return wrong_value_kind(std::move(location), expected, found);
         }
     }
 

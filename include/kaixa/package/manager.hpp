@@ -2,6 +2,7 @@
 
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/model/manifest.hpp>
+#include <kaixa/package/publication_backend.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -43,4 +44,5 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<PublishResult> publish_package(const PublishRequest& request);
+    [[nodiscard]] Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend& backend);
 }

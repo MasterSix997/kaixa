@@ -25,7 +25,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
-            auto discovered = resolver->products(graph, root, environment, *instances);
+            auto discovered = resolver->products(graph, registry, root, environment, *instances);
             if (!discovered)
                 return std::unexpected(discovered.error());
 
@@ -98,7 +98,7 @@ namespace kaixa {
                 package_request.build_default = true;
             }
 
-            auto planned = resolver->plan(graph, package, environment, *instances, package_request, plan);
+            auto planned = resolver->plan(graph, registry, package, environment, *instances, package_request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }
@@ -126,7 +126,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + root.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_tests(graph, root, environment, *instances, request, *plan);
+            auto planned = resolver->plan_tests(graph, registry, root, environment, *instances, request, *plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }

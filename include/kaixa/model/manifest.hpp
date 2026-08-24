@@ -5,6 +5,7 @@
 #include <kaixa/model/automation.hpp>
 #include <kaixa/model/file_set.hpp>
 #include <kaixa/model/version.hpp>
+#include <kaixa/test/adapter.hpp>
 
 #include <filesystem>
 #include <map>
@@ -12,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 namespace kaixa {
@@ -32,10 +34,55 @@ namespace kaixa {
         Value options;
     };
 
-    struct CandidateSelection {
-        std::optional<std::string> provider;
-        std::optional<std::filesystem::path> path;
-        std::optional<SourceLocator> source;
+    class CandidateSelection {
+    public:
+        struct Automatic {};
+        struct Provider {
+            std::string name;
+        };
+        struct Path {
+            std::filesystem::path value;
+        };
+        struct Source {
+            SourceLocator value;
+        };
+
+        CandidateSelection() = default;
+
+        [[nodiscard]] static CandidateSelection from_provider(std::string name) { return CandidateSelection(Provider{std::move(name)}); }
+
+        [[nodiscard]] static CandidateSelection from_path(std::filesystem::path path) { return CandidateSelection(Path{std::move(path)}); }
+
+        [[nodiscard]] static CandidateSelection from_source(SourceLocator source) { return CandidateSelection(Source{std::move(source)}); }
+
+        [[nodiscard]] bool automatic() const noexcept { return std::holds_alternative<Automatic>(m_value); }
+
+        [[nodiscard]] const std::string* provider() const noexcept {
+            const Provider* selected = std::get_if<Provider>(&m_value);
+            return selected ? &selected->name : nullptr;
+        }
+
+        [[nodiscard]] const std::filesystem::path* path() const noexcept {
+            const Path* selected = std::get_if<Path>(&m_value);
+            return selected ? &selected->value : nullptr;
+        }
+
+        [[nodiscard]] const SourceLocator* source() const noexcept {
+            const Source* selected = std::get_if<Source>(&m_value);
+            return selected ? &selected->value : nullptr;
+        }
+
+    private:
+        explicit CandidateSelection(Provider selected)
+            : m_value(std::move(selected)) {}
+
+        explicit CandidateSelection(Path selected)
+            : m_value(std::move(selected)) {}
+
+        explicit CandidateSelection(Source selected)
+            : m_value(std::move(selected)) {}
+
+        std::variant<Automatic, Provider, Path, Source> m_value;
     };
 
     struct DependencyBinding {
@@ -48,7 +95,7 @@ namespace kaixa {
         DependencyBinding() = default;
         DependencyBinding(std::string dependency_name, std::filesystem::path dependency_path, SourceLocation source_location = {})
             : request{std::move(dependency_name), std::nullopt, {}, false}
-            , selection{std::nullopt, std::move(dependency_path), std::nullopt}
+            , selection(CandidateSelection::from_path(std::move(dependency_path)))
             , alias(std::nullopt)
             , visibility(DependencyVisibility::private_dependency)
             , location(std::move(source_location)) {}
@@ -101,11 +148,23 @@ namespace kaixa {
         SourceLocation location;
     };
 
+    struct TargetMatrixAxis {
+        std::string name;
+        std::vector<Value> values;
+        SourceLocation location;
+    };
+
+    struct TargetMatrix {
+        std::vector<TargetMatrixAxis> axes;
+        SourceLocation location;
+    };
+
     struct PackageTarget {
         PackageTargetKind kind = PackageTargetKind::test;
         bool each_source = false;
         bool partial = false;
         std::optional<std::string> name;
+        bool name_template = false;
         std::optional<std::string> display_name;
         std::optional<std::string> description;
         std::optional<std::string> category;
@@ -117,9 +176,10 @@ namespace kaixa {
         bool discover = false;
         bool hidden = false;
         std::optional<std::string> framework;
+        std::optional<TestAdapterInfo> adapter;
         std::optional<Value> policy;
         std::optional<Value> resolver_options;
-        std::optional<Value> matrix;
+        std::optional<TargetMatrix> matrix;
         std::vector<TaskDeclaration> commands;
         std::filesystem::path source;
         SourceLocation location;
@@ -135,7 +195,6 @@ namespace kaixa {
         std::vector<ProductDeclaration> products;
         std::vector<PackageTargetReference> target_references;
         std::vector<PackageTarget> targets;
-        std::vector<PackageTarget> resolved_targets;
         ConfigurationSet configurations;
         std::optional<Value> resolver_options;
         std::vector<TaskDeclaration> commands;

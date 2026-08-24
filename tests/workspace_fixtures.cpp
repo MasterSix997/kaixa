@@ -148,11 +148,11 @@ KAIXA_TEST(target_directories_compose_layers_captures_and_skip_requirements) {
         return;
     }
     const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
-    context.check_equal(root.manifest->resolved_targets.size(), std::size_t{1}, "one symbolic example is composed");
-    if (root.manifest->resolved_targets.empty())
+    context.check_equal(root.targets.size(), std::size_t{1}, "one symbolic example is composed");
+    if (root.targets.empty())
         return;
 
-    const kaixa::PackageTarget& target = root.manifest->resolved_targets.front();
+    const kaixa::PackageTarget& target = root.targets.front();
     context.check_equal(target.name.value_or(""), std::string("ex.render.bindless"), "captures expand after layering");
     context.check_equal(target.category.value_or(""), std::string("Rendering"), "group category is inherited");
 
@@ -435,6 +435,143 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
     );
 }
 
+namespace {
+    template <typename TestContext>
+    void validate_generated_project_execution(
+        TestContext& context,
+        const kaixa::testing::TempDirectory& workspace,
+        const kaixa::Graph& graph,
+        const kaixa::ExtensionRegistry& registry,
+        const kaixa::BuildEnvironment& environment,
+        const kaixa::BuildPlan& plan,
+        const kaixa::GeneratedFile& generated
+    ) {
+        const auto run_targets = kaixa::discover_run_targets(graph, registry, environment);
+        context.check(run_targets.has_value(), "configured project exposes run targets");
+        if (run_targets) {
+            context.check_equal(run_targets->size(), std::size_t{1}, "one executable target");
+            if (!run_targets->empty()) {
+                context.check_equal(run_targets->front().name, std::string("test_generated"), "CMake executable target name");
+                context.check(
+                    !run_targets->front().process.argv.empty()
+                        && std::filesystem::path(run_targets->front().process.argv.front()).filename().stem() == "test_generated",
+                    "CMake reports the executable artifact"
+                );
+            }
+        }
+
+        const auto run_plan = kaixa::plan_run(graph, registry, environment, "test_generated");
+        context.check(run_plan.has_value(), "run target plans");
+        if (run_plan) {
+            const auto build = std::ranges::find_if(run_plan->actions(), [](const kaixa::Action& action) {
+                return action.description == "build selected targets for test_generated";
+            });
+            context.check(build != run_plan->actions().end(), "run plan has a build action");
+            if (build != run_plan->actions().end()) {
+                context.check(
+                    std::ranges::find(build->argv, "--target") != build->argv.end()
+                        && std::ranges::find(build->argv, "test_generated") != build->argv.end(),
+                    "run plan builds only the selected target"
+                );
+            }
+        }
+
+        const auto clean_plan = kaixa::plan_clean(graph, registry, environment);
+        context.check(clean_plan.has_value(), "CMake clean paths plan");
+        if (clean_plan) {
+            context.check(
+                std::ranges::find(clean_plan->paths(), environment.state_root / "build/debug") != clean_plan->paths().end(),
+                "clean plan owns public artifacts"
+            );
+            context.check(
+                std::ranges::find(clean_plan->paths(), environment.state_root / "build/cmake/debug") != clean_plan->paths().end(),
+                "clean plan owns private CMake state"
+            );
+            context.check(
+                std::ranges::find(clean_plan->paths(), environment.state_root / "generated/cmake") == clean_plan->paths().end(),
+                "regular clean preserves generated state"
+            );
+        }
+
+        const auto generated_clean_plan = kaixa::plan_clean(graph, registry, environment, kaixa::CleanRequest{true});
+        context.check(generated_clean_plan.has_value(), "CMake generated clean paths plan");
+        if (generated_clean_plan) {
+            context.check(
+                std::ranges::find(generated_clean_plan->paths(), environment.state_root / "generated/cmake")
+                    == generated_clean_plan->paths().end(),
+                "generated files option does not select state generation"
+            );
+            context.check(generated_clean_plan->generated_files().empty(), "state generation has no source files to clean");
+        }
+
+        const auto synchronized_plan = kaixa::plan_build(graph, registry, environment);
+        context.check(synchronized_plan.has_value(), "synchronized project plans again");
+        if (synchronized_plan) {
+            const auto state = kaixa::check(*synchronized_plan);
+            context.check(state.has_value(), "synchronized project can be checked");
+            if (state) {
+                context.check(!state->requires_synchronization(), "generate leaves no required synchronization");
+            }
+        }
+
+        kaixa::EffectiveBuildConfiguration changed_configuration;
+        changed_configuration.profile = "debug";
+        changed_configuration.resolvers.push_back({"cmake", kaixa::Value::table({{"generator", "Ninja"}}), {}, {}});
+        const kaixa::BuildEnvironment changed_environment{workspace.path(), workspace.path() / ".kaixa", std::move(changed_configuration)};
+        const auto changed_variant = kaixa::plan_build(graph, registry, changed_environment);
+        context.check(changed_variant.has_value(), "changed CMake variant plans");
+        if (changed_variant) {
+            context.check_equal(
+                changed_variant->outputs().front().path,
+                plan.outputs().front().path,
+                "same named config keeps the public output path"
+            );
+            context.check(
+                std::ranges::any_of(
+                    changed_variant->actions(),
+                    [](const kaixa::Action& action) { return action.description == "reset test_generated"; }
+                ),
+                "incompatible CMake state plans a private build reset"
+            );
+        }
+
+        const auto report = kaixa::test(plan);
+        context.check(report.has_value(), "generated project configures, builds and tests");
+        if (!report)
+            context.fail(kaixa::format_diagnostic(report.error()));
+        else {
+            context.check_equal(report->executed, std::size_t{3}, "configure, build and test execute");
+
+            const auto configured_plan = kaixa::plan_build(graph, registry, environment);
+            context.check(configured_plan.has_value(), "configured project plans again");
+            if (configured_plan) {
+                const auto state = kaixa::check(*configured_plan);
+                context.check(state.has_value(), "configured project can be checked");
+                if (state) {
+                    context.check(
+                        state->actions.front().state == kaixa::ActionState::current,
+                        "CMake File API reports configuration as current"
+                    );
+                }
+            }
+
+            std::filesystem::last_write_time(generated.path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2));
+            const auto stale_plan = kaixa::plan_build(graph, registry, environment);
+            context.check(stale_plan.has_value(), "changed CMake input plans again");
+            if (stale_plan) {
+                const auto state = kaixa::check(*stale_plan);
+                context.check(state.has_value(), "changed CMake input can be checked");
+                if (state) {
+                    context.check(
+                        state->actions.front().state == kaixa::ActionState::required,
+                        "CMake File API detects configuration input changes"
+                    );
+                }
+            }
+        }
+    }
+}
+
 KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     const kaixa::testing::TempDirectory workspace("generated-cmake-project");
     workspace.copy_from(workspaces_directory / "generated_project");
@@ -553,129 +690,10 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     }
     context.check_equal(synchronization->synchronized, std::size_t{1}, "CMake configuration synchronizes");
 
-    const auto run_targets = kaixa::discover_run_targets(*graph, registry, environment);
-    context.check(run_targets.has_value(), "configured project exposes run targets");
-    if (run_targets) {
-        context.check_equal(run_targets->size(), std::size_t{1}, "one executable target");
-        if (!run_targets->empty()) {
-            context.check_equal(run_targets->front().name, std::string("test_generated"), "CMake executable target name");
-            context.check(
-                !run_targets->front().process.argv.empty()
-                    && std::filesystem::path(run_targets->front().process.argv.front()).filename().stem() == "test_generated",
-                "CMake reports the executable artifact"
-            );
-        }
-    }
+    if (generated == plan->generated_files().end())
+        return;
 
-    const auto run_plan = kaixa::plan_run(*graph, registry, environment, "test_generated");
-    context.check(run_plan.has_value(), "run target plans");
-    if (run_plan) {
-        const auto build = std::ranges::find_if(run_plan->actions(), [](const kaixa::Action& action) {
-            return action.description == "build selected targets for test_generated";
-        });
-        context.check(build != run_plan->actions().end(), "run plan has a build action");
-        if (build != run_plan->actions().end()) {
-            context.check(
-                std::ranges::find(build->argv, "--target") != build->argv.end()
-                    && std::ranges::find(build->argv, "test_generated") != build->argv.end(),
-                "run plan builds only the selected target"
-            );
-        }
-    }
-
-    const auto clean_plan = kaixa::plan_clean(*graph, registry, environment);
-    context.check(clean_plan.has_value(), "CMake clean paths plan");
-    if (clean_plan) {
-        context.check(
-            std::ranges::find(clean_plan->paths(), environment.state_root / "build/debug") != clean_plan->paths().end(),
-            "clean plan owns public artifacts"
-        );
-        context.check(
-            std::ranges::find(clean_plan->paths(), environment.state_root / "build/cmake/debug") != clean_plan->paths().end(),
-            "clean plan owns private CMake state"
-        );
-        context.check(
-            std::ranges::find(clean_plan->paths(), environment.state_root / "generated/cmake") == clean_plan->paths().end(),
-            "regular clean preserves generated state"
-        );
-    }
-
-    const auto generated_clean_plan = kaixa::plan_clean(*graph, registry, environment, kaixa::CleanRequest{true});
-    context.check(generated_clean_plan.has_value(), "CMake generated clean paths plan");
-    if (generated_clean_plan) {
-        context.check(
-            std::ranges::find(generated_clean_plan->paths(), environment.state_root / "generated/cmake")
-                == generated_clean_plan->paths().end(),
-            "generated files option does not select state generation"
-        );
-        context.check(generated_clean_plan->generated_files().empty(), "state generation has no source files to clean");
-    }
-
-    const auto synchronized_plan = kaixa::plan_build(*graph, registry, environment);
-    context.check(synchronized_plan.has_value(), "synchronized project plans again");
-    if (synchronized_plan) {
-        const auto state = kaixa::check(*synchronized_plan);
-        context.check(state.has_value(), "synchronized project can be checked");
-        if (state) {
-            context.check(!state->requires_synchronization(), "generate leaves no required synchronization");
-        }
-    }
-
-    kaixa::EffectiveBuildConfiguration changed_configuration;
-    changed_configuration.profile = "debug";
-    changed_configuration.resolvers.push_back({"cmake", kaixa::Value::table({{"generator", "Ninja"}}), {}, {}});
-    const kaixa::BuildEnvironment changed_environment{workspace.path(), workspace.path() / ".kaixa", std::move(changed_configuration)};
-    const auto changed_variant = kaixa::plan_build(*graph, registry, changed_environment);
-    context.check(changed_variant.has_value(), "changed CMake variant plans");
-    if (changed_variant) {
-        context.check_equal(
-            changed_variant->outputs().front().path,
-            plan->outputs().front().path,
-            "same named config keeps the public output path"
-        );
-        context.check(
-            std::ranges::any_of(
-                changed_variant->actions(),
-                [](const kaixa::Action& action) { return action.description == "reset test_generated"; }
-            ),
-            "incompatible CMake state plans a private build reset"
-        );
-    }
-
-    const auto report = kaixa::test(*plan);
-    context.check(report.has_value(), "generated project configures, builds and tests");
-    if (!report)
-        context.fail(kaixa::format_diagnostic(report.error()));
-    else {
-        context.check_equal(report->executed, std::size_t{3}, "configure, build and test execute");
-
-        const auto configured_plan = kaixa::plan_build(*graph, registry, environment);
-        context.check(configured_plan.has_value(), "configured project plans again");
-        if (configured_plan) {
-            const auto state = kaixa::check(*configured_plan);
-            context.check(state.has_value(), "configured project can be checked");
-            if (state) {
-                context.check(
-                    state->actions.front().state == kaixa::ActionState::current,
-                    "CMake File API reports configuration as current"
-                );
-            }
-        }
-
-        std::filesystem::last_write_time(generated->path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2));
-        const auto stale_plan = kaixa::plan_build(*graph, registry, environment);
-        context.check(stale_plan.has_value(), "changed CMake input plans again");
-        if (stale_plan) {
-            const auto state = kaixa::check(*stale_plan);
-            context.check(state.has_value(), "changed CMake input can be checked");
-            if (state) {
-                context.check(
-                    state->actions.front().state == kaixa::ActionState::required,
-                    "CMake File API detects configuration input changes"
-                );
-            }
-        }
-    }
+    validate_generated_project_execution(context, workspace, *graph, registry, environment, *plan, *generated);
 }
 
 KAIXA_TEST(generated_project_refuses_to_replace_a_manual_cmakelists) {
@@ -807,19 +825,19 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         return;
     }
 
-    const kaixa::Manifest& manifest = *(*graph)[graph->roots().front()].manifest;
+    const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
+    const kaixa::Manifest& manifest = *root.manifest;
     context.check_equal(manifest.targets.size(), std::size_t{1}, "inline declaration is preserved");
-    context.check_equal(manifest.resolved_targets.size(), std::size_t{5}, "targets are normalized");
+    context.check_equal(root.targets.size(), std::size_t{5}, "targets are normalized");
     context.check(
         std::ranges::all_of(
-            manifest.resolved_targets,
+            root.targets,
             [](const kaixa::PackageTarget& target) {
                 return target.name.has_value() && !target.each_source && !target.sources.files.empty();
             }
         ),
         "resolver receives concrete named targets"
     );
-    const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
     context.check_equal(root.target_dependencies.size(), std::size_t{4}, "target dependency group count");
     context.check_equal(
         (*graph)[root.target_dependencies.front().packages.front()].name,
@@ -906,4 +924,37 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
         if (!tested)
             context.fail(kaixa::format_diagnostic(tested.error()));
     }
+}
+
+KAIXA_TEST(target_matrices_expand_names_and_resolver_values) {
+    const kaixa::testing::TempDirectory workspace("target-matrix");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"matrix\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[benchmarks]\n"
+        "name-template = \"matrix.{value}\"\n"
+        "sources = [\"benchmark.cpp\"]\n"
+        "matrix = { value = [64, 128] }\n"
+        "defines = { MATRIX_VALUE = \"{value}\" }\n"
+    );
+    workspace.write("benchmark.cpp", "int main() { return 0; }\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "target matrix workspace loads");
+    if (!graph)
+        return;
+
+    const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
+    context.check_equal(root.targets.size(), std::size_t{2}, "target matrix expands every value");
+    if (root.targets.size() != 2)
+        return;
+
+    context.check_equal(root.targets[0].name.value_or(""), std::string("matrix.64"), "first matrix target name");
+    context.check_equal(root.targets[1].name.value_or(""), std::string("matrix.128"), "second matrix target name");
+    const kaixa::Value* definitions = root.targets[0].resolver_options ? root.targets[0].resolver_options->find("defines") : nullptr;
+    const kaixa::Value* value = definitions ? definitions->find("MATRIX_VALUE") : nullptr;
+    context.check(value && value->as_string() && *value->as_string() == "64", "matrix value reaches resolver options");
 }

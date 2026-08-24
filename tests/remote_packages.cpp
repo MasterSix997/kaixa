@@ -11,6 +11,25 @@
 using kaixa::testing::TempDirectory;
 
 namespace {
+    class RecordingPublicationBackend final : public kaixa::PublicationBackend {
+    public:
+        [[nodiscard]] kaixa::Result<void> create_archive(
+            const std::filesystem::path& contents,
+            const std::filesystem::path& destination
+        ) const override {
+            archived = std::filesystem::is_directory(contents);
+            return kaixa::write_file(destination, "test archive");
+        }
+
+        [[nodiscard]] kaixa::Result<void> upload(const kaixa::PackageUpload&) const override {
+            uploaded = true;
+            return {};
+        }
+
+        mutable bool archived = false;
+        mutable bool uploaded = false;
+    };
+
     kaixa::Result<void> run(std::vector<std::string> arguments, const std::filesystem::path& directory) {
         auto result = kaixa::run_process({std::move(arguments), directory, {}, true});
         if (!result)
@@ -21,6 +40,22 @@ namespace {
 
         return {};
     }
+}
+
+KAIXA_TEST(publication_transport_is_replaceable) {
+    const TempDirectory root("publication-backend");
+    root.write(
+        "library/Kaixa.toml",
+        "[package]\n"
+        "name = \"replaceable\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    const RecordingPublicationBackend backend;
+    const auto published = kaixa::publish_package({root.path() / "library", root.path() / "registry"}, backend);
+    context.check(published.has_value(), "publication accepts an injected transport backend");
+    context.check(backend.archived, "injected backend creates the package archive");
+    context.check(!backend.uploaded, "local registries do not invoke remote upload");
 }
 
 KAIXA_TEST(sha256_matches_the_standard_test_vector) {
@@ -314,6 +349,23 @@ KAIXA_TEST(dependency_edits_preserve_unrelated_manifest_text) {
     context.check(removed.has_value(), "dependency removal is prepared from the original document");
     if (removed)
         context.check(!removed->after.contains("existing ="), "only selected dependency is removed");
+}
+
+KAIXA_TEST(dependency_edits_match_dotted_names_literally) {
+    const TempDirectory root("dependency-edit-dotted-name");
+    root.write(
+        "Kaixa.toml",
+        "[package]\nname = \"application\"\nresolver = \"cmake\"\n\n"
+        "[dependencies]\nfooXbar = \"1\"\nfoo.bar = \"2\"\n"
+    );
+
+    auto removed = kaixa::remove_manifest_dependency(root.path() / "Kaixa.toml", "foo.bar");
+    context.check(removed.has_value(), "dotted dependency removal is prepared");
+    if (!removed)
+        return;
+
+    context.check_contains(removed->after, "fooXbar = \"1\"", "regex-like sibling name is preserved");
+    context.check(!removed->after.contains("foo.bar ="), "exact dotted dependency is removed");
 }
 
 KAIXA_TEST(publication_rejects_machine_local_dependencies) {

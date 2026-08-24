@@ -115,7 +115,7 @@ KAIXA_TEST(target_abi_policy_creates_dependency_variants_and_stable_identities) 
     kaixa::PackageTarget target;
     target.name = "root.tests.noexcept";
     target.policy = policy({{"exceptions", false}});
-    graph[root].manifest->resolved_targets.push_back(std::move(target));
+    graph[root].targets.push_back(std::move(target));
     graph.add_root(root);
 
     const auto first = kaixa::configure_package_instances(graph);

@@ -1,5 +1,8 @@
 #include <kaixa/test/adapter.hpp>
 
+#include <kaixa/extension/registry.hpp>
+#include <kaixa/model/manifest.hpp>
+
 #include <algorithm>
 #include <cctype>
 #include <string>
@@ -36,50 +39,78 @@ namespace kaixa {
         }
     }
 
-    Result<TestAdapterInfo> test_adapter(const std::string_view framework, const PackageTargetKind kind, const SourceLocation& location) {
-        if (framework.empty() || framework == "executable") {
-            return TestAdapterInfo{"executable",
-                kind == PackageTargetKind::benchmark ? TestAdapterPurpose::benchmark : TestAdapterPurpose::test};
-        }
-        if (framework == "kaixa") {
-            if (kind != PackageTargetKind::test)
-                return std::unexpected(error_at(location, "the `kaixa` adapter only supports test targets"));
-
-            return TestAdapterInfo{"kaixa", TestAdapterPurpose::test, {}, {}, {"--kaixa-test-list"}, "--kaixa-test-run", {}};
-        }
-        if (framework == "googletest") {
-            if (kind != PackageTargetKind::test)
-                return std::unexpected(error_at(location, "the `googletest` adapter only supports test targets"));
-
-            return TestAdapterInfo{"googletest",
+    void add_standard_test_adapters(ExtensionRegistry& registry) {
+        registry.add(TestAdapterInfo{"executable", TestAdapterPurpose::test});
+        registry.add(TestAdapterInfo{"executable-benchmark", TestAdapterPurpose::benchmark});
+        registry.add(
+            TestAdapterInfo{"kaixa",
+                TestAdapterPurpose::test,
+                {},
+                {},
+                {"--kaixa-test-list"},
+                "--kaixa-test-run",
+                {},
+                TestCaseListingFormat::lines,
+                true}
+        );
+        registry.add(
+            TestAdapterInfo{"googletest",
                 TestAdapterPurpose::test,
                 "googletest",
                 "gtest_main",
                 {"--gtest_list_tests"},
                 "--gtest_filter=",
-                {}};
-        }
-        if (framework == "google-benchmark") {
-            if (kind != PackageTargetKind::benchmark)
-                return std::unexpected(error_at(location, "the `google-benchmark` adapter only supports benchmark targets"));
-
-            return TestAdapterInfo{"google-benchmark",
+                {},
+                TestCaseListingFormat::googletest}
+        );
+        registry.add(
+            TestAdapterInfo{"google-benchmark",
                 TestAdapterPurpose::benchmark,
                 "google_benchmark",
                 "benchmark::benchmark_main",
                 {"--benchmark_list_tests=true"},
                 "--benchmark_filter=^",
-                "$"};
+                "$"}
+        );
+    }
+
+    std::string_view default_test_adapter(const PackageTargetKind kind, const bool discover) {
+        if (discover)
+            return "kaixa";
+
+        return kind == PackageTargetKind::benchmark ? "executable-benchmark" : "executable";
+    }
+
+    Result<TestAdapterInfo> test_adapter(
+        const ExtensionRegistry& registry,
+        const std::string_view framework,
+        const PackageTargetKind kind,
+        const SourceLocation& location
+    ) {
+        const TestAdapterInfo* adapter = registry.find_test_adapter(framework);
+        if (!adapter)
+            return std::unexpected(error_at(location, "test adapter `" + std::string(framework) + "` is not installed"));
+
+        const TestAdapterPurpose expected = kind == PackageTargetKind::benchmark ? TestAdapterPurpose::benchmark : TestAdapterPurpose::test;
+        if (adapter->purpose != expected) {
+            return std::unexpected(error_at(
+                location,
+                "test adapter `"
+                    + std::string(framework)
+                    + "` does not support "
+                    + (kind == PackageTargetKind::benchmark ? "benchmark" : "test")
+                    + " targets"
+            ));
         }
-        return std::unexpected(error_at(location, "test adapter `" + std::string(framework) + "` is not installed"));
+        return *adapter;
     }
 
     Result<std::vector<std::string>> parse_test_cases(const TestAdapterInfo& adapter, const std::string_view output) {
         std::vector<std::string> result;
-        if (adapter.name == "executable")
+        if (adapter.discovery_arguments.empty())
             return result;
 
-        if (adapter.name == "googletest") {
+        if (adapter.listing_format == TestCaseListingFormat::googletest) {
             std::string suite;
             for (const std::string_view untrimmed: lines(output)) {
                 const std::string_view line = trim(untrimmed);
@@ -112,7 +143,7 @@ namespace kaixa {
         const std::span<const std::string> arguments
     ) {
         std::vector<std::string> result(arguments.begin(), arguments.end());
-        if (adapter.name == "kaixa") {
+        if (adapter.separate_filter_argument) {
             result.push_back(adapter.case_filter_prefix);
             result.emplace_back(test_case);
         } else if (!adapter.case_filter_prefix.empty()) {

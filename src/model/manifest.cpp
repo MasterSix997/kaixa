@@ -14,12 +14,14 @@ namespace kaixa {
         Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path);
 
         bool is_valid_target_template(std::string value) {
-            for (const std::string_view capture: {"{parent}", "{stem}", "{value}"}) {
-                std::size_t position = 0;
-                while ((position = value.find(capture, position)) != std::string::npos) {
-                    value.replace(position, capture.size(), "capture");
-                    position += std::string_view("capture").size();
-                }
+            std::size_t position = 0;
+            while ((position = value.find('{', position)) != std::string::npos) {
+                const std::size_t end = value.find('}', position + 1);
+                if (end == std::string::npos || !is_valid_identifier(std::string_view(value).substr(position + 1, end - position - 1)))
+                    return false;
+
+                value.replace(position, end - position + 1, "capture");
+                position += std::string_view("capture").size();
             }
             return is_valid_target_name(value);
         }
@@ -477,24 +479,13 @@ namespace kaixa {
             return {};
         }
 
-        Result<PackageTarget> parse_package_target(
-            TableReader& table,
-            const PackageTargetKind kind,
-            const bool each_source,
-            const std::string_view resolver,
-            const bool allow_partial
-        ) {
-            PackageTarget target;
-            target.kind = kind;
-            target.each_source = each_source;
-            target.location = table.location_of("sources");
-
+        Result<void> read_target_identity(TableReader& table, PackageTarget& target) {
             auto name = table.optional_string("name");
             if (!name)
                 return std::unexpected(name.error());
 
             if (*name) {
-                if (!is_valid_target_name(**name) && !(each_source && is_valid_target_template(**name))) {
+                if (!is_valid_target_name(**name) && !is_valid_target_template(**name)) {
                     return std::unexpected(error_at(table.location_of("name"), "`" + **name + "` is not a valid target name"));
                 }
                 target.name = std::move(**name);
@@ -516,8 +507,13 @@ namespace kaixa {
                     );
                 }
                 target.name = std::move(**name_template);
+                target.name_template = true;
             }
 
+            return {};
+        }
+
+        Result<void> read_target_metadata(TableReader& table, PackageTarget& target) {
             auto display_name = table.optional_string("display-name");
             if (!display_name)
                 return std::unexpected(display_name.error());
@@ -536,6 +532,10 @@ namespace kaixa {
 
             target.category = std::move(*category);
 
+            return {};
+        }
+
+        Result<void> read_target_sources(TableReader& table, PackageTarget& target, const bool allow_partial) {
             auto sources = read_string_array(table, "sources");
             if (!sources)
                 return std::unexpected(sources.error());
@@ -577,6 +577,10 @@ namespace kaixa {
 
             target.sources.exclude = std::move(*excludes);
 
+            return {};
+        }
+
+        Result<void> read_target_required_features(TableReader& table, PackageTarget& target) {
             if (const Value* required_features = table.take("required-features")) {
                 if (required_features->as_array()) {
                     auto values = read_string_array_value(*required_features, "required-features");
@@ -604,6 +608,10 @@ namespace kaixa {
                 }
             }
 
+            return {};
+        }
+
+        Result<void> read_target_behavior(TableReader& table, PackageTarget& target) {
             auto dependencies = read_dependencies(table);
             if (!dependencies)
                 return std::unexpected(dependencies.error());
@@ -642,12 +650,39 @@ namespace kaixa {
             }
 
             if (const Value* matrix = table.take("matrix")) {
-                if (!matrix->is_table()) {
+                const std::vector<TableEntry>* axes = matrix->as_table();
+                if (!axes) {
                     return std::unexpected(error_at(matrix->location(), "target matrix must be a table"));
                 }
-                target.matrix = *matrix;
+                TargetMatrix parsed;
+                parsed.location = matrix->location();
+                for (const TableEntry& axis: *axes) {
+                    if (!is_valid_identifier(axis.key)) {
+                        return std::unexpected(error_at(axis.value.location(), "invalid target matrix axis `" + axis.key + "`"));
+                    }
+                    const std::vector<Value>* values = axis.value.as_array();
+                    if (!values || values->empty()) {
+                        return std::unexpected(
+                            error_at(axis.value.location(), "target matrix axis `" + axis.key + "` must be a non-empty array")
+                        );
+                    }
+                    for (const Value& value: *values) {
+                        if (value.kind() == ValueKind::none || value.kind() == ValueKind::array || value.kind() == ValueKind::table) {
+                            return std::unexpected(error_at(value.location(), "target matrix values must be booleans, numbers or strings"));
+                        }
+                    }
+                    parsed.axes.push_back({axis.key, *values, axis.value.location()});
+                }
+                if (parsed.axes.empty())
+                    return std::unexpected(error_at(matrix->location(), "target matrix must declare at least one axis"));
+
+                target.matrix = std::move(parsed);
             }
 
+            return {};
+        }
+
+        Result<void> read_target_resolver_options(TableReader& table, PackageTarget& target, const std::string_view resolver) {
             if (!resolver.empty()) {
                 if (const Value* options = table.take(resolver)) {
                     if (!options->is_table()) {
@@ -689,6 +724,45 @@ namespace kaixa {
                 }
                 target.resolver_options = Value::table(std::move(direct_options), table.location_of("sources"));
             }
+
+            return {};
+        }
+
+        Result<PackageTarget> parse_package_target(
+            TableReader& table,
+            const PackageTargetKind kind,
+            const bool each_source,
+            const std::string_view resolver,
+            const bool allow_partial
+        ) {
+            PackageTarget target;
+            target.kind = kind;
+            target.each_source = each_source;
+            target.location = table.location_of("sources");
+
+            auto identity = read_target_identity(table, target);
+            if (!identity)
+                return std::unexpected(identity.error());
+
+            auto metadata = read_target_metadata(table, target);
+            if (!metadata)
+                return std::unexpected(metadata.error());
+
+            auto sources = read_target_sources(table, target, allow_partial);
+            if (!sources)
+                return std::unexpected(sources.error());
+
+            auto required_features = read_target_required_features(table, target);
+            if (!required_features)
+                return std::unexpected(required_features.error());
+
+            auto behavior = read_target_behavior(table, target);
+            if (!behavior)
+                return std::unexpected(behavior.error());
+
+            auto resolver_options = read_target_resolver_options(table, target, resolver);
+            if (!resolver_options)
+                return std::unexpected(resolver_options.error());
 
             auto finished = table.finish();
             if (!finished)
@@ -846,7 +920,6 @@ namespace kaixa {
                 if (!is_valid_identifier(**provider)) {
                     return std::unexpected(error_at(table.location_of("from"), "`" + **provider + "` is not a valid provider name"));
                 }
-                dependency.selection.provider = std::move(**provider);
             }
 
             auto directory = table.optional_string("path");
@@ -856,9 +929,9 @@ namespace kaixa {
             if (*directory) {
                 if ((*directory)->empty())
                     return std::unexpected(error_at(table.location_of("path"), "path cannot be empty"));
-
-                dependency.selection.path = std::filesystem::path(**directory);
             }
+
+            std::optional<SourceLocator> source;
 
             constexpr std::array common_fields{std::string_view{"version"},
                 std::string_view{"features"},
@@ -877,18 +950,25 @@ namespace kaixa {
                 if (!field.value.is_table()) {
                     return std::unexpected(error_at(field.value.location(), "source driver `" + field.key + "` options must be a table"));
                 }
-                if (dependency.selection.source) {
+                if (source) {
                     return std::unexpected(error_at(field.value.location(), "dependency selects more than one direct source"));
                 }
-                dependency.selection.source = SourceLocator{field.key, field.value};
+                source = SourceLocator{field.key, field.value};
             }
 
-            if (dependency.selection.path && dependency.selection.source) {
+            if (*directory && source) {
                 return std::unexpected(error_at(location, "dependency cannot combine `path` with a source driver"));
             }
-            if (dependency.selection.provider && (dependency.selection.path || dependency.selection.source)) {
+            if (*provider && (*directory || source)) {
                 return std::unexpected(error_at(location, "dependency cannot combine `from` with a direct source"));
             }
+
+            if (*provider)
+                dependency.selection = CandidateSelection::from_provider(std::move(**provider));
+            else if (*directory)
+                dependency.selection = CandidateSelection::from_path(std::filesystem::path(std::move(**directory)));
+            else if (source)
+                dependency.selection = CandidateSelection::from_source(std::move(*source));
 
             auto finished = table.finish();
             if (!finished)
@@ -1254,19 +1334,15 @@ namespace kaixa {
         return AutomationDocument{std::move(*commands), std::move(*workflows)};
     }
 
-    Result<ManifestDocument> parse_manifest_document(const Value& document) {
-        auto root_result = TableReader::bind(document);
-        if (!root_result)
-            return std::unexpected(root_result.error());
+    namespace {
+        Result<std::optional<Manifest>> read_document_package(TableReader& root) {
+            auto package_result = root.optional_table("package");
+            if (!package_result)
+                return std::unexpected(package_result.error());
 
-        TableReader root = std::move(*root_result);
+            if (!*package_result)
+                return std::optional<Manifest>{};
 
-        auto package_result = root.optional_table("package");
-        if (!package_result)
-            return std::unexpected(package_result.error());
-
-        ManifestDocument result;
-        if (*package_result) {
             TableReader package = std::move(**package_result);
             Manifest manifest;
 
@@ -1348,9 +1424,9 @@ namespace kaixa {
 
             if (!manifest.resolver.empty()) {
                 if (const Value* options = root.take(manifest.resolver)) {
-                    if (!options->is_table()) {
+                    if (!options->is_table())
                         return std::unexpected(error_at(options->location(), "resolver options must be a table"));
-                    }
+
                     manifest.resolver_options = *options;
                 }
             }
@@ -1359,27 +1435,34 @@ namespace kaixa {
                     error_at(manifest.location, "package `" + manifest.name + "` declares a product without a resolver")
                 );
             }
-            result.package = std::move(manifest);
+
+            return std::optional<Manifest>{std::move(manifest)};
         }
 
-        auto package_set_result = root.optional_table("package-set");
-        if (!package_set_result)
-            return std::unexpected(package_set_result.error());
+        Result<std::optional<PackageSet>> read_document_package_set(TableReader& root) {
+            auto package_set_result = root.optional_table("package-set");
+            if (!package_set_result)
+                return std::unexpected(package_set_result.error());
 
-        if (*package_set_result) {
+            if (!*package_set_result)
+                return std::optional<PackageSet>{};
+
             TableReader package_set = std::move(**package_set_result);
             auto parsed = parse_package_set(package_set);
             if (!parsed)
                 return std::unexpected(parsed.error());
 
-            result.package_set = std::move(*parsed);
+            return std::optional<PackageSet>{std::move(*parsed)};
         }
 
-        auto members_result = root.optional_table("members");
-        if (!members_result)
-            return std::unexpected(members_result.error());
+        Result<void> read_document_members(TableReader& root, ManifestDocument& result) {
+            auto members_result = root.optional_table("members");
+            if (!members_result)
+                return std::unexpected(members_result.error());
 
-        if (*members_result) {
+            if (!*members_result)
+                return {};
+
             TableReader members = std::move(**members_result);
             for (const TableEntry& entry: members.entries()) {
                 auto member = parse_inline_member(entry, join_config_path(members.path(), entry.key));
@@ -1389,7 +1472,82 @@ namespace kaixa {
                 result.inline_members.push_back(std::move(*member));
             }
             members.take_all();
+            return {};
         }
+
+        Result<void> read_document_routing(TableReader& root, ManifestDocument& result) {
+            auto routing_result = root.optional_table("routing");
+            if (!routing_result)
+                return std::unexpected(routing_result.error());
+
+            if (!*routing_result)
+                return {};
+
+            TableReader routing = std::move(**routing_result);
+            for (const TableEntry& entry: routing.entries()) {
+                const std::string* provider = entry.value.as_string();
+                if (!provider)
+                    return std::unexpected(error_at(entry.value.location(), "provider routing values must be strings"));
+
+                if (!is_valid_identifier(*provider)) {
+                    return std::unexpected(error_at(entry.value.location(), "`" + *provider + "` is not a valid provider name"));
+                }
+                result.routing.emplace(entry.key, *provider);
+            }
+            routing.take_all();
+            return {};
+        }
+
+        Result<void> read_document_automation(TableReader& root, ManifestDocument& result) {
+            auto commands = read_task_declarations(root);
+            if (!commands)
+                return std::unexpected(commands.error());
+
+            if (!commands->empty()) {
+                if (!result.package)
+                    return std::unexpected(error_at(commands->front().location, "commands require a package"));
+
+                result.package->commands = std::move(*commands);
+            }
+
+            auto workflows = read_workflow_declarations(root);
+            if (!workflows)
+                return std::unexpected(workflows.error());
+
+            if (!workflows->empty()) {
+                if (!result.package)
+                    return std::unexpected(error_at(workflows->front().location, "workflows require a package"));
+
+                result.package->workflows = std::move(*workflows);
+            }
+
+            return {};
+        }
+    }
+
+    Result<ManifestDocument> parse_manifest_document(const Value& document) {
+        auto root_result = TableReader::bind(document);
+        if (!root_result)
+            return std::unexpected(root_result.error());
+
+        TableReader root = std::move(*root_result);
+        ManifestDocument result;
+
+        auto package = read_document_package(root);
+        if (!package)
+            return std::unexpected(package.error());
+
+        result.package = std::move(*package);
+
+        auto package_set = read_document_package_set(root);
+        if (!package_set)
+            return std::unexpected(package_set.error());
+
+        result.package_set = std::move(*package_set);
+
+        auto members = read_document_members(root, result);
+        if (!members)
+            return std::unexpected(members.error());
 
         if (!result.package && !result.package_set) {
             return std::unexpected(error_at(document.location(), "manifest requires a `[package]` or `[package-set]` table"));
@@ -1409,24 +1567,9 @@ namespace kaixa {
 
         result.providers = std::move(*providers);
 
-        auto routing_result = root.optional_table("routing");
-        if (!routing_result)
-            return std::unexpected(routing_result.error());
-
-        if (*routing_result) {
-            TableReader routing = std::move(**routing_result);
-            for (const TableEntry& entry: routing.entries()) {
-                const std::string* provider = entry.value.as_string();
-                if (!provider) {
-                    return std::unexpected(error_at(entry.value.location(), "provider routing values must be strings"));
-                }
-                if (!is_valid_identifier(*provider)) {
-                    return std::unexpected(error_at(entry.value.location(), "`" + *provider + "` is not a valid provider name"));
-                }
-                result.routing.emplace(entry.key, *provider);
-            }
-            routing.take_all();
-        }
+        auto routing = read_document_routing(root, result);
+        if (!routing)
+            return std::unexpected(routing.error());
 
         auto imports = read_string_array(root, "imports");
         if (!imports)
@@ -1435,27 +1578,9 @@ namespace kaixa {
         for (std::string& import: *imports)
             result.imports.emplace_back(std::move(import));
 
-        auto commands = read_task_declarations(root);
-        if (!commands)
-            return std::unexpected(commands.error());
-
-        if (!commands->empty()) {
-            if (!result.package)
-                return std::unexpected(error_at(commands->front().location, "commands require a package"));
-
-            result.package->commands = std::move(*commands);
-        }
-
-        auto workflows = read_workflow_declarations(root);
-        if (!workflows)
-            return std::unexpected(workflows.error());
-
-        if (!workflows->empty()) {
-            if (!result.package)
-                return std::unexpected(error_at(workflows->front().location, "workflows require a package"));
-
-            result.package->workflows = std::move(*workflows);
-        }
+        auto automation = read_document_automation(root, result);
+        if (!automation)
+            return std::unexpected(automation.error());
 
         auto root_finished = root.finish();
         if (!root_finished)

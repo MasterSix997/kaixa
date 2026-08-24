@@ -72,7 +72,7 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + package.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_clean(graph, package, environment, *instances, request, plan);
+            auto planned = resolver->plan_clean(graph, registry, package, environment, *instances, request, plan);
             if (!planned)
                 return std::unexpected(planned.error());
         }

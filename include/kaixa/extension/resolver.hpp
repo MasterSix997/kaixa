@@ -15,6 +15,8 @@
 #include <vector>
 
 namespace kaixa {
+    class ExtensionRegistry;
+
     struct ResolverInfo {
         std::string name;
         std::string description;
@@ -65,6 +67,7 @@ namespace kaixa {
         [[nodiscard]] virtual ResolverInfo info() const = 0;
         [[nodiscard]] virtual Result<void> plan(
             const Graph& graph,
+            const ExtensionRegistry& registry,
             const PackageNode& package,
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
@@ -74,6 +77,7 @@ namespace kaixa {
 
         [[nodiscard]] virtual Result<void> plan_tests(
             const Graph& graph,
+            const ExtensionRegistry& registry,
             const PackageNode& package,
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
@@ -83,6 +87,7 @@ namespace kaixa {
 
         [[nodiscard]] virtual Result<std::vector<BuildProduct>> products(
             const Graph& graph,
+            const ExtensionRegistry& registry,
             const PackageNode& package,
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances
@@ -90,6 +95,7 @@ namespace kaixa {
 
         [[nodiscard]] virtual Result<void> plan_clean(
             const Graph& graph,
+            const ExtensionRegistry& registry,
             const PackageNode& package,
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,

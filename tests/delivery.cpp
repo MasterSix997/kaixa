@@ -8,7 +8,8 @@
 #include <string>
 
 KAIXA_TEST(test_adapters_normalize_framework_cases_and_invocations) {
-    const auto googletest = kaixa::test_adapter("googletest", kaixa::PackageTargetKind::test);
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto googletest = kaixa::test_adapter(registry, "googletest", kaixa::PackageTargetKind::test);
     context.check(googletest.has_value(), "GoogleTest adapter is available");
     if (googletest) {
         const auto cases = kaixa::parse_test_cases(
@@ -25,13 +26,32 @@ KAIXA_TEST(test_adapters_normalize_framework_cases_and_invocations) {
         context.check_equal(arguments.back(), std::string("--gtest_filter=MathSuite.Adds"), "case invocation uses the adapter filter");
     }
 
-    const auto benchmark = kaixa::test_adapter("google-benchmark", kaixa::PackageTargetKind::benchmark);
+    const auto benchmark = kaixa::test_adapter(registry, "google-benchmark", kaixa::PackageTargetKind::benchmark);
     context.check(benchmark.has_value(), "Google Benchmark adapter is available");
     if (benchmark) {
         const auto cases = kaixa::parse_test_cases(*benchmark, "BM_Insert/8\nBM_Insert/64\n");
         context.check(cases && cases->size() == 2, "benchmark cases are normalized");
         const auto arguments = kaixa::test_case_arguments(*benchmark, "BM_Insert/8");
         context.check_equal(arguments.front(), std::string("--benchmark_filter=^BM_Insert/8$"), "benchmark invocation is exact");
+    }
+
+    registry.add(
+        kaixa::TestAdapterInfo{"project-tests",
+            kaixa::TestAdapterPurpose::test,
+            {},
+            {},
+            {"--list"},
+            "--case=",
+            {},
+            kaixa::TestCaseListingFormat::lines}
+    );
+    const auto custom = kaixa::test_adapter(registry, "project-tests", kaixa::PackageTargetKind::test);
+    context.check(custom.has_value(), "extensions can register a project-specific test adapter");
+    if (custom) {
+        const auto cases = kaixa::parse_test_cases(*custom, "alpha\nbeta\n");
+        context.check(cases && cases->size() == 2, "custom adapter uses its declared listing format");
+        const auto arguments = kaixa::test_case_arguments(*custom, "alpha");
+        context.check_equal(arguments.front(), std::string("--case=alpha"), "custom adapter owns case invocation");
     }
 }
 

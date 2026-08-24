@@ -32,7 +32,7 @@ KAIXA_TEST(manifest_reads_the_current_schema) {
     context.check_equal(manifest->resolver, std::string("cmake"), "resolver");
     context.check_equal(manifest->dependencies.size(), std::size_t{1}, "dependency count");
     if (!manifest->dependencies.empty()) {
-        context.check_equal(manifest->dependencies.front().selection.path->generic_string(), std::string("../math"), "dependency path");
+        context.check_equal(manifest->dependencies.front().selection.path()->generic_string(), std::string("../math"), "dependency path");
     }
 }
 
@@ -252,12 +252,8 @@ KAIXA_TEST(package_targets_preserve_feature_requirements_for_selection) {
 
     const kaixa::PackageNode& app = graph->nodes().front();
     context.check(app.manifest.has_value(), "managed package retains its manifest");
-    if (app.manifest && !app.manifest->resolved_targets.empty()) {
-        context.check_equal(
-            app.manifest->resolved_targets.front().required_features.front(),
-            std::string("graphics"),
-            "selection requirement is retained"
-        );
+    if (app.manifest && !app.targets.empty()) {
+        context.check_equal(app.targets.front().required_features.front(), std::string("graphics"), "selection requirement is retained");
     }
 }
 

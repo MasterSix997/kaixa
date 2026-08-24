@@ -63,7 +63,7 @@ foreach(_kaixa_case IN LISTS _kaixa_cases)
   endif()
   set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
   add_test("${_kaixa_name}" "${_kaixa_test_executable}")cmake";
-            if (test.adapter.name == "kaixa") {
+            if (test.adapter.separate_filter_argument) {
                 output += " " + quote(test.adapter.case_filter_prefix) + " \"${_kaixa_case}\"";
             } else if (!test.adapter.case_filter_prefix.empty()) {
                 output += " " + quote(test.adapter.case_filter_prefix + "${_kaixa_case}" + test.adapter.case_filter_suffix);
@@ -133,7 +133,7 @@ endforeach()
         output += "enable_testing()\n\n";
         for (std::size_t index = 0; index < tests.size(); ++index) {
             const TestOptions& test = tests[index];
-            if (test.adapter.name == "googletest") {
+            if (test.adapter.listing_format == TestCaseListingFormat::googletest) {
                 generate_googletest(output, test);
                 continue;
             }

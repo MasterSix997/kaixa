@@ -1,6 +1,7 @@
 #include <kaixa/model/effective_product.hpp>
 
 #include <kaixa/config/table_reader.hpp>
+#include <kaixa/config/value_operations.hpp>
 #include <kaixa/model/file_set.hpp>
 
 #include <algorithm>
@@ -12,7 +13,7 @@
 namespace kaixa {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
+            return wrong_value_kind(std::move(location), expected, found);
         }
 
         Result<std::vector<std::string>> string_array(TableReader& table, const std::string_view key) {
@@ -40,31 +41,7 @@ namespace kaixa {
         }
 
         Value merge_product_values(const Value& base, const Value& overlay) {
-            if (const std::vector<TableEntry>* base_table = base.as_table()) {
-                const std::vector<TableEntry>* overlay_table = overlay.as_table();
-                if (!overlay_table)
-                    return overlay;
-
-                std::vector<TableEntry> merged = *base_table;
-                for (const TableEntry& incoming: *overlay_table) {
-                    const auto existing = std::ranges::find_if(merged, [&](const TableEntry& entry) { return entry.key == incoming.key; });
-                    if (existing == merged.end())
-                        merged.push_back(incoming);
-                    else
-                        existing->value = merge_product_values(existing->value, incoming.value);
-                }
-                return Value::table(std::move(merged), overlay.location());
-            }
-            if (const std::vector<Value>* base_array = base.as_array()) {
-                const std::vector<Value>* overlay_array = overlay.as_array();
-                if (!overlay_array)
-                    return overlay;
-
-                std::vector<Value> merged = *base_array;
-                merged.insert(merged.end(), overlay_array->begin(), overlay_array->end());
-                return Value::array(std::move(merged), overlay.location());
-            }
-            return overlay;
+            return merge_values(base, overlay, ArrayMerge::append);
         }
 
         Result<bool> condition_matches(const Value& condition, const PackageNode& package, const ProductRealizationContext& context) {
@@ -583,7 +560,7 @@ namespace kaixa {
 
             result.products.push_back(std::move(*product));
         }
-        for (const PackageTarget& target: package.manifest->resolved_targets) {
+        for (const PackageTarget& target: package.targets) {
             result.targets.push_back(realize_target(graph, package, target));
         }
         auto claims = resolve_source_claims(result, package);

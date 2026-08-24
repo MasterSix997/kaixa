@@ -1,5 +1,7 @@
 #include <kaixa/model/policy.hpp>
 
+#include <kaixa/config/value_operations.hpp>
+
 #include <kaixa/model/graph.hpp>
 #include <kaixa/model/package.hpp>
 
@@ -13,7 +15,7 @@
 namespace kaixa {
     namespace {
         Diagnostic wrong_kind(SourceLocation location, const std::string_view expected, const ValueKind found) {
-            return error_at(std::move(location), "expected " + std::string(expected) + ", found " + std::string(value_kind_name(found)));
+            return wrong_value_kind(std::move(location), expected, found);
         }
 
         std::string target_os(const PolicyContext& context) {
@@ -621,7 +623,7 @@ namespace kaixa {
             if (!package.manifest)
                 continue;
 
-            for (const PackageTarget& target: package.manifest->resolved_targets) {
+            for (const PackageTarget& target: package.targets) {
                 if (!target.policy || !target.name)
                     continue;
 
