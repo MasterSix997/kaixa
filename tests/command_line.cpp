@@ -24,35 +24,27 @@ KAIXA_TEST(command_line_parses_reproducible_resolution_modes) {
         context.check(command && command->workspace.lock_mode == kaixa::LockMode::frozen, "frozen mode is retained");
     }
 
-    constexpr std::array conflicting_arguments = {
-        std::string_view("check"), std::string_view("--locked"), std::string_view("--frozen")
-    };
+    constexpr std::array conflicting_arguments = {std::string_view("check"), std::string_view("--locked"), std::string_view("--frozen")};
     const auto conflicting = kaixa::cli::parse_command_line(conflicting_arguments);
     context.check(!conflicting.has_value(), "lock modes are mutually exclusive");
 }
 
 KAIXA_TEST(command_line_parses_package_lifecycle_commands) {
-    constexpr std::array search_arguments = {
-        std::string_view("search"),
+    constexpr std::array search_arguments = {std::string_view("search"),
         std::string_view("physics"),
         std::string_view("--tag"),
-        std::string_view("engine")
-    };
+        std::string_view("engine")};
 
     const auto search = kaixa::cli::parse_command_line(search_arguments);
-    context.check(search.has_value() && std::holds_alternative<kaixa::cli::SearchCommand>(*search),
-                  "search command parses"
-    );
+    context.check(search.has_value() && std::holds_alternative<kaixa::cli::SearchCommand>(*search), "search command parses");
 
-    constexpr std::array add_arguments = {
-        std::string_view("add"),
+    constexpr std::array add_arguments = {std::string_view("add"),
         std::string_view("physics"),
         std::string_view("--version"),
         std::string_view("^2"),
         std::string_view("--provider"),
         std::string_view("official"),
-        std::string_view("--dry-run")
-    };
+        std::string_view("--dry-run")};
 
     const auto add = kaixa::cli::parse_command_line(add_arguments);
     context.check(add.has_value(), "add command parses");
@@ -61,9 +53,7 @@ KAIXA_TEST(command_line_parses_package_lifecycle_commands) {
         context.check(command && command->dry_run && command->provider == "official", "add options are retained");
     }
 
-    constexpr std::array update_arguments = {
-        std::string_view("update"), std::string_view("physics"), std::string_view("render")
-    };
+    constexpr std::array update_arguments = {std::string_view("update"), std::string_view("physics"), std::string_view("render")};
     const auto update = kaixa::cli::parse_command_line(update_arguments);
     context.check(update.has_value(), "targeted update parses");
     if (update) {
@@ -72,9 +62,27 @@ KAIXA_TEST(command_line_parses_package_lifecycle_commands) {
     }
 }
 
+KAIXA_TEST(command_line_install_selects_a_distribution_prefix) {
+    constexpr std::array arguments{std::string_view{"install"},
+        std::string_view{"--prefix"},
+        std::string_view{"stage"},
+        std::string_view{"--profile"},
+        std::string_view{"release"}};
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "install command parses");
+    if (!parsed)
+        return;
+
+    const auto* install = std::get_if<kaixa::cli::InstallCommand>(&*parsed);
+    context.check(install != nullptr, "install command has its own type");
+    if (install) {
+        context.check_equal(install->prefix->generic_string(), std::string("stage"), "install prefix is preserved");
+        context.check_equal(install->workspace.profile.value_or(""), std::string("release"), "install keeps build profile");
+    }
+}
+
 KAIXA_TEST(command_line_build_keeps_workspace_options) {
-    constexpr std::array arguments = {
-        std::string_view("build"),
+    constexpr std::array arguments = {std::string_view("build"),
         std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--package"),
@@ -84,8 +92,7 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
         std::string_view("--profile"),
         std::string_view("release"),
         std::string_view("--config"),
-        std::string_view("clang")
-    };
+        std::string_view("clang")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "build command parses");
@@ -105,12 +112,10 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
 }
 
 KAIXA_TEST(command_line_can_replace_default_configurations) {
-    constexpr std::array arguments = {
-        std::string_view("build"),
+    constexpr std::array arguments = {std::string_view("build"),
         std::string_view("--no-default-configs"),
         std::string_view("--config"),
-        std::string_view("clang-release")
-    };
+        std::string_view("clang-release")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "explicit configuration replacement parses");
@@ -127,8 +132,7 @@ KAIXA_TEST(command_line_can_replace_default_configurations) {
 }
 
 KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
-    constexpr std::array selected_arguments = {
-        std::string_view("build"),
+    constexpr std::array selected_arguments = {std::string_view("build"),
         std::string_view("--target"),
         std::string_view("core"),
         std::string_view("--target"),
@@ -140,8 +144,7 @@ KAIXA_TEST(command_line_build_lists_or_selects_multiple_targets) {
         std::string_view("-DDEV=ON"),
         std::string_view("--for"),
         std::string_view("cmake.build"),
-        std::string_view("--verbose")
-    };
+        std::string_view("--verbose")};
 
     const auto selected = kaixa::cli::parse_command_line(selected_arguments);
     context.check(selected.has_value(), "multiple build targets parse");
@@ -177,16 +180,14 @@ KAIXA_TEST(command_line_build_rejects_invalid_job_counts) {
 }
 
 KAIXA_TEST(command_line_build_parses_semantic_product_selectors) {
-    constexpr std::array arguments = {
-        std::string_view("build"),
+    constexpr std::array arguments = {std::string_view("build"),
         std::string_view("--example"),
         std::string_view("hello_world"),
         std::string_view("--test"),
         std::string_view("unit_tests"),
         std::string_view("--bench"),
         std::string_view("allocation"),
-        std::string_view("--list")
-    };
+        std::string_view("--list")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "named product selectors parse");
@@ -205,34 +206,28 @@ KAIXA_TEST(command_line_build_parses_semantic_product_selectors) {
 }
 
 KAIXA_TEST(command_line_build_rejects_conflicting_product_selectors) {
-    constexpr std::array redundant_examples = {
-        std::string_view("build"),
+    constexpr std::array redundant_examples = {std::string_view("build"),
         std::string_view("--examples"),
         std::string_view("--example"),
-        std::string_view("hello_world")
-    };
+        std::string_view("hello_world")};
 
     const auto examples = kaixa::cli::parse_command_line(redundant_examples);
     context.check(!examples.has_value(), "all and named examples conflict");
     if (!examples)
         context.check_contains(examples.error().message, "already selects every example", "example conflict reason");
 
-    constexpr std::array all_targets = {
-        std::string_view("build"), std::string_view("--all-targets"), std::string_view("--tests")
-    };
+    constexpr std::array all_targets = {std::string_view("build"), std::string_view("--all-targets"), std::string_view("--tests")};
 
     const auto all = kaixa::cli::parse_command_line(all_targets);
     context.check(!all.has_value(), "all targets and category conflict");
     if (!all)
         context.check_contains(all.error().message, "already selects every product", "all-targets conflict reason");
 
-    constexpr std::array raw_target = {
-        std::string_view("build"),
+    constexpr std::array raw_target = {std::string_view("build"),
         std::string_view("--target"),
         std::string_view("hello_world"),
         std::string_view("--example"),
-        std::string_view("hello_world")
-    };
+        std::string_view("hello_world")};
 
     const auto raw = kaixa::cli::parse_command_line(raw_target);
     context.check(!raw.has_value(), "raw and semantic target selection conflict");
@@ -241,9 +236,7 @@ KAIXA_TEST(command_line_build_rejects_conflicting_product_selectors) {
 }
 
 KAIXA_TEST(command_line_run_distinguishes_one_example_from_example_listing) {
-    constexpr std::array selected_arguments = {
-        std::string_view("run"), std::string_view("--example"), std::string_view("hello_world")
-    };
+    constexpr std::array selected_arguments = {std::string_view("run"), std::string_view("--example"), std::string_view("hello_world")};
 
     const auto selected = kaixa::cli::parse_command_line(selected_arguments);
     context.check(selected.has_value(), "named run example parses");
@@ -254,9 +247,7 @@ KAIXA_TEST(command_line_run_distinguishes_one_example_from_example_listing) {
             context.check_equal(command->example.value_or(""), std::string("hello_world"), "run example");
     }
 
-    constexpr std::array listed_arguments = {
-        std::string_view("run"), std::string_view("--examples"), std::string_view("--list")
-    };
+    constexpr std::array listed_arguments = {std::string_view("run"), std::string_view("--examples"), std::string_view("--list")};
 
     const auto listed = kaixa::cli::parse_command_line(listed_arguments);
     context.check(listed.has_value(), "example listing parses");
@@ -269,14 +260,12 @@ KAIXA_TEST(command_line_run_distinguishes_one_example_from_example_listing) {
 }
 
 KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
-    constexpr std::array arguments = {
-        std::string_view("inspect"),
+    constexpr std::array arguments = {std::string_view("inspect"),
         std::string_view("targets"),
         std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--config"),
-        std::string_view("clang")
-    };
+        std::string_view("clang")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "inspect targets parses");
@@ -293,14 +282,12 @@ KAIXA_TEST(command_line_inspect_targets_accepts_build_configuration) {
 }
 
 KAIXA_TEST(command_line_test_keeps_test_options_together) {
-    constexpr std::array arguments = {
-        std::string_view("test"),
+    constexpr std::array arguments = {std::string_view("test"),
         std::string_view("manifest"),
         std::string_view("--target"),
         std::string_view("kaixa_tests"),
         std::string_view("--path"),
-        std::string_view("project")
-    };
+        std::string_view("project")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "test command parses");
@@ -327,13 +314,11 @@ KAIXA_TEST(command_line_rejects_extra_positional_arguments) {
 }
 
 KAIXA_TEST(command_line_test_list_composes_with_filter_and_target) {
-    constexpr std::array arguments = {
-        std::string_view("test"),
+    constexpr std::array arguments = {std::string_view("test"),
         std::string_view("manifest"),
         std::string_view("--list"),
         std::string_view("--target"),
-        std::string_view("kaixa_tests")
-    };
+        std::string_view("kaixa_tests")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "test list command parses");
@@ -351,16 +336,14 @@ KAIXA_TEST(command_line_test_list_composes_with_filter_and_target) {
 }
 
 KAIXA_TEST(command_line_run_separates_program_arguments) {
-    constexpr std::array arguments = {
-        std::string_view("run"),
+    constexpr std::array arguments = {std::string_view("run"),
         std::string_view("--target"),
         std::string_view("editor"),
         std::string_view("--config"),
         std::string_view("clang"),
         std::string_view("--"),
         std::string_view("--project"),
-        std::string_view("sandbox")
-    };
+        std::string_view("sandbox")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "run command parses");
@@ -379,14 +362,12 @@ KAIXA_TEST(command_line_run_separates_program_arguments) {
 }
 
 KAIXA_TEST(command_line_task_lists_or_forwards_arguments) {
-    constexpr std::array selected_arguments = {
-        std::string_view("task"),
+    constexpr std::array selected_arguments = {std::string_view("task"),
         std::string_view("lint"),
         std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--"),
-        std::string_view("--fix")
-    };
+        std::string_view("--fix")};
 
     const auto selected = kaixa::cli::parse_command_line(selected_arguments);
     context.check(selected.has_value(), "task command parses");
@@ -410,14 +391,12 @@ KAIXA_TEST(command_line_task_lists_or_forwards_arguments) {
 }
 
 KAIXA_TEST(command_line_workflow_selects_or_lists_workflows) {
-    constexpr std::array selected_arguments = {
-        std::string_view("workflow"),
+    constexpr std::array selected_arguments = {std::string_view("workflow"),
         std::string_view("ci"),
         std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--config"),
-        std::string_view("quality")
-    };
+        std::string_view("quality")};
 
     const auto selected = kaixa::cli::parse_command_line(selected_arguments);
     context.check(selected.has_value(), "workflow command parses");
@@ -441,14 +420,12 @@ KAIXA_TEST(command_line_workflow_selects_or_lists_workflows) {
 }
 
 KAIXA_TEST(command_line_bench_selects_a_target_and_forwards_arguments) {
-    constexpr std::array arguments = {
-        std::string_view("bench"),
+    constexpr std::array arguments = {std::string_view("bench"),
         std::string_view("--target"),
         std::string_view("manifest_format"),
         std::string_view("--"),
         std::string_view("--iterations"),
-        std::string_view("500")
-    };
+        std::string_view("500")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "bench command parses");
@@ -465,12 +442,10 @@ KAIXA_TEST(command_line_bench_selects_a_target_and_forwards_arguments) {
 }
 
 KAIXA_TEST(command_line_bench_rejects_a_target_while_listing) {
-    constexpr std::array arguments = {
-        std::string_view("bench"),
+    constexpr std::array arguments = {std::string_view("bench"),
         std::string_view("--list"),
         std::string_view("--target"),
-        std::string_view("manifest_format")
-    };
+        std::string_view("manifest_format")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(!parsed.has_value(), "bench list rejects a selected target");
@@ -484,12 +459,10 @@ KAIXA_TEST(command_line_bench_rejects_a_target_while_listing) {
 }
 
 KAIXA_TEST(command_line_run_list_is_explicit) {
-    constexpr std::array arguments = {
-        std::string_view("run"),
+    constexpr std::array arguments = {std::string_view("run"),
         std::string_view("--list"),
         std::string_view("--path"),
-        std::string_view("project")
-    };
+        std::string_view("project")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "run list parses");
@@ -504,14 +477,12 @@ KAIXA_TEST(command_line_run_list_is_explicit) {
 }
 
 KAIXA_TEST(command_line_clean_supports_dry_run_and_all) {
-    constexpr std::array arguments = {
-        std::string_view("clean"),
+    constexpr std::array arguments = {std::string_view("clean"),
         std::string_view("--path"),
         std::string_view("project"),
         std::string_view("--all"),
         std::string_view("--generated-files"),
-        std::string_view("--dry-run")
-    };
+        std::string_view("--dry-run")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "clean all parses");
@@ -530,12 +501,10 @@ KAIXA_TEST(command_line_clean_supports_dry_run_and_all) {
 }
 
 KAIXA_TEST(command_line_clean_all_rejects_configuration_selection) {
-    constexpr std::array arguments = {
-        std::string_view("clean"),
+    constexpr std::array arguments = {std::string_view("clean"),
         std::string_view("--all"),
         std::string_view("--config"),
-        std::string_view("clang")
-    };
+        std::string_view("clang")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(!parsed.has_value(), "clean all rejects configuration");
@@ -545,12 +514,10 @@ KAIXA_TEST(command_line_clean_all_rejects_configuration_selection) {
 }
 
 KAIXA_TEST(command_line_config_list_and_path_accept_workspace_paths) {
-    constexpr std::array list_arguments = {
-        std::string_view("config"),
+    constexpr std::array list_arguments = {std::string_view("config"),
         std::string_view("list"),
         std::string_view("--path"),
-        std::string_view("project")
-    };
+        std::string_view("project")};
 
     const auto listed = kaixa::cli::parse_command_line(list_arguments);
     context.check(listed.has_value(), "config list parses");
@@ -562,12 +529,10 @@ KAIXA_TEST(command_line_config_list_and_path_accept_workspace_paths) {
         }
     }
 
-    constexpr std::array path_arguments = {
-        std::string_view("config"),
+    constexpr std::array path_arguments = {std::string_view("config"),
         std::string_view("path"),
         std::string_view("--path"),
-        std::string_view("project")
-    };
+        std::string_view("project")};
 
     const auto path = kaixa::cli::parse_command_line(path_arguments);
     context.check(path.has_value(), "config path parses");
@@ -578,8 +543,7 @@ KAIXA_TEST(command_line_config_list_and_path_accept_workspace_paths) {
 }
 
 KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
-    constexpr std::array arguments = {
-        std::string_view("config"),
+    constexpr std::array arguments = {std::string_view("config"),
         std::string_view("show"),
         std::string_view("clang"),
         std::string_view("--verbose"),
@@ -587,8 +551,7 @@ KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
         std::string_view("release"),
         std::string_view("--for"),
         std::string_view("cmake.configure"),
-        std::string_view("-DDEV=ON")
-    };
+        std::string_view("-DDEV=ON")};
 
     const auto parsed = kaixa::cli::parse_command_line(arguments);
     context.check(parsed.has_value(), "config show parses");
@@ -608,13 +571,11 @@ KAIXA_TEST(command_line_config_show_composes_named_config_and_overrides) {
 
 KAIXA_TEST(command_line_inspect_supports_every_mode) {
     for (
-        const auto& [name, mode]: {
-            std::pair{std::string_view("packages"), kaixa::cli::InspectMode::packages},
+        const auto& [name, mode]: {std::pair{std::string_view("packages"), kaixa::cli::InspectMode::packages},
             std::pair{std::string_view("targets"), kaixa::cli::InspectMode::targets},
             std::pair{std::string_view("outputs"), kaixa::cli::InspectMode::outputs},
             std::pair{std::string_view("actions"), kaixa::cli::InspectMode::actions},
-            std::pair{std::string_view("config"), kaixa::cli::InspectMode::config}
-        }
+            std::pair{std::string_view("config"), kaixa::cli::InspectMode::config}}
     ) {
         const std::array arguments = {std::string_view("inspect"), name, std::string_view("--verbose")};
         const auto parsed = kaixa::cli::parse_command_line(arguments);
@@ -632,9 +593,7 @@ KAIXA_TEST(command_line_inspect_supports_every_mode) {
 }
 
 KAIXA_TEST(command_line_workspace_commands_require_the_path_option) {
-    constexpr std::array check_arguments = {
-        std::string_view("check"), std::string_view("--path"), std::string_view("project")
-    };
+    constexpr std::array check_arguments = {std::string_view("check"), std::string_view("--path"), std::string_view("project")};
     const auto checked = kaixa::cli::parse_command_line(check_arguments);
     context.check(checked.has_value(), "check accepts --path");
     if (checked) {
@@ -659,21 +618,17 @@ KAIXA_TEST(command_line_check_selects_the_diagnostic_format) {
         context.check(command && command->format == kaixa::cli::DiagnosticFormat::short_form, "joined format is retained");
     }
 
-    constexpr std::array separate_arguments = {
-        std::string_view("check"),
+    constexpr std::array separate_arguments = {std::string_view("check"),
         std::string_view("--format"),
         std::string_view("short"),
         std::string_view("--path"),
-        std::string_view("project")
-    };
+        std::string_view("project")};
 
     const auto separate = kaixa::cli::parse_command_line(separate_arguments);
     context.check(separate.has_value(), "check accepts a separate format value");
     if (separate) {
         const auto* command = std::get_if<kaixa::cli::CheckCommand>(&*separate);
-        context.check(command && command->format == kaixa::cli::DiagnosticFormat::short_form,
-                      "separate format is retained"
-        );
+        context.check(command && command->format == kaixa::cli::DiagnosticFormat::short_form, "separate format is retained");
         if (command) {
             context.check_equal(command->workspace.path.generic_string(), std::string("project"), "check workspace path");
         }
@@ -690,11 +645,9 @@ KAIXA_TEST(command_line_check_selects_the_diagnostic_format) {
     constexpr std::array unknown_arguments = {std::string_view("check"), std::string_view("--format=xml")};
     context.check(!kaixa::cli::parse_command_line(unknown_arguments).has_value(), "unknown formats are rejected");
 
-    constexpr std::array repeated_arguments = {
-        std::string_view("check"),
+    constexpr std::array repeated_arguments = {std::string_view("check"),
         std::string_view("--format=short"),
-        std::string_view("--format=human")
-    };
+        std::string_view("--format=human")};
     context.check(!kaixa::cli::parse_command_line(repeated_arguments).has_value(), "--format cannot be repeated");
 
     constexpr std::array generate_arguments = {std::string_view("generate"), std::string_view("--format=short")};

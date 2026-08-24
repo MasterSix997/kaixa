@@ -1,0 +1,10 @@
+[package]
+name = "runtime_support"
+version = "1.0.0"
+resolver = "cmake"
+
+[lib]
+sources = ["src/value.cpp"]
+public-headers = ["include/runtime_support/value.hpp"]
+public-include = ["include"]
+runtime-files = ["runtime/runtime.dat"]

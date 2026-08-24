@@ -27,14 +27,25 @@ namespace kaixa::plugin::cmake::detail {
             return escaped;
         }
 
+        std::string test_labels(const TestOptions& test) {
+            return std::string(test_target_label_prefix)
+                + test.target
+                + ";kaixa.purpose:"
+                + (test.adapter.purpose == TestAdapterPurpose::benchmark ? "benchmark" : "test");
+        }
+
         std::string discovery_script(const TestOptions& test) {
-            const std::string label = std::string(test_target_label_prefix) + test.target;
+            const std::string label = test_labels(test);
             std::string output;
             output += "set(_kaixa_test_executable " + quote("$<TARGET_FILE:" + test.target + ">") + ")\n";
             output += "set(_kaixa_test_prefix " + quote(test.name) + ")\n";
             output += "set(_kaixa_test_label " + quote(label) + ")\n";
-            output += R"cmake(execute_process(
-  COMMAND "${_kaixa_test_executable}" --kaixa-test-list
+            output += "if(NOT EXISTS \"${_kaixa_test_executable}\")\n  return()\nendif()\n";
+            output += "execute_process(\n  COMMAND \"${_kaixa_test_executable}\"";
+            for (const std::string& argument: test.adapter.discovery_arguments)
+                output += " " + quote(argument);
+
+            output += R"cmake(
   RESULT_VARIABLE _kaixa_result
   OUTPUT_VARIABLE _kaixa_output
   ERROR_VARIABLE _kaixa_error
@@ -51,7 +62,12 @@ foreach(_kaixa_case IN LISTS _kaixa_cases)
 
   endif()
   set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
-  add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")cmake";
+  add_test("${_kaixa_name}" "${_kaixa_test_executable}")cmake";
+            if (test.adapter.name == "kaixa") {
+                output += " " + quote(test.adapter.case_filter_prefix) + " \"${_kaixa_case}\"";
+            } else if (!test.adapter.case_filter_prefix.empty()) {
+                output += " " + quote(test.adapter.case_filter_prefix + "${_kaixa_case}" + test.adapter.case_filter_suffix);
+            }
             for (const std::string& argument: test.arguments)
                 output += " " + quote(argument);
 
@@ -83,6 +99,19 @@ endforeach()
             output += " \"${" + variable + "}.cmake\")\n";
         }
 
+        void generate_googletest(std::string& output, const TestOptions& test) {
+            output += "include(GoogleTest)\n";
+            output += "gtest_discover_tests(" + test.target + " TEST_PREFIX " + quote(test.name + "::") + " DISCOVERY_MODE PRE_TEST";
+            if (!test.arguments.empty()) {
+                output += " EXTRA_ARGS";
+                for (const std::string& argument: test.arguments)
+                    output += " " + quote(argument);
+            }
+            std::string labels = test_labels(test);
+            labels.replace(labels.find(';'), 1, "\\;");
+            output += " PROPERTIES LABELS \"" + labels + "\")\n";
+        }
+
         Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package, const std::string_view configured_artifact) {
             const auto action = std::ranges::find_if(plan.actions(), [&](const Action& candidate) {
                 return candidate.package == package.id
@@ -104,7 +133,11 @@ endforeach()
         output += "enable_testing()\n\n";
         for (std::size_t index = 0; index < tests.size(); ++index) {
             const TestOptions& test = tests[index];
-            if (test.discover) {
+            if (test.adapter.name == "googletest") {
+                generate_googletest(output, test);
+                continue;
+            }
+            if (!test.adapter.discovery_arguments.empty()) {
                 generate_discovered_test(output, test, index);
                 continue;
             }
@@ -114,11 +147,7 @@ endforeach()
                 output += " " + quote(argument);
 
             output += ")\n";
-            output += "set_tests_properties("
-                + quote(test.name)
-                + " PROPERTIES LABELS "
-                + quote(std::string(test_target_label_prefix) + test.target)
-                + ")\n";
+            output += "set_tests_properties(" + quote(test.name) + " PROPERTIES LABELS " + quote(test_labels(test)) + ")\n";
         }
     }
 
@@ -133,7 +162,10 @@ endforeach()
         if (!route.selected_targets.empty()) {
             build_targets.assign(route.selected_targets.begin(), route.selected_targets.end());
             for (const std::string& selected: build_targets) {
-                if (std::ranges::none_of(options.tests, [&](const TestOptions& test) { return test.target == selected; })) {
+                if (std::ranges::none_of(options.tests, [&](const TestOptions& test) {
+                        return test.target == selected
+                            && (request.purpose == ProductPurpose::benchmark) == (test.adapter.purpose == TestAdapterPurpose::benchmark);
+                    })) {
                     return std::unexpected(error("CMake target `" + selected + "` does not declare tests"));
                 }
             }
@@ -144,13 +176,19 @@ endforeach()
             if (target == options.targets.end()) {
                 return std::unexpected(error("CMake target `" + *request.target + "` does not exist"));
             }
-            if (std::ranges::none_of(options.tests, [&](const TestOptions& test) { return test.target == *request.target; })) {
+            if (std::ranges::none_of(options.tests, [&](const TestOptions& test) {
+                    return test.target == *request.target
+                        && (request.purpose == ProductPurpose::benchmark) == (test.adapter.purpose == TestAdapterPurpose::benchmark);
+                })) {
                 return std::unexpected(error("CMake target `" + *request.target + "` does not declare tests"));
             }
 
             build_targets.push_back(*request.target);
         } else {
             for (const TestOptions& test: options.tests) {
+                if ((request.purpose == ProductPurpose::benchmark) != (test.adapter.purpose == TestAdapterPurpose::benchmark))
+                    continue;
+
                 if (std::ranges::find(build_targets, test.target) == build_targets.end())
                     build_targets.push_back(test.target);
             }
@@ -191,6 +229,9 @@ endforeach()
             labels += '$';
             action.argv.push_back("--label-regex");
             action.argv.push_back(std::move(labels));
+        } else {
+            action.argv.push_back("--label-regex");
+            action.argv.push_back(request.purpose == ProductPurpose::benchmark ? "^kaixa\\.purpose:benchmark$" : "^kaixa\\.purpose:test$");
         }
         action.working_directory = package.directory;
         action.package = package.id;

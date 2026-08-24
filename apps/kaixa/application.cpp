@@ -644,14 +644,8 @@ namespace kaixa::cli {
                     for (const TableEntry& definition: product.public_definitions)
                         std::cout << "    public-define: " << definition.key << '\n';
 
-                    for (const EffectiveResource& resource: product.resources)
-                        std::cout
-                            << "    resource: "
-                            << resource.source.generic_string()
-                            << " -> "
-                            << resource.destination.generic_string()
-
-                            << '\n';
+                    for (const std::filesystem::path& runtime_file: product.runtime_files.files)
+                        std::cout << "    runtime-file: " << runtime_file.generic_string() << '\n';
                 }
                 for (const EffectiveTarget& target: package->targets) {
                     std::cout << "  " << associated_target_kind_name(target.target.kind) << ' ' << target.target.name.value_or("<unnamed>");
@@ -669,14 +663,8 @@ namespace kaixa::cli {
                         if (target.target.category)
                             std::cout << "    category: " << *target.target.category << '\n';
 
-                        for (const EffectiveResource& resource: target.resources)
-                            std::cout
-                                << "    resource: "
-                                << resource.source.generic_string()
-                                << " -> "
-
-                                << resource.destination.generic_string()
-                                << '\n';
+                        if (target.target.framework)
+                            std::cout << "    adapter: " << *target.target.framework << '\n';
                     }
                 }
             }
@@ -1038,51 +1026,21 @@ namespace kaixa::cli {
         }
 
         Result<std::size_t> execute_workflow_benchmarks(const Workspace& workspace) {
-            auto synchronized = execute_workflow_generate(workspace);
-            if (!synchronized)
-                return std::unexpected(synchronized.error());
+            TestRequest request;
+            request.purpose = ProductPurpose::benchmark;
+            auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, request);
+            if (!plan)
+                return std::unexpected(plan.error());
 
-            auto targets = discover_executable_targets(workspace.graph, workspace.registry, workspace.environment);
-            if (!targets)
-                return std::unexpected(targets.error());
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return std::unexpected(printed.error());
 
-            std::vector<RunTarget> benchmarks;
-            for (const RunTarget& target: *targets) {
-                if (target.purpose == ProductPurpose::benchmark)
-                    benchmarks.push_back(target);
-            }
-            if (benchmarks.empty())
-                return std::unexpected(error("workflow benchmark step found no runnable benchmarks"));
+            auto report = test(*plan);
+            if (!report)
+                return std::unexpected(report.error());
 
-            std::size_t executed = *synchronized;
-            for (RunTarget& benchmark: benchmarks) {
-                auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, benchmark.name, benchmark.package);
-                if (!plan)
-                    return std::unexpected(plan.error());
-
-                auto printed = print_actions(*plan);
-                if (!printed)
-                    return std::unexpected(printed.error());
-
-                auto built = kaixa::execute(*plan);
-                if (!built)
-                    return std::unexpected(built.error());
-
-                executed += built->executed;
-                std::cout << "benchmarking: " << format_command(benchmark.process.argv) << '\n';
-                std::cout.flush();
-                auto result = run_process(benchmark.process);
-                if (!result)
-                    return std::unexpected(result.error());
-
-                if (!result->succeeded()) {
-                    return std::unexpected(
-                        error("benchmark `" + benchmark.name + "` exited with code " + std::to_string(result->exit_code))
-                    );
-                }
-                ++executed;
-            }
-            return executed;
+            return report->executed;
         }
 
         Result<std::size_t> execute_workflow_step(const Workspace& workspace, const PreparedWorkflowStep& step) {
@@ -1371,6 +1329,38 @@ namespace kaixa::cli {
             return 0;
         }
 
+        int run(const InstallCommand& command) {
+            auto workspace = open_workspace(command.workspace);
+            if (!workspace)
+                return fail(workspace.error());
+
+            std::filesystem::path prefix = command.prefix.value_or(
+                workspace->environment.state_root / "install" / workspace->environment.configuration.profile
+            );
+            if (prefix.is_relative())
+                prefix = workspace->environment.workspace / prefix;
+
+            prefix = prefix.lexically_normal();
+            BuildRequest request;
+            request.install = true;
+            request.install_prefix = prefix;
+            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, request);
+            if (!plan)
+                return fail(plan.error());
+
+            auto printed = print_actions(*plan);
+            if (!printed)
+                return fail(printed.error());
+
+            auto report = execute(*plan);
+            if (!report)
+                return fail(report.error());
+
+            std::cout << "install completed: " << report->executed << " action(s) run\n";
+            std::cout << "prefix -> " << display_path(prefix, workspace->environment.workspace) << '\n';
+            return 0;
+        }
+
         int run(const TestCommand& command) {
             auto workspace = open_workspace(command.workspace);
             if (!workspace)
@@ -1397,6 +1387,29 @@ namespace kaixa::cli {
             auto workspace = open_workspace(command.workspace);
             if (!workspace)
                 return fail(workspace.error());
+
+            if (command.arguments.empty()) {
+                TestRequest request;
+                request.target = command.target;
+                request.mode = command.list ? TestMode::list : TestMode::run;
+                request.purpose = ProductPurpose::benchmark;
+                auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, request);
+                if (!plan)
+                    return fail(plan.error());
+
+                auto printed = print_actions(*plan);
+                if (!printed)
+                    return fail(printed.error());
+
+                auto report = test(*plan);
+                if (!report)
+                    return fail(report.error());
+
+                if (!command.list)
+                    std::cout << "benchmarks completed: " << report->executed << " action(s) run\n";
+
+                return 0;
+            }
 
             auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment);
             if (!synchronization)

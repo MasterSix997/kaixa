@@ -5,6 +5,7 @@
 #include <kaixa/config/parser.hpp>
 #include <kaixa/model/file_set.hpp>
 #include <kaixa/model/manifest.hpp>
+#include <kaixa/test/adapter.hpp>
 #include <kaixa/workspace/package_index.hpp>
 
 #include <algorithm>
@@ -132,7 +133,6 @@ namespace kaixa {
             if (layer.matrix)
                 target.matrix = layer.matrix;
 
-            target.resources.insert(target.resources.end(), layer.resources.begin(), layer.resources.end());
             target.commands.insert(target.commands.end(), layer.commands.begin(), layer.commands.end());
             if (!layer.sources.include.empty()) {
                 target.sources = layer.sources;
@@ -163,33 +163,6 @@ namespace kaixa {
                 name += "_" + identifier_from_path(logical_source);
 
             return name;
-        }
-
-        void expand_target_resource_captures(
-            PackageTarget& target,
-            const std::filesystem::path& logical_source,
-            const std::string_view logical_name
-        ) {
-            const std::string stem = logical_name.empty() ? logical_source.stem().string() : std::string(logical_name);
-            const std::string parent = logical_source.parent_path().filename().string();
-            for (Value& resource: target.resources) {
-                const std::vector<TableEntry>* entries = resource.as_table();
-                if (!entries)
-                    continue;
-
-                std::vector<TableEntry> expanded = *entries;
-                for (TableEntry& entry: expanded) {
-                    const std::string* declared = entry.value.as_string();
-                    if (!declared)
-                        continue;
-
-                    std::string value = *declared;
-                    replace_capture(value, "{stem}", stem);
-                    replace_capture(value, "{parent}", parent);
-                    entry.value = Value::string(std::move(value), entry.value.location());
-                }
-                resource = Value::table(std::move(expanded), resource.location());
-            }
         }
 
         Result<bool> target_layer_excludes(
@@ -302,7 +275,6 @@ namespace kaixa {
                     concrete.each_source = false;
                     concrete.partial = false;
                     concrete.name = instantiate_target_name(root, local, local.stem().string());
-                    expand_target_resource_captures(concrete, local, local.stem().string());
                     concrete.source = package_directory / "Kaixa.toml";
                     concrete.sources.include = {relative.generic_string()};
                     concrete.sources.exclude.clear();
@@ -325,7 +297,6 @@ namespace kaixa {
                     const std::string logical_name = declared.name.value_or("target");
                     std::filesystem::path logical_source = group.lexically_relative(root_directory) / (logical_name + ".cpp");
                     concrete.name = instantiate_target_name(root, logical_source, logical_name);
-                    expand_target_resource_captures(concrete, logical_source, logical_name);
                     concrete.each_source = false;
                     concrete.partial = false;
                     if (declared.sources.include.empty()) {
@@ -839,27 +810,9 @@ namespace kaixa {
                 }
 
                 const std::vector<PackageTarget> package_targets = m_graph[id].manifest->resolved_targets;
-                for (const PackageTarget& package_target: package_targets) {
-                    if (package_target.dependencies.empty())
-                        continue;
-
-                    PackageTargetDependencies resolved;
-                    resolved.target = *package_target.name;
-                    resolved.kind = package_target.kind;
-                    for (const DependencyBinding& dependency: package_target.dependencies) {
-                        if (dependency.request.optional)
-                            continue;
-
-                        auto target = load_dependency(package_target.source.parent_path(), canonical_manifest, dependency);
-                        if (!target)
-                            return std::unexpected(target.error());
-
-                        if (*target != id && std::ranges::find(resolved.packages, *target) == resolved.packages.end()) {
-                            resolved.packages.push_back(*target);
-                        }
-                    }
-                    m_graph[id].target_dependencies.push_back(std::move(resolved));
-                }
+                auto resolved_targets = resolve_target_dependencies(id, package_targets, canonical_manifest);
+                if (!resolved_targets)
+                    return std::unexpected(resolved_targets.error());
 
                 const std::vector<std::string> defaults = m_graph[id].manifest->default_features;
                 auto activated = activate_features(id, defaults, m_graph[id].manifest->location);
@@ -867,6 +820,49 @@ namespace kaixa {
                     return std::unexpected(activated.error());
 
                 return id;
+            }
+
+            Result<void> resolve_target_dependencies(
+                const PackageId package,
+                const std::span<const PackageTarget> package_targets,
+                const std::filesystem::path& requester_manifest
+            ) {
+                for (const PackageTarget& package_target: package_targets) {
+                    PackageTargetDependencies resolved;
+                    resolved.target = *package_target.name;
+                    resolved.kind = package_target.kind;
+                    std::vector<DependencyBinding> dependencies = package_target.dependencies;
+                    if (package_target.framework || package_target.discover) {
+                        const std::string_view framework = package_target.framework ? std::string_view(*package_target.framework)
+                                                                                    : std::string_view{"kaixa"};
+                        auto adapter = test_adapter(framework, package_target.kind, package_target.location);
+                        if (!adapter)
+                            return std::unexpected(adapter.error());
+
+                        if (!adapter->dependency.empty() && std::ranges::none_of(dependencies, [&](const DependencyBinding& dependency) {
+                                return dependency.request.package == adapter->dependency;
+                            })) {
+                            DependencyBinding dependency;
+                            dependency.request.package = adapter->dependency;
+                            dependency.location = package_target.location;
+                            dependencies.push_back(std::move(dependency));
+                        }
+                    }
+                    for (const DependencyBinding& dependency: dependencies) {
+                        if (dependency.request.optional)
+                            continue;
+
+                        auto target = load_dependency(package_target.source.parent_path(), requester_manifest, dependency);
+                        if (!target)
+                            return std::unexpected(target.error());
+
+                        if (*target != package && std::ranges::find(resolved.packages, *target) == resolved.packages.end())
+                            resolved.packages.push_back(*target);
+                    }
+                    if (!resolved.packages.empty())
+                        m_graph[package].target_dependencies.push_back(std::move(resolved));
+                }
+                return {};
             }
 
             Result<void> validate_resolved_version(

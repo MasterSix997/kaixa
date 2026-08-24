@@ -85,6 +85,11 @@ namespace kaixa::cli {
         bool list = false;
     };
 
+    struct InstallCommand {
+        WorkspaceOptions workspace;
+        std::optional<std::filesystem::path> prefix;
+    };
+
     struct TestCommand {
         WorkspaceOptions workspace;
         TestRequest request;
@@ -190,6 +195,7 @@ namespace kaixa::cli {
         CheckCommand,
         GenerateCommand,
         BuildCommand,
+        InstallCommand,
         TestCommand,
         BenchCommand,
         RunCommand,

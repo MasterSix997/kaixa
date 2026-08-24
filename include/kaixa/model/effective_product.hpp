@@ -14,13 +14,6 @@ namespace kaixa {
         interface_library
     };
 
-    struct EffectiveResource {
-        std::string name;
-        std::filesystem::path source;
-        std::filesystem::path destination;
-        bool optional = false;
-    };
-
     struct EffectiveProduct {
         std::string name;
         EffectiveProductType type = EffectiveProductType::static_library;
@@ -35,7 +28,7 @@ namespace kaixa {
         std::vector<TableEntry> public_definitions;
         std::vector<std::string> dependency_sources;
         std::vector<std::filesystem::path> dependency_source_files;
-        std::vector<EffectiveResource> resources;
+        FileSet runtime_files;
         std::vector<Value> policy_layers;
         bool modules = false;
         SourceLocation location;
@@ -50,7 +43,6 @@ namespace kaixa {
         PackageTarget target;
         TargetAvailability availability = TargetAvailability::available;
         std::vector<std::string> skip_reasons;
-        std::vector<EffectiveResource> resources;
     };
 
     struct EffectivePackage {

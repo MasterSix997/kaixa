@@ -173,62 +173,6 @@ namespace kaixa {
             return *entries;
         }
 
-        Result<std::vector<EffectiveResource>> product_resources(TableReader& table) {
-            const Value* value = table.take("resources");
-            if (!value)
-                return std::vector<EffectiveResource>{};
-
-            const std::vector<TableEntry>* entries = value->as_table();
-            if (!entries)
-                return std::unexpected(wrong_kind(value->location(), "a resources table", value->kind()));
-
-            std::vector<EffectiveResource> result;
-            result.reserve(entries->size());
-            for (const TableEntry& entry: *entries) {
-                const std::string* source = entry.value.as_string();
-                if (!source)
-                    return std::unexpected(wrong_kind(entry.value.location(), "a resource path", entry.value.kind()));
-
-                result.push_back({entry.key, std::filesystem::path(*source), entry.key, false});
-            }
-            return result;
-        }
-
-        Result<std::vector<EffectiveResource>> target_resources(const PackageTarget& target) {
-            std::vector<EffectiveResource> result;
-            result.reserve(target.resources.size());
-            for (const Value& resource: target.resources) {
-                auto table_result = TableReader::bind(resource, "resources");
-                if (!table_result)
-                    return std::unexpected(table_result.error());
-
-                TableReader table = std::move(*table_result);
-                auto from = table.string("from");
-                if (!from)
-                    return std::unexpected(from.error());
-
-                auto to = table.optional_string("to");
-                if (!to)
-                    return std::unexpected(to.error());
-
-                bool optional = false;
-                if (const Value* declared_optional = table.take("optional")) {
-                    const bool* enabled = declared_optional->as_boolean();
-                    if (!enabled)
-                        return std::unexpected(wrong_kind(declared_optional->location(), "a boolean", declared_optional->kind()));
-
-                    optional = *enabled;
-                }
-
-                auto finished = table.finish();
-                if (!finished)
-                    return std::unexpected(finished.error());
-
-                result.push_back({{}, std::filesystem::path(*from), std::filesystem::path(to->value_or(*from)), optional});
-            }
-            return result;
-        }
-
         Result<const PackageNode*> dependency_by_local_name(
             const Graph& graph,
             const PackageNode& package,
@@ -419,11 +363,12 @@ namespace kaixa {
                 result.modules = *enabled;
             }
 
-            auto resources = product_resources(table);
-            if (!resources)
-                return std::unexpected(resources.error());
+            auto runtime_files = string_array(table, "runtime-files");
+            if (!runtime_files)
+                return std::unexpected(runtime_files.error());
 
-            result.resources = std::move(*resources);
+            result.runtime_files.include = std::move(*runtime_files);
+            result.runtime_files.location = declaration.location;
             result.policy_layers = package.policy_layers;
 
             auto finished = table.finish();
@@ -448,6 +393,11 @@ namespace kaixa {
             std::erase_if(result.headers.files, [&](const std::filesystem::path& header) {
                 return std::ranges::find(result.public_headers.files, header) != result.public_headers.files.end();
             });
+            auto runtime_file_paths = expand_file_set(result.runtime_files, package.directory, package.directory, true);
+            if (!runtime_file_paths)
+                return std::unexpected(runtime_file_paths.error());
+
+            result.runtime_files.files = std::move(*runtime_file_paths);
             auto dependency_paths = resolve_dependency_paths(graph, package, result);
             if (!dependency_paths)
                 return std::unexpected(dependency_paths.error());
@@ -634,13 +584,7 @@ namespace kaixa {
             result.products.push_back(std::move(*product));
         }
         for (const PackageTarget& target: package.manifest->resolved_targets) {
-            EffectiveTarget realized = realize_target(graph, package, target);
-            auto resources = target_resources(target);
-            if (!resources)
-                return std::unexpected(resources.error());
-
-            realized.resources = std::move(*resources);
-            result.targets.push_back(std::move(realized));
+            result.targets.push_back(realize_target(graph, package, target));
         }
         auto claims = resolve_source_claims(result, package);
         if (!claims)

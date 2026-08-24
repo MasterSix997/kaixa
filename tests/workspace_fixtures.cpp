@@ -129,11 +129,6 @@ KAIXA_TEST(target_directories_compose_layers_captures_and_skip_requirements) {
         "[examples]\n"
         "sources = [\"*/*.cpp\"]\n"
         "name = \"ex.{parent}.{stem}\"\n"
-        "\n"
-        "[[examples.resources]]\n"
-        "from = \"{parent}/assets\"\n"
-        "to = \"assets\"\n"
-        "optional = true\n"
     );
     workspace.write(
         "examples/render/Kaixa.toml",
@@ -172,11 +167,6 @@ KAIXA_TEST(target_directories_compose_layers_captures_and_skip_requirements) {
             effective->targets.front().skip_reasons.front(),
             "layered/vulkan",
             "skip reason identifies owning package feature"
-        );
-        context.check_equal(
-            effective->targets.front().resources.front().source.generic_string(),
-            std::string("render/assets"),
-            "resource captures expand with the concrete target"
         );
     }
 }

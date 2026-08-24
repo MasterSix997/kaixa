@@ -21,6 +21,7 @@
 #include <kaixa/services/task_service.hpp>
 #include <kaixa/services/workflow_service.hpp>
 #include <kaixa/source/cache.hpp>
+#include <kaixa/test/adapter.hpp>
 #include <kaixa/workspace/loader.hpp>
 #include <kaixa/workspace/package_index.hpp>
 #include <kaixa/workspace/resolution_lock.hpp>

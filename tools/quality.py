@@ -18,6 +18,7 @@ import sys
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE_SUFFIXES = {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}
 TRANSLATION_UNIT_SUFFIXES = {".c", ".cc", ".cpp", ".cxx"}
+TEXT_SUFFIXES = SOURCE_SUFFIXES | {"", ".cmake", ".json", ".lock", ".md", ".ps1", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
 SOURCE_ROOTS = ("include", "src", "apps", "plugins", "tests", "benchmarks", "examples")
 EXCLUDED_PREFIXES = ("third_party/", "tests/workspaces/", "examples/generated_cmake/")
 
@@ -117,8 +118,9 @@ def check_rules() -> None:
     conflict = re.compile(r"^(<<<<<<<|=======|>>>>>>>)")
     namespace_comment = re.compile(r"^\s*}\s*//\s*namespace\b")
     trailing_member = re.compile(r"\b[a-zA-Z][a-zA-Z0-9]*_;\s*(?://.*)?$")
+    workstation_path = re.compile(r"(?<![a-zA-Z0-9+.-])[a-zA-Z]:[/\\]|/(?:home|Users)/[^/\s]+/")
     for relative in repository_files():
-        if relative.suffix.lower() not in SOURCE_SUFFIXES | {".md", ".toml", ".yml", ".yaml", ".py"}:
+        if relative.suffix.lower() not in TEXT_SUFFIXES:
             continue
         path = ROOT / relative
         text = path.read_text(encoding="utf-8")
@@ -130,6 +132,8 @@ def check_rules() -> None:
                 failures.append(f"{location}: trailing whitespace")
             if conflict.match(line):
                 failures.append(f"{location}: merge conflict marker")
+            if workstation_path.search(line):
+                failures.append(f"{location}: host-specific absolute path")
             if namespace_comment.match(line):
                 failures.append(f"{location}: namespace closing comments are forbidden")
             if relative.suffix.lower() in {".h", ".hh", ".hpp", ".hxx"} and re.search(r"\busing\s+namespace\b", line):

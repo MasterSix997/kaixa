@@ -13,3 +13,5 @@ __pycache__/
 *.py[cod]
 compile_commands.json
 /examples/generated_cmake/CMakeLists.txt
+/examples/installation/**/CMakeLists.txt
+/examples/test_adapters/**/CMakeLists.txt

@@ -29,6 +29,7 @@ namespace kaixa {
         std::optional<std::string> filter;
         std::optional<std::string> target;
         TestMode mode = TestMode::run;
+        ProductPurpose purpose = ProductPurpose::test;
     };
 
     struct PackageBuildRequest {
@@ -42,6 +43,8 @@ namespace kaixa {
         std::optional<std::size_t> jobs;
         bool build_default = true;
         std::vector<PackageBuildRequest> packages;
+        bool install = false;
+        std::optional<std::filesystem::path> install_prefix;
     };
 
     struct RunTarget {

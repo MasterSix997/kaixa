@@ -406,92 +406,128 @@ namespace kaixa::cli {
             return {};
         }
 
+        std::expected<bool, ParseError> parse_product_selection(Parser& parser, ProductSelection& selection) {
+            const std::string_view argument = parser.peek();
+            std::expected<void, ParseError> selected;
+            if (argument == "--example")
+                selected = parse_named_product(parser, argument, selection.examples);
+            else if (argument == "--test")
+                selected = parse_named_product(parser, argument, selection.tests);
+            else if (argument == "--bench")
+                selected = parse_named_product(parser, argument, selection.benchmarks);
+            else if (argument == "--examples")
+                selected = select_all_products(parser, argument, selection.all_examples);
+            else if (argument == "--tests")
+                selected = select_all_products(parser, argument, selection.all_tests);
+            else if (argument == "--benchmarks")
+                selected = select_all_products(parser, argument, selection.all_benchmarks);
+            else if (argument == "--all-targets")
+                selected = select_all_products(parser, argument, selection.all_targets);
+            else
+                return false;
+
+            if (!selected)
+                return std::unexpected(selected.error());
+
+            return true;
+        }
+
+        std::expected<void, ParseError> parse_build_target(Parser& parser, BuildCommand& command) {
+            parser.take();
+            auto value = parser.value("--target");
+            if (!value)
+                return std::unexpected(value.error());
+
+            if (std::ranges::find(command.targets, *value) != command.targets.end()) {
+                return std::unexpected(ParseError{"--target `" + std::string(*value) + "` was specified more than once"});
+            }
+
+            command.targets.emplace_back(*value);
+            return {};
+        }
+
+        std::expected<void, ParseError> parse_build_jobs(Parser& parser, BuildCommand& command) {
+            parser.take();
+            auto value = parser.value("--jobs");
+            if (!value)
+                return std::unexpected(value.error());
+
+            std::size_t jobs = 0;
+            const char* begin = value->data();
+            const char* end = begin + value->size();
+            const auto parsed_jobs = std::from_chars(begin, end, jobs);
+            if (parsed_jobs.ec != std::errc{} || parsed_jobs.ptr != end || jobs == 0) {
+                return std::unexpected(ParseError{"--jobs requires a positive integer"});
+            }
+
+            command.jobs = jobs;
+            return {};
+        }
+
+        std::expected<void, ParseError> validate_build(const BuildCommand& command) {
+            if (command.list && !command.targets.empty())
+                return std::unexpected(ParseError{"--list cannot be combined with --target"});
+
+            if (command.list && command.jobs)
+                return std::unexpected(ParseError{"--list cannot be combined with --jobs"});
+
+            if (!command.targets.empty() && !command.selection.empty()) {
+                return std::unexpected(ParseError{"--target cannot be combined with semantic product selectors"});
+            }
+
+            const ProductSelection& selection = command.selection;
+            if (selection.all_targets
+                && (selection.all_examples
+                    || selection.all_tests
+                    || selection.all_benchmarks
+                    || !selection.examples.empty()
+                    || !selection.tests.empty()
+                    || !selection.benchmarks.empty())) {
+                return std::unexpected(
+                    ParseError{"--all-targets already selects every product and cannot be combined with category selectors"}
+                );
+            }
+            if (selection.all_examples && !selection.examples.empty())
+                return std::unexpected(ParseError{"--examples already selects every example; remove --example"});
+
+            if (selection.all_tests && !selection.tests.empty())
+                return std::unexpected(ParseError{"--tests already selects every test; remove --test"});
+
+            if (selection.all_benchmarks && !selection.benchmarks.empty())
+                return std::unexpected(ParseError{"--benchmarks already selects every benchmark; remove --bench"});
+
+            return {};
+        }
+
         std::expected<BuildCommand, ParseError> parse_build(Parser& parser) {
             BuildCommand command;
             while (!parser.done()) {
                 const std::string_view argument = parser.peek();
                 if (argument == "--target") {
-                    parser.take();
-                    auto value = parser.value(argument);
-                    if (!value)
-                        return std::unexpected(value.error());
-
-                    if (std::ranges::find(command.targets, *value) != command.targets.end()) {
-                        return std::unexpected(ParseError{"--target `" + std::string(*value) + "` was specified more than once"});
-                    }
-
-                    command.targets.emplace_back(*value);
-                    continue;
-                }
-                if (argument == "--example") {
-                    auto selected = parse_named_product(parser, argument, command.selection.examples);
-                    if (!selected)
-                        return std::unexpected(selected.error());
+                    auto target = parse_build_target(parser, command);
+                    if (!target)
+                        return std::unexpected(target.error());
 
                     continue;
                 }
-                if (argument == "--test") {
-                    auto selected = parse_named_product(parser, argument, command.selection.tests);
-                    if (!selected)
-                        return std::unexpected(selected.error());
 
-                    continue;
-                }
-                if (argument == "--bench") {
-                    auto selected = parse_named_product(parser, argument, command.selection.benchmarks);
-                    if (!selected)
-                        return std::unexpected(selected.error());
+                auto selection = parse_product_selection(parser, command.selection);
+                if (!selection)
+                    return std::unexpected(selection.error());
 
+                if (*selection)
                     continue;
-                }
-                if (argument == "--examples") {
-                    auto selected = select_all_products(parser, argument, command.selection.all_examples);
-                    if (!selected)
-                        return std::unexpected(selected.error());
 
-                    continue;
-                }
-                if (argument == "--tests") {
-                    auto selected = select_all_products(parser, argument, command.selection.all_tests);
-                    if (!selected)
-                        return std::unexpected(selected.error());
-
-                    continue;
-                }
-                if (argument == "--benchmarks") {
-                    auto selected = select_all_products(parser, argument, command.selection.all_benchmarks);
-                    if (!selected)
-                        return std::unexpected(selected.error());
-
-                    continue;
-                }
-                if (argument == "--all-targets") {
-                    auto selected = select_all_products(parser, argument, command.selection.all_targets);
-                    if (!selected)
-                        return std::unexpected(selected.error());
-
-                    continue;
-                }
                 if (argument == "--list") {
                     parser.take();
                     command.list = true;
                     continue;
                 }
                 if (argument == "--jobs") {
-                    parser.take();
-                    auto value = parser.value(argument);
-                    if (!value)
-                        return std::unexpected(value.error());
+                    auto jobs = parse_build_jobs(parser, command);
+                    if (!jobs)
+                        return std::unexpected(jobs.error());
 
-                    std::size_t jobs = 0;
-                    const char* begin = value->data();
-                    const char* end = begin + value->size();
-                    const auto parsed_jobs = std::from_chars(begin, end, jobs);
-                    if (parsed_jobs.ec != std::errc{} || parsed_jobs.ptr != end || jobs == 0) {
-                        return std::unexpected(ParseError{"--jobs requires a positive integer"});
-                    }
-
-                    command.jobs = jobs;
                     continue;
                 }
 
@@ -505,35 +541,9 @@ namespace kaixa::cli {
                 return std::unexpected(ParseError{"unexpected argument `" + std::string(parser.take()) + "`"});
             }
 
-            if (command.list && !command.targets.empty()) {
-                return std::unexpected(ParseError{"--list cannot be combined with --target"});
-            }
-            if (command.list && command.jobs) {
-                return std::unexpected(ParseError{"--list cannot be combined with --jobs"});
-            }
-            if (!command.targets.empty() && !command.selection.empty()) {
-                return std::unexpected(ParseError{"--target cannot be combined with semantic product selectors"});
-            }
-            if (command.selection.all_targets
-                && (command.selection.all_examples
-                    || command.selection.all_tests
-                    || command.selection.all_benchmarks
-                    || !command.selection.examples.empty()
-                    || !command.selection.tests.empty()
-                    || !command.selection.benchmarks.empty())) {
-                return std::unexpected(
-                    ParseError{"--all-targets already selects every product and cannot be combined with category selectors"}
-                );
-            }
-            if (command.selection.all_examples && !command.selection.examples.empty()) {
-                return std::unexpected(ParseError{"--examples already selects every example; remove --example"});
-            }
-            if (command.selection.all_tests && !command.selection.tests.empty()) {
-                return std::unexpected(ParseError{"--tests already selects every test; remove --test"});
-            }
-            if (command.selection.all_benchmarks && !command.selection.benchmarks.empty()) {
-                return std::unexpected(ParseError{"--benchmarks already selects every benchmark; remove --bench"});
-            }
+            auto valid = validate_build(command);
+            if (!valid)
+                return std::unexpected(valid.error());
 
             return command;
         }
@@ -667,6 +677,34 @@ namespace kaixa::cli {
                     || !command.workspace.resolver_arguments.empty()
                     || !command.workspace.use_default_configurations)) {
                 return std::unexpected(ParseError{"--all cannot be combined with build configuration options"});
+            }
+            return command;
+        }
+
+        std::expected<InstallCommand, ParseError> parse_install(Parser& parser) {
+            InstallCommand command;
+            while (!parser.done()) {
+                if (parser.peek() == "--prefix") {
+                    parser.take();
+                    if (command.prefix)
+                        return std::unexpected(ParseError{"--prefix was specified more than once"});
+
+                    auto value = parser.value("--prefix");
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    command.prefix = std::filesystem::path(*value);
+                    continue;
+                }
+
+                auto parsed = parse_workspace_option(parser, command.workspace);
+                if (!parsed)
+                    return std::unexpected(parsed.error());
+
+                if (*parsed)
+                    continue;
+
+                return std::unexpected(ParseError{"unexpected install argument `" + std::string(parser.take()) + "`"});
             }
             return command;
         }
@@ -990,7 +1028,8 @@ namespace kaixa::cli {
             << "  kaixa build [--path path] [--list] [--target name]... [--jobs count]\n"
             << "        [--example name]... [--examples] [--test name]... [--tests]\n"
             << "        [--bench name]... [--benchmarks] [--all-targets]\n"
-            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n\n"
+            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n"
+            << "  kaixa install [--prefix path] [--path path] [--profile name] [--config name]...\n\n"
 
             << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
             << "        [--config name]...\n"
@@ -1149,6 +1188,14 @@ namespace kaixa::cli {
 
         if (name == "build") {
             auto command = parse_build(parser);
+            if (!command)
+                return std::unexpected(command.error());
+
+            return Command{std::move(*command)};
+        }
+
+        if (name == "install") {
+            auto command = parse_install(parser);
             if (!command)
                 return std::unexpected(command.error());
 

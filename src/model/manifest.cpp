@@ -648,19 +648,6 @@ namespace kaixa {
                 target.matrix = *matrix;
             }
 
-            if (const Value* resources = table.take("resources")) {
-                const std::vector<Value>* entries = resources->as_array();
-                if (!entries) {
-                    return std::unexpected(error_at(resources->location(), "target resources must be an array of tables"));
-                }
-                for (const Value& resource: *entries) {
-                    if (!resource.is_table()) {
-                        return std::unexpected(error_at(resource.location(), "target resources must contain tables"));
-                    }
-                    target.resources.push_back(resource);
-                }
-            }
-
             if (!resolver.empty()) {
                 if (const Value* options = table.take(resolver)) {
                     if (!options->is_table()) {
@@ -686,8 +673,7 @@ namespace kaixa {
                 std::string_view{"hidden"},
                 std::string_view{"framework"},
                 std::string_view{"policy"},
-                std::string_view{"matrix"},
-                std::string_view{"resources"}};
+                std::string_view{"matrix"}};
             std::vector<TableEntry> direct_options;
             for (const TableEntry& field: table.entries()) {
                 if (std::ranges::find(common_fields, field.key) != common_fields.end() || (!resolver.empty() && field.key == resolver)) {

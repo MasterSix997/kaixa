@@ -1,0 +1,10 @@
+[package]
+name = "install_example"
+version = "1.0.0"
+resolver = "cmake"
+
+[dependencies]
+runtime_support = "1.0.0"
+
+[bin]
+sources = ["main.cpp"]

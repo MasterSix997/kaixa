@@ -120,7 +120,6 @@ namespace kaixa {
         std::optional<Value> policy;
         std::optional<Value> resolver_options;
         std::optional<Value> matrix;
-        std::vector<Value> resources;
         std::vector<TaskDeclaration> commands;
         std::filesystem::path source;
         SourceLocation location;

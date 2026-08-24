@@ -1,0 +1,4 @@
+[[benchmark]]
+name = "adapter_example.benchmarks"
+sources = ["calculator_benchmarks.cpp"]
+framework = "google-benchmark"

@@ -1,0 +1,11 @@
+[package]
+name = "adapter_example"
+version = "1.0.0"
+resolver = "cmake"
+tests = ["tests"]
+benchmarks = ["benchmarks"]
+
+[lib]
+sources = ["src/calculator.cpp"]
+public-headers = ["include/adapter_example/calculator.hpp"]
+public-include = ["include"]

@@ -191,6 +191,21 @@ namespace kaixa::plugin::cmake {
             return environment.state_root / "cache" / "cmake" / instance.artifact;
         }
 
+        std::optional<std::filesystem::path> install_destination(
+            const BuildRequest& request,
+            const bool dependency_install,
+            const BuildEnvironment& environment,
+            const ConfiguredPackageInstance& instance
+        ) {
+            if (!request.install && !dependency_install)
+                return std::nullopt;
+
+            if (request.install_prefix)
+                return *request.install_prefix;
+
+            return artifact_directory(environment, instance);
+        }
+
         struct ConfiguredRoute {
             std::string context;
             const ConfiguredPackageInstance* instance = nullptr;
@@ -219,6 +234,8 @@ namespace kaixa::plugin::cmake {
                 BuildRequest routed;
                 routed.jobs = request.jobs;
                 routed.build_default = false;
+                routed.install = request.install;
+                routed.install_prefix = request.install_prefix;
                 routes.push_back({std::move(context), &instance, std::move(routed)});
                 return routes.back();
             };
@@ -905,11 +922,13 @@ namespace kaixa::plugin::cmake {
             ) const {
                 const BuildRequest& request = route.request;
                 const ProductRealizationContext realization{environment.configuration.profile, host_target_os()};
-                auto install = requires_install(graph, package, realization);
-                if (!install)
-                    return std::unexpected(install.error());
+                auto dependency_install = requires_install(graph, package, realization);
+                if (!dependency_install)
+                    return std::unexpected(dependency_install.error());
 
-                if (!graph.is_root(package.id) && !*install)
+                const std::optional<std::filesystem::path>
+                    install = install_destination(request, *dependency_install, environment, *route.instance);
+                if (!graph.is_root(package.id) && !install)
                     return {};
 
                 auto context = prepare_build_context(graph, package, environment, *route.instance, route.context);
@@ -1025,9 +1044,8 @@ namespace kaixa::plugin::cmake {
                 Action configure;
                 configure.description = "configure " + package.name;
                 configure.argv = {"cmake", "-S", projects[package.id.index]->source.string(), "-B", context->directory.string()};
-                if (*install) {
-                    configure.argv.push_back("-DCMAKE_INSTALL_PREFIX=" + artifact_directory(environment, *route.instance).string());
-                }
+                if (install)
+                    configure.argv.push_back("-DCMAKE_INSTALL_PREFIX=" + install->string());
                 configure.argv.push_back("-DCMAKE_PROJECT_INCLUDE=" + integration_file.string());
                 configure.inputs.push_back(context->metadata);
                 configure.inputs.push_back(integration_file);
@@ -1093,7 +1111,7 @@ namespace kaixa::plugin::cmake {
                         build.argv.push_back(std::to_string(*request.jobs));
                     }
                     build.argv.insert(build.argv.end(), context->build.build_arguments.begin(), context->build.build_arguments.end());
-                    if (*install)
+                    if (install)
                         build.stage = ActionStage::synchronize;
 
                     return build;
@@ -1109,8 +1127,7 @@ namespace kaixa::plugin::cmake {
                     return std::unexpected(error("CMake build request selects neither default nor explicit targets"));
                 }
 
-                if (*install) {
-                    const std::filesystem::path destination = artifact_directory(environment, *route.instance);
+                if (install) {
                     Action install_action;
                     install_action.description = "install " + package.name;
                     install_action.argv = {"cmake",
@@ -1119,7 +1136,7 @@ namespace kaixa::plugin::cmake {
                         "--config",
                         context->configuration,
                         "--prefix",
-                        destination.string()};
+                        install->string()};
                     install_action.argv.insert(
                         install_action.argv.end(),
                         context->build.install_arguments.begin(),
@@ -1127,7 +1144,7 @@ namespace kaixa::plugin::cmake {
                     );
                     install_action.working_directory = package.directory;
                     install_action.inputs.push_back(context->directory);
-                    install_action.outputs.push_back(destination);
+                    install_action.outputs.push_back(*install);
                     install_action.package = package.id;
                     install_action.configured_artifact = route.instance->artifact;
                     install_action.stage = ActionStage::synchronize;
@@ -1159,6 +1176,9 @@ namespace kaixa::plugin::cmake {
                     test_targets.push_back(*request.target);
                 } else {
                     for (const detail::TestOptions& test: default_build_context->project.tests) {
+                        if ((request.purpose == ProductPurpose::benchmark) != (test.adapter.purpose == TestAdapterPurpose::benchmark)) {
+                            continue;
+                        }
                         if (std::ranges::find(test_targets, test.target) == test_targets.end())
                             test_targets.push_back(test.target);
                     }

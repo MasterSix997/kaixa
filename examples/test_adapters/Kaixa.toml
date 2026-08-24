@@ -1,0 +1,6 @@
+[package-set]
+members = ["app", "googletest", "google_benchmark"]
+default = ["adapter_example"]
+
+[package-set.policy]
+cxx = 23

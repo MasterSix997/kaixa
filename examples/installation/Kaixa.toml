@@ -1,0 +1,6 @@
+[package-set]
+members = ["app", "runtime_support"]
+default = ["install_example"]
+
+[package-set.policy]
+cxx = 23

@@ -107,10 +107,6 @@ KAIXA_TEST(manifest_tree_loads_target_layers_and_advanced_target_data) {
         "source = \"template.cpp\"\n"
         "required-features = { graphics = [\"vulkan\"] }\n"
         "matrix = { quality = [1, 2] }\n"
-        "\n"
-        "[[examples.resources]]\n"
-        "from = \"assets\"\n"
-        "to = \"assets\"\n"
     );
 
     const auto tree = kaixa::load_manifest_tree(root.path());
@@ -125,7 +121,6 @@ KAIXA_TEST(manifest_tree_loads_target_layers_and_advanced_target_data) {
     context.check_equal(tree->summary.target_documents, std::size_t{1}, "target document count");
     const kaixa::PackageTarget& target = tree->target_documents.front().targets.front();
     context.check(target.matrix.has_value(), "target matrix is normalized");
-    context.check_equal(target.resources.size(), std::size_t{1}, "target resources are normalized");
     context.check_equal(
         target.required_dependency_features.at("graphics").front(),
         std::string("vulkan"),

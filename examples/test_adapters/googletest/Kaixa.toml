@@ -1,0 +1,4 @@
+[package]
+name = "googletest"
+version = "1.0.0"
+resolver = "cmake"

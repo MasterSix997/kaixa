@@ -3,6 +3,7 @@
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/model/effective_product.hpp>
 #include <kaixa/model/graph.hpp>
+#include <kaixa/test/adapter.hpp>
 
 #include <cstdint>
 #include <filesystem>
@@ -43,6 +44,17 @@ namespace kaixa::plugin::cmake::detail {
     };
 
     struct TargetOptions {
+        struct RuntimeFile {
+            std::filesystem::path source;
+            std::filesystem::path destination;
+            bool directory = false;
+        };
+
+        struct InstallHeader {
+            std::filesystem::path source;
+            std::filesystem::path destination;
+        };
+
         std::string name;
         TargetType type = TargetType::executable;
         std::vector<std::string> sources;
@@ -58,16 +70,19 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<std::string> public_compile_options;
         std::vector<std::string> link_options;
         std::vector<std::string> precompiled_headers;
+        std::vector<RuntimeFile> runtime_files;
+        std::vector<InstallHeader> install_headers;
         std::optional<std::int64_t> cxx_standard;
         MsvcRuntime msvc_runtime = MsvcRuntime::default_runtime;
         bool default_build = true;
+        bool install = false;
     };
 
     struct TestOptions {
         std::string name;
         std::string target;
         std::vector<std::string> arguments;
-        bool discover = false;
+        TestAdapterInfo adapter;
     };
 
     struct Options {
