@@ -611,6 +611,35 @@ namespace kaixa {
             return {};
         }
 
+        Result<void> read_target_product_options(TableReader& table, PackageTarget& target) {
+            auto include_directories = read_string_array(table, "include");
+            if (!include_directories)
+                return std::unexpected(include_directories.error());
+
+            target.include_directories = std::move(*include_directories);
+
+            auto system_include_directories = read_string_array(table, "system-include");
+            if (!system_include_directories)
+                return std::unexpected(system_include_directories.error());
+
+            target.system_include_directories = std::move(*system_include_directories);
+
+            if (const Value* definitions = table.take("defines")) {
+                const std::vector<TableEntry>* entries = definitions->as_table();
+                if (!entries)
+                    return std::unexpected(error_at(definitions->location(), "target definitions must be a table"));
+
+                target.definitions = *entries;
+            }
+
+            auto system_libraries = read_string_array(table, "system-libraries");
+            if (!system_libraries)
+                return std::unexpected(system_libraries.error());
+
+            target.system_libraries = std::move(*system_libraries);
+            return {};
+        }
+
         Result<void> read_target_behavior(TableReader& table, PackageTarget& target) {
             auto dependencies = read_dependencies(table);
             if (!dependencies)
@@ -635,6 +664,12 @@ namespace kaixa {
                 return std::unexpected(hidden.error());
 
             target.hidden = *hidden;
+
+            auto install = read_boolean(table, "install");
+            if (!install)
+                return std::unexpected(install.error());
+
+            target.install = *install;
 
             auto framework = table.optional_string("framework");
             if (!framework)
@@ -701,11 +736,16 @@ namespace kaixa {
                 std::string_view{"source"},
                 std::string_view{"source-excludes"},
                 std::string_view{"exclude"},
+                std::string_view{"include"},
+                std::string_view{"system-include"},
+                std::string_view{"defines"},
+                std::string_view{"system-libraries"},
                 std::string_view{"required-features"},
                 std::string_view{"dependencies"},
                 std::string_view{"arguments"},
                 std::string_view{"discover"},
                 std::string_view{"hidden"},
+                std::string_view{"install"},
                 std::string_view{"framework"},
                 std::string_view{"policy"},
                 std::string_view{"matrix"}};
@@ -751,6 +791,10 @@ namespace kaixa {
             auto sources = read_target_sources(table, target, allow_partial);
             if (!sources)
                 return std::unexpected(sources.error());
+
+            auto product_options = read_target_product_options(table, target);
+            if (!product_options)
+                return std::unexpected(product_options.error());
 
             auto required_features = read_target_required_features(table, target);
             if (!required_features)

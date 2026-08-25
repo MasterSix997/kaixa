@@ -80,6 +80,11 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
         "[[test]]\n"
         "name = \"app.tests\"\n"
         "sources = [\"tests.cpp\"]\n"
+        "include = [\"support\"]\n"
+        "system-include = [\"vendor/include\"]\n"
+        "defines = { CASE_ROOT = { path = \"fixtures\" } }\n"
+        "system-libraries = [\"threads\"]\n"
+        "install = true\n"
         "framework = \"googletest\"\n"
     );
     workspace.write("app/tests/tests.cpp", "int test_source() { return 0; }\n");
@@ -125,6 +130,285 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
         context.check_contains(project->content, "--benchmark_list_tests=true", "benchmark cases are discovered for CTest and IDEs");
         context.check_contains(project->content, "if(NOT EXISTS", "unbuilt discovery targets do not break the selected catalog");
         context.check_contains(project->content, "kaixa.purpose:benchmark", "benchmark catalog has a normalized purpose label");
+        context.check_contains(project->content, "tests/support", "target include is relative to its manifest");
+        context.check_contains(project->content, "tests/vendor/include", "target system include is relative to its manifest");
+        context.check_contains(project->content, "CASE_ROOT=", "target definition is generated");
+        context.check_contains(project->content, "app/tests/fixtures", "definition path is relative to its manifest");
+        context.check_contains(project->content, "threads", "target system library is linked");
+        context.check_contains(project->content, "install(TARGETS app.tests", "installable associated target is exported");
+    }
+}
+
+KAIXA_TEST(prebuilt_descriptors_reach_cmake_consumers) {
+    const kaixa::testing::TempDirectory workspace("prebuilt-consumer");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "toolkit = \"1\"\n"
+        "\n"
+        "[bin]\n"
+        "sources = [\"source.cpp\"]\n"
+        "\n"
+        "[providers.binary]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.binary.package]]\n"
+        "name = \"toolkit\"\n"
+        "version = \"1.0.0\"\n"
+        "artifact = { driver = \"path\", path = \"toolkit\" }\n"
+        "include = [\"include\"]\n"
+        "system-include = [\"system\"]\n"
+        "libraries = [\"lib/toolkit.lib\"]\n"
+        "system-libraries = [\"user32\"]\n"
+        "runtime-files = [\"bin/*.dll\"]\n"
+    );
+    workspace.write("source.cpp", "int main() { return 0; }\n");
+    workspace.write("toolkit/include/toolkit.hpp", "#pragma once\n");
+    workspace.write("toolkit/system/toolkit_detail.hpp", "#pragma once\n");
+    workspace.write("toolkit/lib/toolkit.lib", "library\n");
+    workspace.write("toolkit/bin/toolkit.dll", "runtime\n");
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(
+        workspace.path(),
+        kaixa::ResolutionOptions{{}, &registry, workspace.path() / ".cache"}
+    );
+    context.check(resolution.has_value(), "prebuilt descriptor resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+
+    const auto toolkit = resolution->graph.find_by_name("toolkit");
+    context.check(toolkit.has_value(), "prebuilt package enters the graph");
+    if (toolkit) {
+        context.check_equal(resolution->graph[*toolkit].directory, workspace.path() / "toolkit", "artifact is materialized");
+    }
+
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(resolution->graph, registry, environment);
+    context.check(plan.has_value(), "prebuilt consumer plans");
+    if (!plan)
+        return;
+
+    const auto project = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "CMakeLists.txt";
+    });
+    context.check(project != plan->generated_files().end(), "consumer project is generated");
+    if (project == plan->generated_files().end())
+        return;
+
+    context.check_contains(project->content, "toolkit/include", "prebuilt public include reaches the consumer");
+    context.check_contains(project->content, "toolkit/system", "prebuilt system include reaches the consumer");
+    context.check_contains(project->content, "toolkit/lib/toolkit.lib", "prebuilt library reaches the linker");
+    context.check_contains(project->content, "user32", "prebuilt system library reaches the linker");
+    context.check_contains(project->content, "toolkit.dll", "prebuilt runtime file is staged");
+}
+
+KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
+    const kaixa::testing::TempDirectory workspace("adopted-provider-source");
+    workspace.write(
+        "Kaixa.toml",
+        "imports = [\"config/providers.toml\"]\n"
+        "\n"
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "component = \"1\"\n"
+        "\n"
+        "[bin]\n"
+        "sources = [\"main.cpp\"]\n"
+    );
+    workspace.write(
+        "config/providers.toml",
+        "[providers.source]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.source.package]]\n"
+        "name = \"component\"\n"
+        "version = \"1.0.0\"\n"
+        "source = { driver = \"path\", path = \"../vendor\" }\n"
+        "consumer = { resolver = \"cmake\", mode = \"add-subdirectory\", path = \"Build\", options = { COMPONENT_VALUE = 42 } }\n"
+        "products = { default = \"UpstreamComponent\" }\n"
+    );
+    workspace.write("main.cpp", "int component_value();\nint main() { return component_value() == 42 ? 0 : 1; }\n");
+    workspace.write("vendor/component.cpp", "int component_value() { return COMPONENT_VALUE; }\n");
+    workspace.write(
+        "vendor/Build/CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(UpstreamComponent LANGUAGES CXX)\n"
+        "add_library(UpstreamComponent STATIC ../component.cpp)\n"
+        "target_compile_definitions(UpstreamComponent PRIVATE COMPONENT_VALUE=${COMPONENT_VALUE})\n"
+    );
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(resolution.has_value(), "provider source recipe resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+
+    const auto component = resolution->graph.find_by_name("component");
+    context.check(component.has_value(), "adopted source package enters the graph");
+    if (!component)
+        return;
+
+    const kaixa::PackageNode& package = resolution->graph[*component];
+    context.check(package.kind == kaixa::PackageKind::managed, "adopted source participates in source builds");
+    context.check_equal(package.directory, workspace.path() / "vendor/Build", "consumer path selects the external project");
+
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(resolution->graph, registry, environment);
+    context.check(plan.has_value(), "adopted source build plans");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto root_project = std::ranges::find_if(plan->generated_files(), [&](const kaixa::GeneratedFile& file) {
+        return file.path == workspace.path() / "CMakeLists.txt";
+    });
+    context.check(root_project != plan->generated_files().end(), "consumer project is generated");
+    if (root_project != plan->generated_files().end())
+        context.check_contains(root_project->content, "UpstreamComponent", "logical package links its declared default product");
+
+    const auto integration = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "dependencies.cmake";
+    });
+    context.check(integration != plan->generated_files().end(), "source integration is generated");
+    if (integration != plan->generated_files().end()) {
+        context.check_contains(integration->content, "set(COMPONENT_VALUE 42)", "consumer option is scoped before adoption");
+        context.check_contains(integration->content, "vendor/Build", "consumer subdirectory is adopted");
+    }
+
+    const auto built = kaixa::execute(*plan);
+    context.check(built.has_value(), "adopted source compiles with its consumer");
+    if (!built)
+        context.fail(kaixa::format_diagnostic(built.error()));
+}
+
+KAIXA_TEST(shared_provider_source_recipe_is_resolved_once) {
+    const kaixa::testing::TempDirectory workspace("shared-adopted-provider-source");
+    workspace.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "name = \"workspace\"\n"
+        "members = [\"first\", \"second\"]\n"
+        "default = [\"first\", \"second\"]\n"
+        "\n"
+        "[providers.source]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.source.package]]\n"
+        "name = \"component\"\n"
+        "version = \"1.0.0\"\n"
+        "source = { driver = \"path\", path = \"vendor\" }\n"
+        "consumer = { resolver = \"cmake\", mode = \"add-subdirectory\" }\n"
+        "products = { default = \"UpstreamComponent\" }\n"
+    );
+    for (const std::string_view package: {"first", "second"}) {
+        workspace.write(
+            std::string(package) + "/Kaixa.toml",
+            "[package]\n"
+            "name = \""
+                + std::string(package)
+                + "\"\n"
+                  "version = \"1.0.0\"\n"
+                  "resolver = \"cmake\"\n"
+                  "\n"
+                  "[dependencies]\n"
+                  "component = \"1\"\n"
+        );
+    }
+    workspace.write("vendor/CMakeLists.txt", "add_library(UpstreamComponent INTERFACE)\n");
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(resolution.has_value(), "shared provider source recipe resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+
+    context.check_equal(resolution->graph.size(), std::size_t{3}, "shared adopted source is resolved once");
+}
+
+KAIXA_TEST(provider_source_recipe_requires_a_consumer_resolver) {
+    const kaixa::testing::TempDirectory workspace("provider-source-without-resolver");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "component = \"1\"\n"
+        "\n"
+        "[providers.source]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.source.package]]\n"
+        "name = \"component\"\n"
+        "version = \"1.0.0\"\n"
+        "source = { driver = \"path\", path = \"vendor\" }\n"
+        "consumer = { mode = \"add-subdirectory\" }\n"
+    );
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(!resolution.has_value(), "consumer without resolver is rejected");
+    if (!resolution) {
+        context.check_contains(
+            kaixa::format_diagnostic(resolution.error()),
+            "[providers.source.package.0.consumer.resolver]: missing required key",
+            "missing resolver diagnostic is precise"
+        );
+    }
+}
+
+KAIXA_TEST(provider_source_recipe_rejects_an_unsupported_consumer_mode) {
+    const kaixa::testing::TempDirectory workspace("provider-source-consumer-mode");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "component = \"1\"\n"
+        "\n"
+        "[providers.source]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.source.package]]\n"
+        "name = \"component\"\n"
+        "version = \"1.0.0\"\n"
+        "source = { driver = \"path\", path = \"vendor\" }\n"
+        "consumer = { resolver = \"cmake\", mode = \"find-package\" }\n"
+    );
+    workspace.write("vendor/CMakeLists.txt", "add_library(UpstreamComponent INTERFACE)\n");
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(!resolution.has_value(), "unsupported consumer mode is rejected");
+    if (!resolution) {
+        context.check_contains(
+            kaixa::format_diagnostic(resolution.error()),
+            "requires consumer mode `add-subdirectory`",
+            "unsupported mode diagnostic is precise"
+        );
     }
 }
 

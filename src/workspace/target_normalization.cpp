@@ -56,6 +56,16 @@ namespace kaixa::workspace_detail {
             }
         }
 
+        void merge_entries(std::vector<TableEntry>& output, const std::vector<TableEntry>& values) {
+            for (const TableEntry& value: values) {
+                const auto existing = std::ranges::find(output, value.key, &TableEntry::key);
+                if (existing == output.end())
+                    output.push_back(value);
+                else
+                    *existing = value;
+            }
+        }
+
         void merge_target_layer(PackageTarget& target, const PackageTarget& layer) {
             if (layer.display_name)
                 target.display_name = layer.display_name;
@@ -71,11 +81,16 @@ namespace kaixa::workspace_detail {
                 append_unique(target.required_dependency_features[package], features);
 
             target.dependencies.insert(target.dependencies.end(), layer.dependencies.begin(), layer.dependencies.end());
+            append_unique(target.include_directories, layer.include_directories);
+            append_unique(target.system_include_directories, layer.system_include_directories);
+            merge_entries(target.definitions, layer.definitions);
+            append_unique(target.system_libraries, layer.system_libraries);
             if (!layer.arguments.empty())
                 target.arguments = layer.arguments;
 
             target.discover = target.discover || layer.discover;
             target.hidden = target.hidden || layer.hidden;
+            target.install = target.install || layer.install;
             if (layer.framework)
                 target.framework = layer.framework;
 
@@ -153,6 +168,18 @@ namespace kaixa::workspace_detail {
 
             for (std::string& argument: target.arguments)
                 replace_capture(argument, capture, replacement);
+
+            for (std::string& include: target.include_directories)
+                replace_capture(include, capture, replacement);
+
+            for (std::string& include: target.system_include_directories)
+                replace_capture(include, capture, replacement);
+
+            for (TableEntry& definition: target.definitions)
+                definition.value = interpolate_value(definition.value, capture, replacement);
+
+            for (std::string& library: target.system_libraries)
+                replace_capture(library, capture, replacement);
 
             for (std::string& include: target.sources.include)
                 replace_capture(include, capture, replacement);

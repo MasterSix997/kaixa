@@ -306,7 +306,7 @@ namespace kaixa::cli {
                 state_root = workspace_directory / ".kaixa";
                 plan.add(state_root);
                 if (command.generated_files) {
-                    auto workspace = open_workspace(command.workspace);
+                    auto workspace = open_workspace(command.workspace, {}, false, false, false);
                     if (!workspace)
                         return fail(workspace.error());
 
@@ -318,7 +318,7 @@ namespace kaixa::cli {
                         plan.generated_file(file);
                 }
             } else {
-                auto workspace = open_workspace(command.workspace);
+                auto workspace = open_workspace(command.workspace, {}, false, false, false);
                 if (!workspace)
                     return fail(workspace.error());
 

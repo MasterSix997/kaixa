@@ -501,6 +501,117 @@ namespace kaixa {
                 std::optional<std::string> integrity;
             };
 
+            std::filesystem::path provider_locator_requester(const SourceLocator& locator, const std::filesystem::path& fallback) {
+                const std::string& source = locator.options.location().source;
+                if (source.empty())
+                    return fallback;
+
+                const std::filesystem::path declaration = source;
+                const std::filesystem::path directory = declaration.parent_path();
+                return directory.empty() ? fallback : directory;
+            }
+
+            Result<std::filesystem::path> adopted_source_directory(
+                const PackageCandidate& candidate,
+                const std::filesystem::path& root,
+                const SourceLocation& location
+            ) {
+                if (!candidate.descriptor)
+                    return std::unexpected(error_at(location, "adopted source package has no descriptor"));
+
+                const Value* consumer = candidate.descriptor->find("consumer");
+                if (!consumer || !consumer->as_table())
+                    return std::unexpected(error_at(location, "adopted source package requires a `consumer` table"));
+
+                const Value* mode_value = consumer->find("mode");
+                const std::string* mode = mode_value ? mode_value->as_string() : nullptr;
+                if (mode_value && !mode)
+                    return std::unexpected(error_at(mode_value->location(), "consumer `mode` must be a string"));
+                if (mode && *mode != "add-subdirectory") {
+                    return std::unexpected(
+                        error_at(mode_value->location(), "adopted source package requires consumer mode `add-subdirectory`")
+                    );
+                }
+
+                const Value* path_value = consumer->find("path");
+                const std::string* path_text = path_value ? path_value->as_string() : nullptr;
+                if (path_value && !path_text)
+                    return std::unexpected(error_at(path_value->location(), "consumer `path` must be a string"));
+
+                const std::filesystem::path relative = path_text ? std::filesystem::path(*path_text) : std::filesystem::path{"."};
+                if (relative.is_absolute() || relative.has_root_path() || std::ranges::find(relative, "..") != relative.end()) {
+                    return std::unexpected(error_at(
+                        path_value ? path_value->location() : location,
+                        "consumer `path` must stay inside the materialized source tree"
+                    ));
+                }
+
+                return workspace_detail::canonical_directory(root / relative, path_value ? path_value->location() : location);
+            }
+
+            Result<PackageId> load_adopted_source_dependency(
+                const PackageProvider& provider,
+                const PackageCandidate& candidate,
+                const std::filesystem::path& requester,
+                const DependencyBinding& dependency
+            ) {
+                if (!candidate.source || !candidate.resolver)
+                    return std::unexpected(error_at(dependency.location, "adopted source package requires a source and resolver"));
+
+                const ProviderInfo info = provider.info();
+                if (const auto existing = m_graph.find_by_name(candidate.package)) {
+                    const std::optional<PackageSource>& resolved = m_graph[*existing].source;
+                    if (!resolved
+                        || resolved->provider != info.name
+                        || resolved->authority != candidate.authority
+                        || resolved->version != candidate.version) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "package `" + candidate.package + "` was already resolved to a different provider candidate"
+                        ));
+                    }
+                    return *existing;
+                }
+
+                auto materialized = workspace_detail::materialize_source(
+                    materialization_context(),
+                    *candidate.source,
+                    provider_locator_requester(*candidate.source, requester),
+                    dependency.request.package,
+                    dependency.location,
+                    workspace_detail::MaterializationKind::package_source
+                );
+                if (!materialized)
+                    return std::unexpected(materialized.error());
+
+                auto directory = adopted_source_directory(candidate, materialized->directory, dependency.location);
+                if (!directory)
+                    return std::unexpected(directory.error());
+
+                Manifest manifest{candidate.package, *candidate.resolver};
+                manifest.version = candidate.version;
+                manifest.source = *directory / "Kaixa.toml";
+                manifest.location = dependency.location;
+
+                return m_graph.add(
+                    PackageNode{{},
+                        candidate.package,
+                        std::move(*directory),
+                        PackageKind::managed,
+                        *candidate.resolver,
+                        std::move(manifest),
+                        {},
+                        {},
+                        PackageSource{info.name,
+                            candidate.authority,
+                            candidate.version,
+                            candidate.source,
+                            std::move(materialized->identity),
+                            std::move(materialized->integrity)},
+                        candidate.descriptor}
+                );
+            }
+
             Result<PackageId> load_package_from_source(
                 const std::filesystem::path& directory,
                 const SourceLocator& source,
@@ -595,6 +706,9 @@ namespace kaixa {
                     return std::unexpected(candidate.error());
 
                 const ProviderInfo info = provider.info();
+                if (candidate->source && candidate->resolver && candidate->descriptor && candidate->descriptor->find("consumer")) {
+                    return load_adopted_source_dependency(provider, *candidate, requester, dependency);
+                }
                 if (!candidate->source) {
                     if (const auto existing = m_graph.find_by_name(candidate->package)) {
                         const std::optional<PackageSource>& resolved = m_graph[*existing].source;
@@ -617,7 +731,7 @@ namespace kaixa {
                         auto materialized = workspace_detail::materialize_source(
                             materialization_context(),
                             *candidate->artifact,
-                            requester,
+                            provider_locator_requester(*candidate->artifact, requester),
                             dependency.request.package,
                             dependency.location,
                             workspace_detail::MaterializationKind::prebuilt_artifact
@@ -650,7 +764,7 @@ namespace kaixa {
                 }
                 return load_source_dependency(
                     *candidate->source,
-                    requester,
+                    provider_locator_requester(*candidate->source, requester),
                     dependency,
                     info.name,
                     candidate->authority,

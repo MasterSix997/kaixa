@@ -209,6 +209,23 @@ namespace kaixa {
             if (!target.sources.exclude.empty())
                 append_strings(output, "source-excludes", target.sources.exclude);
 
+            if (!target.include_directories.empty())
+                append_strings(output, "include", target.include_directories);
+
+            if (!target.system_include_directories.empty())
+                append_strings(output, "system-include", target.system_include_directories);
+
+            if (!target.definitions.empty()) {
+                auto definitions = format_value(Value::table(target.definitions, target.location));
+                if (!definitions)
+                    return std::unexpected(definitions.error());
+
+                output += "defines = " + *definitions + '\n';
+            }
+
+            if (!target.system_libraries.empty())
+                append_strings(output, "system-libraries", target.system_libraries);
+
             if (!target.required_features.empty())
                 append_strings(output, "required-features", target.required_features);
 
@@ -220,6 +237,9 @@ namespace kaixa {
 
             if (target.hidden)
                 output += "hidden = true\n";
+
+            if (target.install)
+                output += "install = true\n";
 
             if (target.framework)
                 output += "framework = " + toml_string(*target.framework) + '\n';

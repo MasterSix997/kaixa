@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <charconv>
 #include <cstdint>
 #include <filesystem>
@@ -445,6 +446,60 @@ namespace kaixa::plugin::cmake {
 
         std::filesystem::path product_metadata_directory(const BuildContext& context) {
             return context.directory / ".kaixa" / "products";
+        }
+
+        bool valid_cmake_variable(const std::string_view name) {
+            if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name.front())) || name.front() == '_'))
+                return false;
+
+            return std::ranges::all_of(name.substr(1), [](const unsigned char character) {
+                return std::isalnum(character) || character == '_';
+            });
+        }
+
+        Result<std::string> cmake_option_value(const Value& value) {
+            if (const bool* boolean = value.as_boolean())
+                return *boolean ? "ON" : "OFF";
+
+            if (const std::int64_t* integer = value.as_integer())
+                return std::to_string(*integer);
+
+            if (const double* floating = value.as_floating()) {
+                std::array<char, 64> buffer{};
+                const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), *floating);
+                if (converted.ec != std::errc{})
+                    return std::unexpected(error_at(value.location(), "cannot represent CMake option floating-point value"));
+
+                return std::string(buffer.data(), converted.ptr);
+            }
+            if (const std::string* string = value.as_string())
+                return cmake_quote(std::filesystem::path{*string});
+
+            return std::unexpected(error_at(value.location(), "CMake consumer options must be scalar values"));
+        }
+
+        Result<std::vector<TableEntry>> consumer_options(const PackageNode& package) {
+            if (!package.descriptor)
+                return std::vector<TableEntry>{};
+
+            const Value* consumer = package.descriptor->find("consumer");
+            if (!consumer)
+                return std::vector<TableEntry>{};
+
+            const Value* options = consumer->find("options");
+            if (!options)
+                return std::vector<TableEntry>{};
+
+            const std::vector<TableEntry>* entries = options->as_table();
+            if (!entries)
+                return std::unexpected(error_at(options->location(), "CMake consumer `options` must be a table"));
+
+            for (const TableEntry& entry: *entries) {
+                if (!valid_cmake_variable(entry.key)) {
+                    return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid CMake option name"));
+                }
+            }
+            return *entries;
         }
 
         std::string product_integration(const BuildContext& context) {
@@ -1144,7 +1199,24 @@ namespace kaixa::plugin::cmake {
 
                     const PackageNode& dependency = graph[id];
 
-                    integration += "  add_subdirectory("
+                    auto options = consumer_options(dependency);
+                    if (!options)
+                        return std::unexpected(options.error());
+
+                    const std::string indent = options->empty() ? "  " : "    ";
+                    if (!options->empty()) {
+                        integration += "  block()\n";
+                        for (const TableEntry& option: *options) {
+                            auto value = cmake_option_value(option.value);
+                            if (!value)
+                                return std::unexpected(value.error());
+
+                            integration += "    set(" + option.key + " " + *value + ")\n";
+                        }
+                    }
+
+                    integration += indent
+                        + "add_subdirectory("
                         + cmake_quote(projects[id.index]->source)
                         + " "
                         + cmake_quote(context->directory / "_dependencies" / dependency.name);
@@ -1152,6 +1224,8 @@ namespace kaixa::plugin::cmake {
                         integration += " EXCLUDE_FROM_ALL";
 
                     integration += ")\n";
+                    if (!options->empty())
+                        integration += "  endblock()\n";
                 }
                 integration += "endif()\n";
                 plan.generate({integration_file, std::move(integration)});

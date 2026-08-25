@@ -1024,7 +1024,9 @@ KAIXA_TEST(target_matrices_expand_names_and_resolver_values) {
 
     context.check_equal(root.targets[0].name.value_or(""), std::string("matrix.64"), "first matrix target name");
     context.check_equal(root.targets[1].name.value_or(""), std::string("matrix.128"), "second matrix target name");
-    const kaixa::Value* definitions = root.targets[0].resolver_options ? root.targets[0].resolver_options->find("defines") : nullptr;
-    const kaixa::Value* value = definitions ? definitions->find("MATRIX_VALUE") : nullptr;
-    context.check(value && value->as_string() && *value->as_string() == "64", "matrix value reaches resolver options");
+    const auto definition = std::ranges::find(root.targets[0].definitions, std::string_view{"MATRIX_VALUE"}, &kaixa::TableEntry::key);
+    context.check(
+        definition != root.targets[0].definitions.end() && definition->value.as_string() && *definition->value.as_string() == "64",
+        "matrix value reaches target definitions"
+    );
 }

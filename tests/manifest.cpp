@@ -179,6 +179,11 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
         "\n"
         "[test]\n"
         "sources = [\"tests/*.cpp\"]\n"
+        "include = [\"support\"]\n"
+        "system-include = [\"vendor/include\"]\n"
+        "defines = { CASE_ROOT = { path = \"fixtures\" } }\n"
+        "system-libraries = [\"threads\"]\n"
+        "install = true\n"
         "discover = true\n"
         "\n"
         "[test.dependencies]\n"
@@ -201,11 +206,30 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     context.check_equal(manifest->target_references.size(), std::size_t{2}, "reference count");
     context.check_equal(manifest->targets.size(), std::size_t{2}, "inline target group count");
     context.check(manifest->targets[0].discover, "test discovery is retained");
+    context.check(manifest->targets[0].install, "target installation is retained");
     context.check(!manifest->targets[0].each_source, "singular test is grouped");
     context.check(manifest->targets[1].each_source, "plural benchmarks are per source");
     context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
+    context.check_equal(manifest->targets[0].include_directories.front(), std::string("support"), "target include is retained");
+    context.check_equal(
+        manifest->targets[0].system_include_directories.front(),
+        std::string("vendor/include"),
+        "target system include is retained"
+    );
+    context.check_equal(manifest->targets[0].definitions.front().key, std::string("CASE_ROOT"), "target definition is retained");
+    context.check_equal(manifest->targets[0].system_libraries.front(), std::string("threads"), "target system library is retained");
     context.check_equal(manifest->targets[0].dependencies.size(), std::size_t{1}, "target dependency count");
     context.check_equal(manifest->targets[0].dependencies.front().request.package, std::string("support"), "target dependency name");
+
+    const auto formatted = kaixa::format_manifest(*manifest);
+    context.check(formatted.has_value(), "target product options format");
+    if (formatted) {
+        context.check_contains(*formatted, "include = [\"support\"]", "target include formats");
+        context.check_contains(*formatted, "system-include = [\"vendor/include\"]", "target system include formats");
+        context.check_contains(*formatted, "defines = { CASE_ROOT = { path = \"fixtures\" } }", "target definitions format");
+        context.check_contains(*formatted, "system-libraries = [\"threads\"]", "target system libraries format");
+        context.check_contains(*formatted, "install = true", "target installation formats");
+    }
 }
 
 KAIXA_TEST(package_target_names_may_preserve_resolver_namespaces) {

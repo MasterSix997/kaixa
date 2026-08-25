@@ -44,6 +44,128 @@ namespace kaixa::plugin::cmake::detail {
             return result;
         }
 
+        Result<std::vector<std::string>> descriptor_strings(const PackageNode& package, const std::string_view key) {
+            if (!package.descriptor)
+                return std::vector<std::string>{};
+
+            const Value* value = package.descriptor->find(key);
+            if (!value)
+                return std::vector<std::string>{};
+
+            const std::vector<Value>* entries = value->as_array();
+            if (!entries)
+                return std::unexpected(wrong_kind(value->location(), "an array of strings", value->kind()));
+
+            std::vector<std::string> result;
+            result.reserve(entries->size());
+            for (const Value& entry: *entries) {
+                const std::string* text = entry.as_string();
+                if (!text)
+                    return std::unexpected(wrong_kind(entry.location(), "a string", entry.kind()));
+
+                if (text->empty())
+                    return std::unexpected(error_at(entry.location(), "package descriptor paths cannot be empty"));
+
+                result.push_back(*text);
+            }
+            return result;
+        }
+
+        Result<std::filesystem::path> opaque_package_root(const PackageNode& package) {
+            if (!package.directory.empty())
+                return package.directory;
+
+            if (package.descriptor) {
+                const Value* source = package.descriptor->find("source");
+                const Value* driver = source ? source->find("driver") : nullptr;
+                const Value* path = source ? source->find("path") : nullptr;
+                const std::string* driver_name = driver ? driver->as_string() : nullptr;
+                const std::string* declared_path = path ? path->as_string() : nullptr;
+                if (driver_name && *driver_name == "path" && declared_path) {
+                    std::filesystem::path resolved = *declared_path;
+                    if (resolved.is_relative() && !path->location().source.empty())
+                        resolved = std::filesystem::path(path->location().source).parent_path() / resolved;
+
+                    return std::filesystem::absolute(resolved).lexically_normal();
+                }
+            }
+            return std::unexpected(error("opaque package `" + package.name + "` has no materialized directory"));
+        }
+
+        bool library_is_path(const std::string_view library) {
+            const std::filesystem::path path{library};
+            return path.has_parent_path() || path.has_extension();
+        }
+
+        Result<std::string> dependency_product_name(const PackageNode& package) {
+            if (!package.descriptor)
+                return package.name;
+
+            const Value* products = package.descriptor->find("products");
+            if (!products)
+                return package.name;
+
+            const Value* default_product = products->find("default");
+            if (!default_product)
+                return std::unexpected(error_at(products->location(), "package products require a `default` entry"));
+
+            const std::string* name = default_product->as_string();
+            if (!name || name->empty())
+                return std::unexpected(error_at(default_product->location(), "default package product must be a non-empty string"));
+
+            return *name;
+        }
+
+        Result<void> apply_opaque_dependency(TargetOptions& product, const PackageNode& dependency, const DependencyVisibility visibility) {
+            auto includes = descriptor_strings(dependency, "include");
+            auto system_includes = descriptor_strings(dependency, "system-include");
+            auto libraries = descriptor_strings(dependency, "libraries");
+            auto system_libraries = descriptor_strings(dependency, "system-libraries");
+            if (!includes)
+                return std::unexpected(includes.error());
+
+            if (!system_includes)
+                return std::unexpected(system_includes.error());
+
+            if (!libraries)
+                return std::unexpected(libraries.error());
+
+            if (!system_libraries)
+                return std::unexpected(system_libraries.error());
+
+            const bool requires_root = !includes->empty() || !system_includes->empty() || std::ranges::any_of(*libraries, library_is_path);
+            std::filesystem::path root;
+            if (requires_root) {
+                auto resolved = opaque_package_root(dependency);
+                if (!resolved)
+                    return std::unexpected(resolved.error());
+
+                root = std::move(*resolved);
+            }
+
+            std::vector<std::string>& target_includes = visibility == DependencyVisibility::public_dependency
+                ? product.public_include_directories
+                : product.include_directories;
+            std::vector<std::string>& target_system_includes = visibility == DependencyVisibility::public_dependency
+                ? product.public_system_include_directories
+                : product.system_include_directories;
+            std::vector<std::string>& target_libraries = visibility == DependencyVisibility::public_dependency
+                ? product.public_link_libraries
+                : product.link_libraries;
+
+            for (const std::string& include: *includes)
+                target_includes.push_back((root / include).lexically_normal().generic_string());
+
+            for (const std::string& include: *system_includes)
+                target_system_includes.push_back((root / include).lexically_normal().generic_string());
+
+            for (const std::string& library: *libraries) {
+                target_libraries.push_back(library_is_path(library) ? (root / library).lexically_normal().generic_string() : library);
+            }
+            target_libraries.insert(target_libraries.end(), system_libraries->begin(), system_libraries->end());
+            return {};
+        }
+
         Result<std::optional<std::int64_t>> optional_integer(TableReader& table, const std::string_view key) {
             const Value* value = table.take(key);
             if (!value)
@@ -168,7 +290,9 @@ namespace kaixa::plugin::cmake::detail {
                 result.cxx_standard = *standard;
 
             if (result.type != TargetType::interface_library && result.sources.empty()) {
-                return std::unexpected(error_at(target.location_of("sources"), "a compiled target requires at least one source"));
+                return std::unexpected(
+                    error_at(target.location_of("sources"), "compiled target `" + result.name + "` requires at least one source")
+                );
             }
             if (result.type == TargetType::interface_library
                 && (!result.sources.empty()
@@ -557,7 +681,7 @@ namespace kaixa::plugin::cmake::detail {
             result.public_compile_definitions = std::move(*exported_definitions);
 
             if (result.type != TargetType::interface_library && result.sources.empty()) {
-                return std::unexpected(error_at(product.location, "a compiled product requires at least one source"));
+                return std::unexpected(error_at(product.location, "compiled product `" + result.name + "` requires at least one source"));
             }
             if (result.type == TargetType::interface_library
                 && (!result.sources.empty()
@@ -639,6 +763,29 @@ namespace kaixa::plugin::cmake::detail {
             auto target = read_target(*declared.name, table, default_standard, project_root, project_root);
             if (!target)
                 return std::unexpected(target.error());
+
+            const std::filesystem::path target_root = declared.source.parent_path();
+            for (const std::string& include: declared.include_directories) {
+                target->include_directories.push_back(
+                    (target_root / include).lexically_normal().lexically_relative(project_root).generic_string()
+                );
+            }
+            for (const std::string& include: declared.system_include_directories) {
+                target->system_include_directories.push_back(
+                    (target_root / include).lexically_normal().lexically_relative(project_root).generic_string()
+                );
+            }
+            Value definitions = Value::table(declared.definitions, declared.location);
+            auto normalized_definitions = product_definitions(definitions, target_root);
+            if (!normalized_definitions)
+                return std::unexpected(normalized_definitions.error());
+
+            target->compile_definitions.insert(
+                target->compile_definitions.end(),
+                std::make_move_iterator(normalized_definitions->begin()),
+                std::make_move_iterator(normalized_definitions->end())
+            );
+            target->link_libraries.insert(target->link_libraries.end(), declared.system_libraries.begin(), declared.system_libraries.end());
 
             auto finished = table.finish();
             if (!finished)
@@ -1017,10 +1164,24 @@ namespace kaixa::plugin::cmake::detail {
                 const auto binding = std::ranges::find_if(package.manifest->dependencies, [&](const DependencyBinding& candidate) {
                     return candidate.request.package == target.name;
                 });
-                if (binding != package.manifest->dependencies.end() && binding->visibility == DependencyVisibility::public_dependency)
-                    product->public_link_libraries.push_back(target.name);
+                const DependencyVisibility visibility = binding != package.manifest->dependencies.end()
+                    ? binding->visibility
+                    : DependencyVisibility::private_dependency;
+                if (target.kind == PackageKind::opaque) {
+                    auto applied = apply_opaque_dependency(*product, target, visibility);
+                    if (!applied)
+                        return std::unexpected(applied.error());
+
+                    continue;
+                }
+                auto linked_product = dependency_product_name(target);
+                if (!linked_product)
+                    return std::unexpected(linked_product.error());
+
+                if (visibility == DependencyVisibility::public_dependency)
+                    product->public_link_libraries.push_back(std::move(*linked_product));
                 else
-                    product->link_libraries.push_back(target.name);
+                    product->link_libraries.push_back(std::move(*linked_product));
             }
             result.targets.push_back(std::move(*product));
             return {};
@@ -1074,7 +1235,8 @@ namespace kaixa::plugin::cmake::detail {
                     return std::unexpected(applied_policy.error());
 
                 result.policy_fingerprint += ':' + policy_fingerprint(target_policy);
-                target->default_build = false;
+                target->default_build = declared.install;
+                target->install = declared.install;
                 if (std::ranges::any_of(context.effective_package.products, [](const EffectiveProduct& product) {
                         return product.type != EffectiveProductType::executable;
                     })) {
@@ -1086,8 +1248,13 @@ namespace kaixa::plugin::cmake::detail {
                     &PackageTargetDependencies::target
                 );
                 if (dependencies != context.package.target_dependencies.end()) {
-                    for (const PackageId dependency: dependencies->packages)
-                        target->link_libraries.push_back(context.graph[dependency].name);
+                    for (const PackageId dependency: dependencies->packages) {
+                        auto linked_product = dependency_product_name(context.graph[dependency]);
+                        if (!linked_product)
+                            return std::unexpected(linked_product.error());
+
+                        target->link_libraries.push_back(std::move(*linked_product));
+                    }
                 }
                 result.targets.push_back(std::move(*target));
 

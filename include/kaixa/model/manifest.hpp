@@ -172,9 +172,14 @@ namespace kaixa {
         std::map<std::string, std::vector<std::string>> required_dependency_features;
         std::vector<DependencyBinding> dependencies;
         FileSet sources;
+        std::vector<std::string> include_directories;
+        std::vector<std::string> system_include_directories;
+        std::vector<TableEntry> definitions;
+        std::vector<std::string> system_libraries;
         std::vector<std::string> arguments;
         bool discover = false;
         bool hidden = false;
+        bool install = false;
         std::optional<std::string> framework;
         std::optional<TestAdapterInfo> adapter;
         std::optional<Value> policy;

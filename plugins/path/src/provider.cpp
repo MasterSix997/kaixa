@@ -3,6 +3,7 @@
 #include <kaixa/config/table_reader.hpp>
 #include <kaixa/workspace/package_index.hpp>
 
+#include <algorithm>
 #include <system_error>
 #include <utility>
 
@@ -10,6 +11,33 @@ namespace kaixa::plugin::path {
     namespace {
         SourceLocator source_locator(const std::filesystem::path& root, const SourceLocation& location) {
             return {"path", Value::table({{"path", Value::string(root.generic_string(), location)}}, location)};
+        }
+
+        Result<std::optional<SourceLocator>> read_locator(const Value* value, const std::string_view name) {
+            if (!value)
+                return std::optional<SourceLocator>{};
+
+            const std::vector<TableEntry>* entries = value->as_table();
+            if (!entries) {
+                return std::unexpected(error_at(value->location(), std::string(name) + " must contain exactly one source-driver table"));
+            }
+            const auto driver = std::ranges::find(*entries, std::string_view{"driver"}, &TableEntry::key);
+            if (driver != entries->end()) {
+                const std::string* driver_name = driver->value.as_string();
+                if (!driver_name || driver_name->empty())
+                    return std::unexpected(error_at(driver->value.location(), std::string(name) + " driver must be a string"));
+
+                std::vector<TableEntry> options;
+                for (const TableEntry& entry: *entries) {
+                    if (entry.key != "driver")
+                        options.push_back(entry);
+                }
+                return std::optional{SourceLocator{*driver_name, Value::table(std::move(options), value->location())}};
+            }
+            if (entries->size() != 1 || !entries->front().value.is_table()) {
+                return std::unexpected(error_at(value->location(), std::string(name) + " must contain exactly one source-driver table"));
+            }
+            return std::optional{SourceLocator{entries->front().key, entries->front().value}};
         }
 
         class PathProvider final : public PackageProvider {
@@ -207,17 +235,40 @@ namespace kaixa::plugin::path {
 
                         if (*consumer_result) {
                             TableReader consumer = std::move(**consumer_result);
-                            auto selected = consumer.optional_string("resolver");
+                            auto selected = consumer.string("resolver");
                             if (!selected)
                                 return std::unexpected(selected.error());
 
+                            if (selected->empty()) {
+                                return std::unexpected(error_at(consumer.location_of("resolver"), "consumer resolver cannot be empty"));
+                            }
                             resolver = std::move(*selected);
                             consumer.take_all();
                         }
 
+                        auto source = read_locator(package.take("source"), "package source");
+                        if (!source)
+                            return std::unexpected(source.error());
+
+                        auto artifact = read_locator(package.take("artifact"), "package artifact");
+                        if (!artifact)
+                            return std::unexpected(artifact.error());
+
+                        if (*source && *artifact) {
+                            return std::unexpected(
+                                error_at((*entries)[index].location(), "package cannot declare both `source` and `artifact`")
+                            );
+                        }
+
                         package.take_all();
                         candidates.push_back(
-                            {std::move(*name), std::move(version), definition.name, std::nullopt, std::move(resolver), (*entries)[index]}
+                            {std::move(*name),
+                                std::move(version),
+                                definition.name,
+                                std::move(*source),
+                                std::move(resolver),
+                                (*entries)[index],
+                                std::move(*artifact)}
                         );
                     }
                 }
