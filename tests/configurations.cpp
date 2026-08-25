@@ -23,10 +23,10 @@ KAIXA_TEST(configuration_document_reads_provider_definitions) {
         "name = \"debug\"\n"
         "profile = \"debug\"\n"
         "\n"
-        "[providers.engine]\n"
+        "[providers.component]\n"
         "driver = \"path\"\n"
         "default = true\n"
-        "path = \"../engine\"\n"
+        "path = \"../component\"\n"
     );
 
     const auto document = kaixa::parse_configuration_document_file(root.path() / "config.toml");
@@ -39,21 +39,21 @@ KAIXA_TEST(configuration_document_reads_provider_definitions) {
     context.check_equal(document->configurations.definitions.size(), std::size_t{1}, "build configuration count");
     context.check_equal(document->providers.size(), std::size_t{1}, "provider count");
     const kaixa::ProviderDefinition& provider = document->providers.front();
-    context.check_equal(provider.name, std::string("engine"), "provider name");
+    context.check_equal(provider.name, std::string("component"), "provider name");
     context.check_equal(provider.driver, std::string("path"), "provider driver");
     context.check(provider.is_default, "default provider flag");
     const kaixa::Value* path = provider.options.find("path");
-    context.check(path && path->as_string() && *path->as_string() == "../engine", "opaque provider options");
+    context.check(path && path->as_string() && *path->as_string() == "../component", "opaque provider options");
 }
 
 KAIXA_TEST(provider_default_must_be_a_boolean) {
     const TempDirectory root("provider-default-type");
     root.write(
         "config.toml",
-        "[providers.engine]\n"
+        "[providers.component]\n"
         "driver = \"path\"\n"
         "default = \"yes\"\n"
-        "path = \"../engine\"\n"
+        "path = \"../component\"\n"
     );
 
     const auto document = kaixa::parse_configuration_document_file(root.path() / "config.toml");

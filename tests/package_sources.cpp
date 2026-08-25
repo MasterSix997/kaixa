@@ -81,7 +81,7 @@ namespace {
 
 KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
     const TempDirectory root("direct-package-source");
-    const std::filesystem::path source = root.path() / "engine-source";
+    const std::filesystem::path source = root.path() / "component-source";
     root.write(
         "Kaixa.toml",
         "[package]\n"
@@ -89,19 +89,19 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = { test_source = { path = \""
+        "component = { test_source = { path = \""
             + source.generic_string()
             + "\" } }\n"
     );
     root.write(
-        "engine-source/Kaixa.toml",
+        "component-source/Kaixa.toml",
         "[package-set]\n"
         "members = [\"packages/*\"]\n"
     );
     root.write(
-        "engine-source/packages/engine/Kaixa.toml",
+        "component-source/packages/component/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.2.0\"\n"
         "resolver = \"cmake\"\n"
         "\n"
@@ -109,7 +109,7 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
         "math = \"1\"\n"
     );
     root.write(
-        "engine-source/packages/math/Kaixa.toml",
+        "component-source/packages/math/Kaixa.toml",
         "[package]\n"
         "name = \"math\"\n"
         "version = \"1.0.0\"\n"
@@ -126,11 +126,11 @@ KAIXA_TEST(direct_source_opens_a_monorepo_and_resolves_internal_packages) {
     }
 
     context.check_equal(resolved->graph.size(), std::size_t{3}, "root, remote package and internal dependency");
-    const std::optional<kaixa::PackageId> engine = resolved->graph.find_by_name("engine");
+    const std::optional<kaixa::PackageId> component = resolved->graph.find_by_name("component");
     const std::optional<kaixa::PackageId> math = resolved->graph.find_by_name("math");
-    context.check(engine.has_value() && math.has_value(), "monorepo packages enter the graph");
-    if (engine) {
-        const std::optional<kaixa::PackageSource>& origin = resolved->graph[*engine].source;
+    context.check(component.has_value() && math.has_value(), "monorepo packages enter the graph");
+    if (component) {
+        const std::optional<kaixa::PackageSource>& origin = resolved->graph[*component].source;
         context.check(origin.has_value(), "direct package keeps source metadata");
         if (origin) {
             context.check(!origin->provider.has_value(), "direct source has no provider instance");
@@ -151,17 +151,17 @@ KAIXA_TEST(path_dependency_opens_a_local_package_set_directly) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = { path = \"engine-source\" }\n"
+        "component = { path = \"component-source\" }\n"
     );
     root.write(
-        "engine-source/Kaixa.toml",
+        "component-source/Kaixa.toml",
         "[package-set]\n"
         "members = [\"packages/*\"]\n"
     );
     root.write(
-        "engine-source/packages/engine/Kaixa.toml",
+        "component-source/packages/component/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "resolver = \"cmake\"\n"
     );
@@ -173,12 +173,12 @@ KAIXA_TEST(path_dependency_opens_a_local_package_set_directly) {
         return;
     }
 
-    const std::optional<kaixa::PackageId> engine = resolved->graph.find_by_name("engine");
-    context.check(engine.has_value(), "directory package enters the graph");
-    if (!engine)
+    const std::optional<kaixa::PackageId> component = resolved->graph.find_by_name("component");
+    context.check(component.has_value(), "directory package enters the graph");
+    if (!component)
         return;
 
-    const std::optional<kaixa::PackageSource>& source = resolved->graph[*engine].source;
+    const std::optional<kaixa::PackageSource>& source = resolved->graph[*component].source;
     context.check(source.has_value(), "path source metadata is retained");
     if (!source)
         return;
@@ -197,7 +197,7 @@ KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = \"1\"\n"
+        "component = \"1\"\n"
     );
     root.write(
         "repository/Kaixa.toml",
@@ -205,15 +205,15 @@ KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
         "members = [\"packages/*\"]\n"
     );
     root.write(
-        "repository/packages/engine/Kaixa.toml",
+        "repository/packages/component/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.3.0\"\n"
         "resolver = \"cmake\"\n"
     );
 
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
-    kaixa::ProviderDefinition provider{"local-engine", "path", true, kaixa::Value::table({{"path", "repository"}}), {}};
+    kaixa::ProviderDefinition provider{"local-component", "path", true, kaixa::Value::table({{"path", "repository"}}), {}};
     const auto configured = extensions.configure_provider(provider, {root.path()});
     context.check(configured.has_value(), "path provider configures");
     if (!configured) {
@@ -228,20 +228,20 @@ KAIXA_TEST(path_provider_driver_exposes_a_local_package_set) {
         return;
     }
 
-    const std::optional<kaixa::PackageId> engine_id = resolved->graph.find_by_name("engine");
-    context.check(engine_id.has_value(), "provider package enters the graph");
-    if (!engine_id)
+    const std::optional<kaixa::PackageId> component_id = resolved->graph.find_by_name("component");
+    context.check(component_id.has_value(), "provider package enters the graph");
+    if (!component_id)
         return;
 
-    const kaixa::PackageNode& engine = resolved->graph[*engine_id];
-    context.check(engine.source.has_value(), "provider source metadata is retained");
-    if (!engine.source)
+    const kaixa::PackageNode& component = resolved->graph[*component_id];
+    context.check(component.source.has_value(), "provider source metadata is retained");
+    if (!component.source)
         return;
 
-    context.check_equal(engine.source->provider.value_or(""), std::string("local-engine"), "configured provider name");
-    context.check(engine.source->locator.has_value(), "configured source locator is retained");
-    if (engine.source->locator)
-        context.check_equal(engine.source->locator->driver, std::string("path"), "configured source driver");
+    context.check_equal(component.source->provider.value_or(""), std::string("local-component"), "configured provider name");
+    context.check(component.source->locator.has_value(), "configured source locator is retained");
+    if (component.source->locator)
+        context.check_equal(component.source->locator->driver, std::string("path"), "configured source driver");
 }
 
 KAIXA_TEST(provider_configuration_rejects_an_unknown_driver) {
@@ -264,7 +264,7 @@ KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
         "members = [\"packages/*\"]\n"
         "default = [\"app\"]\n"
         "\n"
-        "[providers.engine]\n"
+        "[providers.component]\n"
         "driver = \"path\"\n"
         "default = true\n"
         "path = \"repository\"\n"
@@ -276,12 +276,12 @@ KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = \"1\"\n"
+        "component = \"1\"\n"
     );
     root.write(
         "repository/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.5.0\"\n"
         "resolver = \"cmake\"\n"
     );
@@ -294,13 +294,13 @@ KAIXA_TEST(package_set_provider_resolves_dependencies_from_a_nested_member) {
         return;
     }
 
-    const std::optional<kaixa::PackageId> engine_id = resolved->graph.find_by_name("engine");
-    context.check(engine_id.has_value(), "provider dependency enters the graph");
-    if (!engine_id)
+    const std::optional<kaixa::PackageId> component_id = resolved->graph.find_by_name("component");
+    context.check(component_id.has_value(), "provider dependency enters the graph");
+    if (!component_id)
         return;
 
-    const kaixa::PackageNode& engine = resolved->graph[*engine_id];
-    context.check(engine.source && engine.source->provider == "engine", "ancestor provider is retained");
+    const kaixa::PackageNode& component = resolved->graph[*component_id];
+    context.check(component.source && component.source->provider == "component", "ancestor provider is retained");
 }
 
 KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
@@ -312,9 +312,9 @@ KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = \"1\"\n"
+        "component = \"1\"\n"
         "\n"
-        "[providers.engine]\n"
+        "[providers.component]\n"
         "driver = \"path\"\n"
         "default = true\n"
         "path = \"missing\"\n"
@@ -322,12 +322,12 @@ KAIXA_TEST(local_provider_definition_replaces_the_published_definition) {
     root.write(
         "repository/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.1.0\"\n"
         "resolver = \"cmake\"\n"
     );
 
-    kaixa::ProviderLayer local{{{"engine", "path", true, kaixa::Value::table({{"path", "repository"}}), {}}}, {root.path()}};
+    kaixa::ProviderLayer local{{{"component", "path", true, kaixa::Value::table({{"path", "repository"}}), {}}}, {root.path()}};
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
     const std::vector<kaixa::ProviderLayer> layers{local};
     const auto resolved = kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, &extensions, {}, layers});
@@ -365,34 +365,34 @@ KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = \"^1.0\"\n"
+        "component = \"^1.0\"\n"
     );
     root.write(
-        "engine-1.0/Kaixa.toml",
+        "component-1.0/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "resolver = \"cmake\"\n"
     );
     root.write(
-        "engine-1.4/Kaixa.toml",
+        "component-1.4/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.4.0\"\n"
         "resolver = \"cmake\"\n"
     );
     root.write(
-        "engine-2.0/Kaixa.toml",
+        "component-2.0/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"2.0.0\"\n"
         "resolver = \"cmake\"\n"
     );
 
     std::vector<kaixa::PackageCandidate> candidates;
-    candidates.push_back(path_candidate("engine", "1.0.0", root.path() / "engine-1.0"));
-    candidates.push_back(path_candidate("engine", "2.0.0", root.path() / "engine-2.0"));
-    candidates.push_back(path_candidate("engine", "1.4.0", root.path() / "engine-1.4"));
+    candidates.push_back(path_candidate("component", "1.0.0", root.path() / "component-1.0"));
+    candidates.push_back(path_candidate("component", "2.0.0", root.path() / "component-2.0"));
+    candidates.push_back(path_candidate("component", "1.4.0", root.path() / "component-1.4"));
 
     kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
     extensions.add(std::make_unique<TestProvider>(kaixa::ProviderInfo{"official", "test_provider", true}, std::move(candidates)));
@@ -403,12 +403,12 @@ KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
         return;
     }
 
-    const std::optional<kaixa::PackageId> engine = resolved->graph.find_by_name("engine");
-    context.check(engine.has_value(), "provider package enters the graph");
-    if (!engine)
+    const std::optional<kaixa::PackageId> component = resolved->graph.find_by_name("component");
+    context.check(component.has_value(), "provider package enters the graph");
+    if (!component)
         return;
 
-    const kaixa::PackageNode& package = resolved->graph[*engine];
+    const kaixa::PackageNode& package = resolved->graph[*component];
     context.check_equal(package.manifest->version->text, std::string("1.4.0"), "highest compatible version");
     context.check(package.source.has_value(), "provider source metadata is retained");
     if (package.source) {
@@ -426,19 +426,19 @@ KAIXA_TEST(explicit_provider_overrides_the_default_route) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "engine = { version = \"1\", from = \"company\" }\n"
+        "component = { version = \"1\", from = \"company\" }\n"
     );
     root.write(
         "official/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.1.0\"\n"
         "resolver = \"cmake\"\n"
     );
     root.write(
         "company/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.2.0\"\n"
         "resolver = \"cmake\"\n"
     );
@@ -448,13 +448,13 @@ KAIXA_TEST(explicit_provider_overrides_the_default_route) {
     extensions.add(
         std::make_unique<TestProvider>(
             kaixa::ProviderInfo{"official", "test_provider", true},
-            std::vector{candidate("engine", "1.1.0", root.path() / "official", "official")}
+            std::vector{candidate("component", "1.1.0", root.path() / "official", "official")}
         )
     );
     extensions.add(
         std::make_unique<TestProvider>(
             kaixa::ProviderInfo{"company", "test_provider", false},
-            std::vector{candidate("engine", "1.2.0", root.path() / "company", "company")}
+            std::vector{candidate("component", "1.2.0", root.path() / "company", "company")}
         )
     );
 
@@ -465,16 +465,16 @@ KAIXA_TEST(explicit_provider_overrides_the_default_route) {
         return;
     }
 
-    const std::optional<kaixa::PackageId> engine_id = resolved->graph.find_by_name("engine");
-    context.check(engine_id.has_value(), "provider package enters the graph");
-    if (!engine_id)
+    const std::optional<kaixa::PackageId> component_id = resolved->graph.find_by_name("component");
+    context.check(component_id.has_value(), "provider package enters the graph");
+    if (!component_id)
         return;
 
-    const kaixa::PackageNode& engine = resolved->graph[*engine_id];
-    context.check(engine.source.has_value(), "provider source metadata is retained");
-    if (!engine.source)
+    const kaixa::PackageNode& component = resolved->graph[*component_id];
+    context.check(component.source.has_value(), "provider source metadata is retained");
+    if (!component.source)
         return;
 
-    context.check_equal(engine.source->provider.value_or(""), std::string("company"), "explicit provider wins");
-    context.check_equal(engine.source->authority, std::string("company"), "explicit authority");
+    context.check_equal(component.source->provider.value_or(""), std::string("company"), "explicit provider wins");
+    context.check_equal(component.source->authority, std::string("company"), "explicit authority");
 }

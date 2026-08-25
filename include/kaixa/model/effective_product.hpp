@@ -26,6 +26,7 @@ namespace kaixa {
         std::vector<std::string> public_system_include_directories;
         std::vector<TableEntry> definitions;
         std::vector<TableEntry> public_definitions;
+        std::vector<std::string> system_libraries;
         std::vector<std::string> dependency_sources;
         std::vector<std::filesystem::path> dependency_source_files;
         FileSet runtime_files;

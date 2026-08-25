@@ -522,6 +522,7 @@ namespace kaixa::plugin::cmake::detail {
             result.public_include_directories = product.public_include_directories;
             result.system_include_directories = product.system_include_directories;
             result.public_system_include_directories = product.public_system_include_directories;
+            result.link_libraries = product.system_libraries;
 
             for (const std::filesystem::path& header: product.public_headers.files) {
                 result.install_headers.push_back(

@@ -13,13 +13,13 @@ namespace {
     std::string package_map_manifest(const bool include_locked, const bool include_newer) {
         std::string packages;
         if (include_locked) {
-            packages += R"({ name = "engine", version = "1.0.0", consumer = { resolver = "cmake" } })";
+            packages += R"({ name = "component", version = "1.0.0", consumer = { resolver = "cmake" } })";
         }
         if (include_locked && include_newer)
             packages += ", ";
 
         if (include_newer) {
-            packages += R"({ name = "engine", version = "1.5.0", consumer = { resolver = "cmake" } })";
+            packages += R"({ name = "component", version = "1.5.0", consumer = { resolver = "cmake" } })";
         }
 
         return R"([package]
@@ -28,7 +28,7 @@ version = "1.0.0"
 resolver = "cmake"
 
 [dependencies]
-engine = "1"
+component = "1"
 
 [providers.official]
 driver = "package-map"
@@ -44,11 +44,33 @@ package = [)"
                 + std::string(name)
                 + "]\ndriver = \"package-map\"\ndefault = "
                 + (name == default_provider ? "true" : "false")
-                + "\npackage = [{ name = \"engine\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n";
+                + "\npackage = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n";
         };
-        return "[package]\nname = \"app\"\nresolver = \"cmake\"\n\n[dependencies]\nengine = \"1\"\n"
+        return "[package]\nname = \"app\"\nresolver = \"cmake\"\n\n[dependencies]\ncomponent = \"1\"\n"
             + provider("official")
             + provider("company");
+    }
+
+    std::string explicitly_routed_package_map_manifest(const std::string_view selected_provider) {
+        return "[package]\n"
+               "name = \"app\"\n"
+               "resolver = \"cmake\"\n"
+               "\n"
+               "[dependencies]\n"
+               "component = \"1\"\n"
+               "\n"
+               "[routing]\n"
+               "component = \""
+            + std::string(selected_provider)
+            + "\"\n"
+              "\n"
+              "[providers.official]\n"
+              "driver = \"package-map\"\n"
+              "package = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n"
+              "\n"
+              "[providers.company]\n"
+              "driver = \"package-map\"\n"
+              "package = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n";
     }
 
     kaixa::Result<kaixa::PackageResolution> resolve_locked_workspace(const TempDirectory& root, const kaixa::LockMode mode) {
@@ -75,16 +97,55 @@ KAIXA_TEST(resolution_lock_routes_through_the_pinned_provider) {
     if (!pinned)
         return;
 
-    const auto engine = pinned->graph.find_by_name("engine");
-    context.check(engine.has_value(), "routed package enters the graph");
-    if (!engine || !pinned->graph[*engine].source)
+    const auto component = pinned->graph.find_by_name("component");
+    context.check(component.has_value(), "routed package enters the graph");
+    if (!component || !pinned->graph[*component].source)
         return;
 
     context.check_equal(
-        pinned->graph[*engine].source->provider.value_or(""),
+        pinned->graph[*component].source->provider.value_or(""),
         std::string("official"),
         "locked provider remains authoritative"
     );
+}
+
+KAIXA_TEST(targeted_update_may_change_the_locked_provider_route) {
+    const TempDirectory root("resolution-lock-provider-update");
+    root.write("Kaixa.toml", explicitly_routed_package_map_manifest("official"));
+
+    const auto initial = resolve_locked_workspace(root, kaixa::LockMode::update);
+    context.check(initial.has_value(), "initial explicit provider resolves");
+    if (!initial)
+        return;
+
+    root.write("Kaixa.toml", explicitly_routed_package_map_manifest("company"));
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const std::vector<std::string> unlocked{"component"};
+    const auto updated = kaixa::resolve_workspace(
+        root.path(),
+        kaixa::ResolutionOptions{{},
+            &extensions,
+            {},
+            {},
+            nullptr,
+            kaixa::PolicyContext{"debug", "windows"},
+            kaixa::LockMode::update,
+            {},
+            unlocked}
+    );
+    context.check(updated.has_value(), "targeted update follows the new provider route");
+    if (!updated)
+        return;
+
+    const auto component = updated->graph.find_by_name("component");
+    context.check(component.has_value(), "updated package enters the graph");
+    if (component && updated->graph[*component].source) {
+        context.check_equal(
+            updated->graph[*component].source->provider.value_or(""),
+            std::string("company"),
+            "unlocked package is no longer pinned to the previous provider"
+        );
+    }
 }
 
 KAIXA_TEST(resolution_lock_pins_provider_candidate_and_updates_when_unavailable) {
@@ -106,11 +167,11 @@ KAIXA_TEST(resolution_lock_pins_provider_candidate_and_updates_when_unavailable)
     if (!pinned)
         return;
 
-    const auto engine_id = pinned->graph.find_by_name("engine");
-    context.check(engine_id.has_value(), "locked provider package enters the graph");
-    if (engine_id && pinned->graph[*engine_id].source && pinned->graph[*engine_id].source->version) {
+    const auto component_id = pinned->graph.find_by_name("component");
+    context.check(component_id.has_value(), "locked provider package enters the graph");
+    if (component_id && pinned->graph[*component_id].source && pinned->graph[*component_id].source->version) {
         context.check_equal(
-            pinned->graph[*engine_id].source->version->text,
+            pinned->graph[*component_id].source->version->text,
             std::string("1.0.0"),
             "locked version wins over a newer candidate"
         );
@@ -130,10 +191,11 @@ KAIXA_TEST(resolution_lock_pins_provider_candidate_and_updates_when_unavailable)
     if (!updated)
         return;
 
-    const auto updated_engine = updated->graph.find_by_name("engine");
-    context.check(updated_engine.has_value(), "replacement package enters the graph");
-    if (updated_engine && updated->graph[*updated_engine].source && updated->graph[*updated_engine].source->version) {
-        context.check_equal(updated->graph[*updated_engine].source->version->text, std::string("1.5.0"), "replacement version is selected");
+    const auto updated_component = updated->graph.find_by_name("component");
+    context.check(updated_component.has_value(), "replacement package enters the graph");
+    if (updated_component && updated->graph[*updated_component].source && updated->graph[*updated_component].source->version) {
+        context
+            .check_equal(updated->graph[*updated_component].source->version->text, std::string("1.5.0"), "replacement version is selected");
     }
     context.check(updated->lock_changed, "replacement updates Kaixa.lock");
 }
@@ -148,13 +210,13 @@ version = "1.0.0"
 resolver = "cmake"
 
 [dependencies]
-engine = { path = "engine" }
+component = { path = "component" }
 )"
     );
     root.write(
-        "engine/Kaixa.toml",
+        "component/Kaixa.toml",
         R"([package]
-name = "engine"
+name = "component"
 version = "2.0.0"
 resolver = "cmake"
 )"
@@ -176,19 +238,19 @@ resolver = "cmake"
     if (!lock || !*lock)
         return;
 
-    const kaixa::LockedPackage* engine = (**lock).find("engine");
-    context.check(engine != nullptr, "path dependency is represented in the lock");
-    if (!engine)
+    const kaixa::LockedPackage* component = (**lock).find("component");
+    context.check(component != nullptr, "path dependency is represented in the lock");
+    if (!component)
         return;
 
-    context.check_equal(engine->version.value_or(""), std::string("2.0.0"), "manifest version is locked");
-    context.check_equal(engine->authority.value_or(""), std::string("direct"), "direct authority is locked");
-    context.check_equal(engine->source_driver.value_or(""), std::string("path"), "source driver is locked");
-    context.check(!engine->resolutions.empty(), "resolution context is locked");
-    if (!engine->resolutions.empty()) {
-        context.check_equal(engine->resolutions.front().profile, std::string("debug"), "profile is locked");
-        context.check_equal(engine->resolutions.front().target, std::string("windows"), "target is locked");
-        context.check(!engine->resolutions.front().variants.empty(), "configured variants are locked");
+    context.check_equal(component->version.value_or(""), std::string("2.0.0"), "manifest version is locked");
+    context.check_equal(component->authority.value_or(""), std::string("direct"), "direct authority is locked");
+    context.check_equal(component->source_driver.value_or(""), std::string("path"), "source driver is locked");
+    context.check(!component->resolutions.empty(), "resolution context is locked");
+    if (!component->resolutions.empty()) {
+        context.check_equal(component->resolutions.front().profile, std::string("debug"), "profile is locked");
+        context.check_equal(component->resolutions.front().target, std::string("windows"), "target is locked");
+        context.check(!component->resolutions.front().variants.empty(), "configured variants are locked");
     }
 
     const auto strict = resolve_locked_workspace(root, kaixa::LockMode::frozen);
@@ -225,8 +287,8 @@ KAIXA_TEST(locked_mode_rejects_changed_features_and_variants) {
 
 KAIXA_TEST(resolution_lock_prunes_packages_removed_from_a_context) {
     const TempDirectory root("resolution-lock-prune");
-    root.write("Kaixa.toml", "[package]\nname = \"app\"\nresolver = \"cmake\"\n\n[dependencies]\nengine = { path = \"engine\" }\n");
-    root.write("engine/Kaixa.toml", "[package]\nname = \"engine\"\nversion = \"1.0.0\"\nresolver = \"cmake\"\n");
+    root.write("Kaixa.toml", "[package]\nname = \"app\"\nresolver = \"cmake\"\n\n[dependencies]\ncomponent = { path = \"component\" }\n");
+    root.write("component/Kaixa.toml", "[package]\nname = \"component\"\nversion = \"1.0.0\"\nresolver = \"cmake\"\n");
 
     const auto initial = resolve_locked_workspace(root, kaixa::LockMode::update);
     context.check(initial.has_value(), "dependency is initially locked");
@@ -242,7 +304,7 @@ KAIXA_TEST(resolution_lock_prunes_packages_removed_from_a_context) {
     const auto lock = kaixa::read_resolution_lock(root.path() / "Kaixa.lock");
     context.check(lock.has_value() && lock->has_value(), "updated lock parses");
     if (lock && *lock)
-        context.check((**lock).find("engine") == nullptr, "unreferenced package is pruned from this context");
+        context.check((**lock).find("component") == nullptr, "unreferenced package is pruned from this context");
 }
 
 KAIXA_TEST(locked_mode_requires_an_existing_lockfile) {

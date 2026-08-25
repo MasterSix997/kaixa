@@ -326,6 +326,12 @@ namespace kaixa {
 
             result.public_definitions = std::move(*public_definitions);
 
+            auto system_libraries = string_array(table, "system-libraries");
+            if (!system_libraries)
+                return std::unexpected(system_libraries.error());
+
+            result.system_libraries = std::move(*system_libraries);
+
             auto dependency_sources = string_array(table, "dependency-sources");
             if (!dependency_sources)
                 return std::unexpected(dependency_sources.error());

@@ -803,6 +803,14 @@ namespace kaixa::plugin::cmake {
             BuildPlan& plan;
         };
 
+        bool shares_source_directory(const Graph& graph, const PackageNode& package) {
+            return std::ranges::count_if(graph.nodes(), [&](const PackageNode& candidate) {
+                return candidate.kind == PackageKind::managed
+                    && candidate.resolver == package.resolver
+                    && candidate.directory == package.directory;
+            }) > 1;
+        }
+
         Result<PreparedProject> prepare_project(const PackageNode& package, ProjectPreparationContext& context) {
             const ConfiguredPackageInstance* instance = find_configured_package_instance(
                 context.instances,
@@ -827,7 +835,7 @@ namespace kaixa::plugin::cmake {
             if (!options)
                 return std::unexpected(options.error());
 
-            if (context.isolated && !options->targets.empty())
+            if ((context.isolated || shares_source_directory(context.graph, package)) && !options->targets.empty())
                 options->generation = GenerationMode::state;
 
             std::filesystem::path source = options->source;

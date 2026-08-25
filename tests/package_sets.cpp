@@ -38,8 +38,8 @@ KAIXA_TEST(dependencies_normalize_versions_aliases_and_source_drivers) {
         "\n"
         "[dependencies]\n"
         "math = \"0.4\"\n"
-        "engine_physics = { version = \"^2.1\", alias = \"physics\", features = [\"debug\"] }\n"
-        "engine = { git = { url = \"https://example.invalid/engine.git\", tag = \"v0.4.0\" } }\n",
+        "component_physics = { version = \"^2.1\", alias = \"physics\", features = [\"debug\"] }\n"
+        "component = { git = { url = \"https://example.invalid/component.git\", tag = \"v0.4.0\" } }\n",
         "dependencies.toml"
     );
 
@@ -253,13 +253,13 @@ KAIXA_TEST(package_index_exposes_nested_candidates_without_loading_the_graph) {
     root.write(
         "Kaixa.toml",
         "[package-set]\n"
-        "members = [\"engine\"]\n"
-        "default = [\"engine\"]\n"
+        "members = [\"component\"]\n"
+        "default = [\"component\"]\n"
     );
     root.write(
-        "engine/Kaixa.toml",
+        "component/Kaixa.toml",
         "[package]\n"
-        "name = \"engine\"\n"
+        "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "resolver = \"cmake\"\n"
         "\n"
@@ -270,7 +270,7 @@ KAIXA_TEST(package_index_exposes_nested_candidates_without_loading_the_graph) {
         "math = \"0.4\"\n"
     );
     root.write(
-        "engine/libraries/math/Kaixa.toml",
+        "component/libraries/math/Kaixa.toml",
         "[package]\n"
         "name = \"math\"\n"
         "version = \"0.4.1\"\n"
@@ -291,8 +291,8 @@ KAIXA_TEST(package_index_exposes_nested_candidates_without_loading_the_graph) {
     }
 
     context.check_equal(index->candidates().size(), std::size_t{2}, "nested candidates are observable");
-    const std::filesystem::path engine_manifest = std::filesystem::canonical(root.path() / "engine/Kaixa.toml");
-    const kaixa::LocalPackageCandidate* math = index->find_for(engine_manifest, "math");
+    const std::filesystem::path component_manifest = std::filesystem::canonical(root.path() / "component/Kaixa.toml");
+    const kaixa::LocalPackageCandidate* math = index->find_for(component_manifest, "math");
     context.check(math != nullptr, "nested package resolves within its own set");
     if (math)
         context.check_equal(math->version->text, std::string("0.4.1"), "candidate metadata is retained");

@@ -120,7 +120,7 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
     });
     context.check(project != plan->generated_files().end(), "application project is generated");
     if (project != plan->generated_files().end()) {
-        context.check_contains(project->content, "gtest_main", "GoogleTest main product is linked implicitly");
+        context.check_contains(project->content, "googletest", "GoogleTest default product is linked implicitly");
         context.check_contains(project->content, "gtest_discover_tests", "GoogleTest cases are registered with CTest");
         context.check_contains(project->content, "--benchmark_list_tests=true", "benchmark cases are discovered for CTest and IDEs");
         context.check_contains(project->content, "if(NOT EXISTS", "unbuilt discovery targets do not break the selected catalog");

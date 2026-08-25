@@ -57,7 +57,7 @@ namespace kaixa {
             TestAdapterInfo{"googletest",
                 TestAdapterPurpose::test,
                 "googletest",
-                "gtest_main",
+                "googletest",
                 {"--gtest_list_tests"},
                 "--gtest_filter=",
                 {},
@@ -67,7 +67,7 @@ namespace kaixa {
             TestAdapterInfo{"google-benchmark",
                 TestAdapterPurpose::benchmark,
                 "google_benchmark",
-                "benchmark::benchmark_main",
+                "google_benchmark",
                 {"--benchmark_list_tests=true"},
                 "--benchmark_filter=^",
                 "$"}

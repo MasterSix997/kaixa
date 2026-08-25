@@ -27,6 +27,7 @@ KAIXA_TEST(effective_products_apply_conditions_and_source_claim_order) {
         "sources = [\"*.cpp\"]\n"
         "headers = [\"*.hpp\"]\n"
         "public-headers = [\"public.hpp\"]\n"
+        "system-libraries = [\"system_support\"]\n"
         "\n"
         "[[lib.when]]\n"
         "if = { profile = [\"release\", \"relwithdebinfo\"] }\n"
@@ -68,6 +69,11 @@ KAIXA_TEST(effective_products_apply_conditions_and_source_claim_order) {
         std::string("public.hpp"),
         "public header is a distinct interface set"
     );
+    context.check_equal(
+        debug->products.front().system_libraries.front(),
+        std::string("system_support"),
+        "system library remains part of the resolver-independent product"
+    );
 
     const auto release = kaixa::realize_package(*graph, root, {"release", kaixa::host_target_os()});
     context.check(release.has_value(), "release product realizes");
@@ -85,6 +91,7 @@ KAIXA_TEST(effective_products_apply_conditions_and_source_claim_order) {
             if (project != plan->generated_files().end()) {
                 context
                     .check_contains(project->content, "RELEASE_BRANCH", "CMake consumes conditional definitions from the effective model");
+                context.check_contains(project->content, "system_support", "CMake links normalized system libraries");
             }
         }
     }
@@ -268,6 +275,69 @@ KAIXA_TEST(cmake_plans_each_selected_package_root) {
             "explicit target reaches only its package"
         );
     }
+}
+
+KAIXA_TEST(inline_packages_generate_distinct_cmake_projects) {
+    const kaixa::testing::TempDirectory workspace("inline-cmake-projects");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"logging\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "default = [\"logging\"]\n"
+        "\n"
+        "[dependencies]\n"
+        "nameof = \"1\"\n"
+        "\n"
+        "[lib]\n"
+        "sources = [\"logging.cpp\"]\n"
+        "\n"
+        "[members.nameof]\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[members.nameof.lib]\n"
+        "type = \"interface\"\n"
+        "public-include = [\"include\"]\n"
+    );
+    workspace.write("logging.cpp", "int logging_value() { return 42; }\n");
+    workspace.write("include/nameof.hpp", "#pragma once\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "inline CMake packages load");
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "inline CMake packages plan");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto projects = std::ranges::count_if(plan->generated_files(), [](const kaixa::GeneratedFile& generated) {
+        return generated.path.filename() == "CMakeLists.txt";
+    });
+    context.check_equal(projects, std::ptrdiff_t{2}, "each inline package receives a generated project");
+    context.check(
+        std::ranges::none_of(
+            plan->generated_files(),
+            [&](const kaixa::GeneratedFile& generated) { return generated.path == workspace.path() / "CMakeLists.txt"; }
+        ),
+        "shared source directories are not overwritten"
+    );
+
+    const auto built = kaixa::execute(*plan);
+    context.check(built.has_value(), "inline CMake projects build together");
+    if (!built)
+        context.fail(kaixa::format_diagnostic(built.error()));
 }
 
 KAIXA_TEST(adopted_cmake_project_exposes_products_and_run_targets) {

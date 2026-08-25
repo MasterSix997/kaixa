@@ -25,7 +25,7 @@ Node
 
 1. **Base commands with hook:** `build`, `run`, `test`, `example`, `create`/`new`, `clean`.
    Meaning referring to each resolve, they attach via hooks (pre/pos).
-2. **Namespaced commands:** `target:commands` (e.g., `cmake:generate`, `engine:bake_shaders`)
+2. **Namespaced commands:** `target:commands` (e.g., `cmake:generate`, `component:bake_shaders`)
 
 ## Reference manifests
 
@@ -70,7 +70,7 @@ before = "cmake:build"
 ### Package set
 ```toml
 [package-set]
-name = "engine"
+name = "component"
 members = ["core", "render", "physics"]
 development-members = ["dev/reflection_prepass"]
 ```

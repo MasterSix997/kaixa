@@ -33,7 +33,7 @@ KAIXA_TEST(command_line_parses_package_lifecycle_commands) {
     constexpr std::array search_arguments = {std::string_view("search"),
         std::string_view("physics"),
         std::string_view("--tag"),
-        std::string_view("engine")};
+        std::string_view("component")};
 
     const auto search = kaixa::cli::parse_command_line(search_arguments);
     context.check(search.has_value() && std::holds_alternative<kaixa::cli::SearchCommand>(*search), "search command parses");

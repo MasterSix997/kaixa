@@ -180,7 +180,9 @@ namespace kaixa::workspace_detail {
             return LocalDependencyRoute{*local};
         }
 
-        const LockedPackage* locked = context.lock ? context.lock->find(dependency.request.package) : nullptr;
+        const bool unlocked = context.unlock_all
+            || std::ranges::find(context.unlocked_packages, dependency.request.package) != context.unlocked_packages.end();
+        const LockedPackage* locked = context.lock && !unlocked ? context.lock->find(dependency.request.package) : nullptr;
         if (locked && locked->provider) {
             PackageProvider* provider = find_provider(context.extensions, *locked->provider);
             if (provider)
