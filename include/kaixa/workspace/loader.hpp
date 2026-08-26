@@ -47,6 +47,7 @@ namespace kaixa {
         bool write_lock = true;
         bool refresh_sources = true;
         std::function<void(std::string_view)> source_progress;
+        bool load_model = true;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

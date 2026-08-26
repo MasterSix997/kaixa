@@ -114,6 +114,11 @@ namespace kaixa::cli {
                     return fail(workspace.error());
 
                 if (command.verbose) {
+                    auto manifest_tree = validate_manifest_tree(workspace->environment.workspace);
+                    if (!manifest_tree)
+                        return fail(manifest_tree.error());
+
+                    workspace->manifest_tree = *manifest_tree;
                     std::cout
                         << "manifest tree: "
                         << workspace->manifest_tree.documents

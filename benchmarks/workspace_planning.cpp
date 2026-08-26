@@ -103,10 +103,12 @@ int main() {
     constexpr std::size_t files_per_package = 8;
     constexpr std::size_t iterations = 9;
 #ifdef NDEBUG
-    constexpr double resolution_budget_ms = 500.0;
+    constexpr double resolution_budget_ms = 200.0;
+    constexpr double model_budget_ms = 150.0;
     constexpr double plan_budget_ms = 150.0;
 #else
-    constexpr double resolution_budget_ms = 1'500.0;
+    constexpr double resolution_budget_ms = 750.0;
+    constexpr double model_budget_ms = 750.0;
     constexpr double plan_budget_ms = 750.0;
 #endif
 
@@ -121,12 +123,21 @@ int main() {
     resolution_options.extensions = &registry;
     resolution_options.write_lock = false;
     resolution_options.refresh_sources = false;
+    resolution_options.load_model = false;
 
     const auto resolution_started = Clock::now();
     auto resolution = kaixa::resolve_workspace(workspace.root, resolution_options);
     const double resolution_ms = milliseconds(Clock::now() - resolution_started);
     if (!resolution) {
         std::cerr << kaixa::format_diagnostic(resolution.error()) << '\n';
+        return 1;
+    }
+
+    const auto model_started = Clock::now();
+    auto model = kaixa::load_manifest_tree(workspace.root);
+    const double model_ms = milliseconds(Clock::now() - model_started);
+    if (!model) {
+        std::cerr << kaixa::format_diagnostic(model.error()) << '\n';
         return 1;
     }
 
@@ -148,14 +159,20 @@ int main() {
         generated_files = plan->generated_files().size();
     }
 
+    const double first_plan_ms = samples.front();
     std::ranges::sort(samples);
     const double median_ms = samples[samples.size() / 2];
     const double maximum_ms = samples.back();
     std::cout << package_count << " packages resolved in " << resolution_ms << " ms\n";
-    std::cout << iterations << " plans: median " << median_ms << " ms, maximum " << maximum_ms << " ms\n";
+    std::cout << model->summary.documents << " manifest documents loaded in " << model_ms << " ms\n";
+    std::cout << iterations << " plans: first " << first_plan_ms << " ms, median " << median_ms << " ms, maximum " << maximum_ms << " ms\n";
     std::cout << actions << " actions, " << generated_files << " generated files\n";
     if (resolution_ms > resolution_budget_ms) {
         std::cerr << "workspace resolution exceeded " << resolution_budget_ms << " ms budget\n";
+        return 1;
+    }
+    if (model_ms > model_budget_ms) {
+        std::cerr << "manifest model loading exceeded " << model_budget_ms << " ms budget\n";
         return 1;
     }
     if (median_ms > plan_budget_ms) {

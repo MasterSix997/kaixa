@@ -31,7 +31,8 @@ namespace kaixa {
                 , m_unlock_all(options.unlock_all)
                 , m_write_lock(options.write_lock)
                 , m_refresh_sources(options.refresh_sources)
-                , m_source_progress(options.source_progress) {}
+                , m_source_progress(options.source_progress)
+                , m_load_model(options.load_model) {}
 
             Result<PackageResolution> load(
                 const std::filesystem::path& manifest_path,
@@ -40,6 +41,8 @@ namespace kaixa {
                 auto workspace = open_workspace(manifest_path);
                 if (!workspace)
                     return std::unexpected(workspace.error());
+
+                m_model = &workspace->tree;
 
                 auto lock = read_lockfile();
                 if (!lock)
@@ -115,11 +118,17 @@ namespace kaixa {
                 if (!document)
                     return std::unexpected(document.error());
 
-                auto tree = load_manifest_tree(selected.parent_path());
-                if (!tree)
-                    return std::unexpected(tree.error());
+                ManifestTree tree;
+                if (m_load_model) {
+                    auto loaded_tree = load_manifest_tree(selected.parent_path());
+                    if (!loaded_tree)
+                        return std::unexpected(loaded_tree.error());
 
-                auto packages = PackageIndex::discover(selected, *document);
+                    tree = std::move(*loaded_tree);
+                }
+
+                auto packages = m_load_model ? PackageIndex::discover(selected, *document, tree.documents)
+                                             : PackageIndex::discover(selected, *document);
                 if (!packages)
                     return std::unexpected(packages.error());
 
@@ -129,7 +138,7 @@ namespace kaixa {
                 if (m_lockfile.empty())
                     m_lockfile = m_context_directory / "Kaixa.lock";
 
-                return OpenedWorkspace{selected, std::move(*document), std::move(*tree)};
+                return OpenedWorkspace{selected, std::move(*document), std::move(tree)};
             }
 
             Result<void> read_lockfile() {
@@ -361,7 +370,23 @@ namespace kaixa {
                 if (existing != m_graph.nodes().end())
                     return existing->id;
 
-                auto prepared = workspace_detail::prepare_managed_package(m_packages, directory, expected_name, declaration);
+                const std::filesystem::path package_manifest = directory / "Kaixa.toml";
+                const ManifestDocument* parsed_document = nullptr;
+                if (m_model) {
+                    const auto document = std::ranges::find(m_model->documents, package_manifest, &ManifestDocument::source);
+                    if (document != m_model->documents.end())
+                        parsed_document = &*document;
+                }
+                if (!parsed_document)
+                    parsed_document = m_packages.document(package_manifest);
+
+                auto prepared = workspace_detail::prepare_managed_package(
+                    m_packages,
+                    directory,
+                    expected_name,
+                    declaration,
+                    parsed_document
+                );
                 if (!prepared)
                     return std::unexpected(prepared.error());
 
@@ -1079,6 +1104,7 @@ namespace kaixa {
             Graph m_graph;
             PackageIndex m_packages;
             ExtensionRegistry* m_extensions = nullptr;
+            const ManifestTree* m_model = nullptr;
             std::filesystem::path m_source_cache;
             std::span<const ProviderLayer> m_provider_layers;
             const Value* m_feature_settings = nullptr;
@@ -1094,6 +1120,7 @@ namespace kaixa {
             bool m_write_lock = true;
             bool m_refresh_sources = true;
             std::function<void(std::string_view)> m_source_progress;
+            bool m_load_model = true;
         };
     }
 

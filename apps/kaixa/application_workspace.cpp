@@ -154,22 +154,20 @@ namespace kaixa::cli::detail {
         const ResolverBuildConfiguration* features = configuration->find("features");
 
         ExtensionRegistry registry = plugin::default_registry();
-        auto resolved = resolve_workspace(
-            options.path,
-            ResolutionOptions{options.packages,
-                &registry,
-                {},
-                provider_layers,
-                features && features->settings ? &*features->settings : nullptr,
-                PolicyContext{configuration->profile, host_target_os()},
-                options.lock_mode,
-                {},
-                unlocked_packages,
-                unlock_all,
-                write_lock,
-                refresh_sources,
-                print_source_progress}
-        );
+        ResolutionOptions resolution_options;
+        resolution_options.packages = options.packages;
+        resolution_options.extensions = &registry;
+        resolution_options.provider_layers = provider_layers;
+        resolution_options.feature_settings = features && features->settings ? &*features->settings : nullptr;
+        resolution_options.policy_context = {configuration->profile, host_target_os()};
+        resolution_options.lock_mode = options.lock_mode;
+        resolution_options.unlocked_packages = unlocked_packages;
+        resolution_options.unlock_all = unlock_all;
+        resolution_options.write_lock = write_lock;
+        resolution_options.refresh_sources = refresh_sources;
+        resolution_options.source_progress = print_source_progress;
+        resolution_options.load_model = false;
+        auto resolved = resolve_workspace(options.path, resolution_options);
         if (!resolved)
             return std::unexpected(resolved.error());
 

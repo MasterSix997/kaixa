@@ -51,9 +51,22 @@ namespace kaixa {
             result.erase(std::ranges::unique(result).begin(), result.end());
             return result;
         }
+
+        const ManifestDocument* find_document(const std::span<const ManifestDocument> documents, const std::filesystem::path& manifest) {
+            const auto document = std::ranges::find(documents, manifest, &ManifestDocument::source);
+            return document == documents.end() ? nullptr : &*document;
+        }
     }
 
     Result<PackageIndex> PackageIndex::discover(const std::filesystem::path& selected_manifest, const ManifestDocument& selected_document) {
+        return discover(selected_manifest, selected_document, {});
+    }
+
+    Result<PackageIndex> PackageIndex::discover(
+        const std::filesystem::path& selected_manifest,
+        const ManifestDocument& selected_document,
+        const std::span<const ManifestDocument> parsed_documents
+    ) {
         PackageIndex result;
         std::error_code canonical_failure;
         const std::filesystem::path selected = std::filesystem::canonical(selected_manifest, canonical_failure);
@@ -62,6 +75,8 @@ namespace kaixa {
                 error("cannot canonicalize manifest `" + selected_manifest.string() + "`: " + canonical_failure.message())
             );
         }
+        if (!find_document(parsed_documents, selected))
+            result.m_documents.emplace(selected, selected_document);
 
         std::vector<std::filesystem::path> containers;
         std::filesystem::path subject = selected;
@@ -79,15 +94,25 @@ namespace kaixa {
                     return std::unexpected(error("cannot canonicalize manifest `" + candidate.string() + "`: " + failure.message()));
                 }
 
-                auto raw_document = parse_file(canonical);
-                if (!raw_document)
-                    return std::unexpected(raw_document.error());
+                const ManifestDocument* document = find_document(parsed_documents, canonical);
+                if (!document)
+                    document = result.document(canonical);
 
-                if (raw_document->find("package-set")) {
-                    auto document = parse_manifest_document_file(canonical);
-                    if (!document)
-                        return std::unexpected(document.error());
+                if (!document) {
+                    auto raw_document = parse_file(canonical);
+                    if (!raw_document)
+                        return std::unexpected(raw_document.error());
 
+                    if (raw_document->find("package-set")) {
+                        auto parsed = result.find_or_parse_document(canonical, parsed_documents);
+                        if (!parsed)
+                            return std::unexpected(parsed.error());
+
+                        document = *parsed;
+                    }
+                }
+
+                if (document && document->package_set) {
                     auto members = expand_members(*document->package_set, canonical.parent_path());
                     if (!members)
                         return std::unexpected(members.error());
@@ -112,16 +137,39 @@ namespace kaixa {
         result.m_context_manifests.push_back(selected);
 
         if (!containers.empty()) {
-            auto indexed = result.index_scope(containers.back(), std::nullopt);
+            auto indexed = result.index_scope(containers.back(), std::nullopt, parsed_documents);
             if (!indexed)
                 return std::unexpected(indexed.error());
 
         } else if (selected_document.package_set) {
-            auto indexed = result.index_scope(selected, std::nullopt);
+            auto indexed = result.index_scope(selected, std::nullopt, parsed_documents);
             if (!indexed)
                 return std::unexpected(indexed.error());
         }
         return result;
+    }
+
+    const ManifestDocument* PackageIndex::document(const std::filesystem::path& manifest) const {
+        const auto document = m_documents.find(manifest);
+        return document == m_documents.end() ? nullptr : &document->second;
+    }
+
+    Result<const ManifestDocument*> PackageIndex::find_or_parse_document(
+        const std::filesystem::path& manifest,
+        const std::span<const ManifestDocument> parsed_documents
+    ) {
+        if (const ManifestDocument* parsed = find_document(parsed_documents, manifest))
+            return parsed;
+
+        if (const ManifestDocument* parsed = document(manifest))
+            return parsed;
+
+        auto parsed = parse_manifest_document_file(manifest);
+        if (!parsed)
+            return std::unexpected(parsed.error());
+
+        const auto stored = m_documents.emplace(manifest, std::move(*parsed)).first;
+        return &stored->second;
     }
 
     Result<void> PackageIndex::include(const std::filesystem::path& package_set_manifest) {
@@ -174,7 +222,11 @@ namespace kaixa {
         return {};
     }
 
-    Result<std::size_t> PackageIndex::index_scope(const std::filesystem::path& manifest_path, const std::optional<std::size_t> parent) {
+    Result<std::size_t> PackageIndex::index_scope(
+        const std::filesystem::path& manifest_path,
+        const std::optional<std::size_t> parent,
+        const std::span<const ManifestDocument> parsed_documents
+    ) {
         if (m_indexing.contains(manifest_path)) {
             return std::unexpected(error("package set inclusion cycle reaches `" + manifest_path.string() + "`"));
         }
@@ -185,9 +237,11 @@ namespace kaixa {
             return existing->second;
         }
 
-        auto document = parse_manifest_document_file(manifest_path);
-        if (!document)
-            return std::unexpected(document.error());
+        auto document_result = find_or_parse_document(manifest_path, parsed_documents);
+        if (!document_result)
+            return std::unexpected(document_result.error());
+
+        const ManifestDocument* document = *document_result;
 
         if (!document->package_set) {
             return std::unexpected(error("manifest `" + manifest_path.string() + "` does not declare a package set"));
@@ -222,12 +276,14 @@ namespace kaixa {
                 return std::unexpected(error_at(document->package_set->location, "package set cannot include its own manifest"));
             }
 
-            auto child = parse_manifest_document_file(member);
-            if (!child)
-                return std::unexpected(child.error());
+            auto child_result = find_or_parse_document(member, parsed_documents);
+            if (!child_result)
+                return std::unexpected(child_result.error());
+
+            const ManifestDocument* child = *child_result;
 
             if (child->package_set) {
-                auto child_scope = index_scope(member, id);
+                auto child_scope = index_scope(member, id, parsed_documents);
                 if (!child_scope)
                     return std::unexpected(child_scope.error());
 

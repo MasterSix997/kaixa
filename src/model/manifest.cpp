@@ -1633,34 +1633,80 @@ namespace kaixa {
         return result;
     }
 
+    namespace {
+        Result<ManifestDocument> complete_manifest_document(const Value& document, const std::filesystem::path& path) {
+            auto manifest = parse_manifest_document(document);
+            if (!manifest)
+                return std::unexpected(manifest.error());
+
+            manifest->source = path;
+            if (manifest->package) {
+                manifest->package->source = path;
+                for (PackageTarget& target: manifest->package->targets)
+                    target.source = path;
+            }
+            for (Manifest& member: manifest->inline_members)
+                member.source = path;
+
+            std::vector<std::filesystem::path> imports = manifest->imports;
+            if (manifest->package_set && manifest->package_set->provider_config)
+                imports.push_back(*manifest->package_set->provider_config);
+
+            std::set<std::filesystem::path> loading;
+            for (const std::filesystem::path& import: imports) {
+                auto appended = append_document_fragment(*manifest, path.parent_path() / import, loading);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+            return manifest;
+        }
+
+        Result<std::vector<PackageTarget>> parse_package_targets_document(
+            const Value& document,
+            const std::filesystem::path& path,
+            const PackageTargetKind kind,
+            const std::string_view resolver
+        ) {
+            auto root_result = TableReader::bind(document);
+            if (!root_result)
+                return std::unexpected(root_result.error());
+
+            TableReader root = std::move(*root_result);
+
+            std::vector<PackageTarget> targets;
+            auto parsed = parse_package_targets(root, resolver, targets, kind, true);
+            if (!parsed)
+                return std::unexpected(parsed.error());
+
+            if (targets.empty()) {
+                return std::unexpected(error_at(document.location(), "referenced target manifest declares no targets"));
+            }
+
+            auto commands = read_task_declarations(root);
+            if (!commands)
+                return std::unexpected(commands.error());
+
+            auto finished = root.finish();
+            if (!finished)
+                return std::unexpected(finished.error());
+
+            for (PackageTarget& target: targets) {
+                target.source = path;
+                target.commands = *commands;
+            }
+
+            return targets;
+        }
+    }
+
     Result<ManifestDocument> parse_manifest_document_file(const std::filesystem::path& path) {
         auto document = parse_file(path);
         if (!document)
             return std::unexpected(document.error());
 
-        auto manifest = parse_manifest_document(*document);
+        auto manifest = complete_manifest_document(*document, path);
         if (!manifest)
             return std::unexpected(manifest.error());
-
-        manifest->source = path;
-        if (manifest->package) {
-            manifest->package->source = path;
-            for (PackageTarget& target: manifest->package->targets)
-                target.source = path;
-        }
-        for (Manifest& member: manifest->inline_members)
-            member.source = path;
-
-        std::vector<std::filesystem::path> imports = manifest->imports;
-        if (manifest->package_set && manifest->package_set->provider_config)
-            imports.push_back(*manifest->package_set->provider_config);
-
-        std::set<std::filesystem::path> loading;
-        for (const std::filesystem::path& import: imports) {
-            auto appended = append_document_fragment(*manifest, path.parent_path() / import, loading);
-            if (!appended)
-                return std::unexpected(appended.error());
-        }
         return manifest;
     }
 
@@ -1725,35 +1771,7 @@ namespace kaixa {
         if (!document)
             return std::unexpected(document.error());
 
-        auto root_result = TableReader::bind(*document);
-        if (!root_result)
-            return std::unexpected(root_result.error());
-
-        TableReader root = std::move(*root_result);
-
-        std::vector<PackageTarget> targets;
-        auto parsed = parse_package_targets(root, resolver, targets, kind, true);
-        if (!parsed)
-            return std::unexpected(parsed.error());
-
-        if (targets.empty()) {
-            return std::unexpected(error_at(document->location(), "referenced target manifest declares no targets"));
-        }
-
-        auto commands = read_task_declarations(root);
-        if (!commands)
-            return std::unexpected(commands.error());
-
-        auto finished = root.finish();
-        if (!finished)
-            return std::unexpected(finished.error());
-
-        for (PackageTarget& target: targets) {
-            target.source = path;
-            target.commands = *commands;
-        }
-
-        return targets;
+        return parse_package_targets_document(*document, path, kind, resolver);
     }
 
     Result<ManifestTree> load_manifest_tree(const std::filesystem::path& root) {
@@ -1789,7 +1807,7 @@ namespace kaixa {
 
             const bool is_package_document = value->find("package") || value->find("package-set");
             if (is_package_document) {
-                auto document = parse_manifest_document_file(path);
+                auto document = complete_manifest_document(*value, path);
                 if (!document)
                     return std::unexpected(document.error());
 
@@ -1816,7 +1834,7 @@ namespace kaixa {
                         error_at(value->location(), "Kaixa.toml declares neither a package, package set, nor package targets")
                     );
                 }
-                auto targets = parse_package_targets_file(path, *kind, {});
+                auto targets = parse_package_targets_document(*value, path, *kind, {});
                 if (!targets)
                     return std::unexpected(targets.error());
 

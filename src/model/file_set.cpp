@@ -1,6 +1,7 @@
 #include <kaixa/model/file_set.hpp>
 
 #include <algorithm>
+#include <optional>
 #include <regex>
 #include <system_error>
 
@@ -68,6 +69,17 @@ namespace kaixa {
             const std::filesystem::path relative = path.lexically_relative(relative_to);
             return relative.empty() ? path.lexically_normal() : relative.lexically_normal();
         }
+
+        std::optional<std::size_t> maximum_pattern_depth(const std::string_view pattern) {
+            if (pattern.find("**") != std::string_view::npos)
+                return std::nullopt;
+
+            return static_cast<std::size_t>(std::ranges::distance(std::filesystem::path(pattern)));
+        }
+
+        std::size_t path_depth(const std::filesystem::path& path) {
+            return static_cast<std::size_t>(std::ranges::distance(path));
+        }
     }
 
     bool is_glob_pattern(const std::string_view value) noexcept {
@@ -112,6 +124,7 @@ namespace kaixa {
             }
 
             const std::filesystem::path directory = search_root(root, pattern);
+            const std::optional<std::size_t> maximum_depth = maximum_pattern_depth(pattern);
             std::error_code failure;
             std::filesystem::recursive_directory_iterator iterator(directory, failure);
             const std::filesystem::recursive_directory_iterator end;
@@ -125,14 +138,17 @@ namespace kaixa {
             bool matched = false;
             while (iterator != end) {
                 const std::filesystem::directory_entry& entry = *iterator;
-                const bool regular = entry.is_regular_file(failure);
+                const std::filesystem::file_status status = entry.status(failure);
                 if (failure) {
                     return std::unexpected(
                         error_at(files.location, "cannot inspect `" + entry.path().string() + "`: " + failure.message())
                     );
                 }
 
-                if (regular) {
+                if (std::filesystem::is_directory(status)) {
+                    if (maximum_depth && path_depth(entry.path().lexically_relative(root)) >= *maximum_depth)
+                        iterator.disable_recursion_pending();
+                } else if (std::filesystem::is_regular_file(status)) {
                     const std::string relative = relative_pattern_path(entry.path(), root);
                     if (std::regex_match(relative, matcher)) {
                         matched = true;

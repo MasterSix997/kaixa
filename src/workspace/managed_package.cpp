@@ -10,17 +10,24 @@ namespace kaixa::workspace_detail {
         PackageIndex& packages,
         const std::filesystem::path& directory,
         const std::optional<std::string_view> expected_name,
-        const SourceLocation& declaration
+        const SourceLocation& declaration,
+        const ManifestDocument* parsed_document
     ) {
         const std::filesystem::path manifest_path = directory / "Kaixa.toml";
-        auto document = parse_manifest_document_file(manifest_path);
-        if (!document)
-            return std::unexpected(document.error());
+        std::optional<ManifestDocument> loaded_document;
+        if (!parsed_document) {
+            auto document = parse_manifest_document_file(manifest_path);
+            if (!document)
+                return std::unexpected(document.error());
 
-        if (!document->package && document->inline_members.empty())
+            loaded_document = std::move(*document);
+            parsed_document = &*loaded_document;
+        }
+
+        if (!parsed_document->package && parsed_document->inline_members.empty())
             return std::unexpected(error_at(declaration, "manifest `" + manifest_path.string() + "` does not declare a package"));
 
-        if (document->package_set) {
+        if (parsed_document->package_set) {
             auto included = packages.include(manifest_path);
             if (!included)
                 return std::unexpected(included.error());
@@ -28,16 +35,29 @@ namespace kaixa::workspace_detail {
 
         std::optional<Manifest> selected;
         if (expected_name) {
-            if (document->package && document->package->name == *expected_name)
-                selected = std::move(*document->package);
+            if (parsed_document->package && parsed_document->package->name == *expected_name) {
+                if (loaded_document)
+                    selected = std::move(*loaded_document->package);
+                else
+                    selected = *parsed_document->package;
+            }
 
             if (!selected) {
-                const auto member = std::ranges::find(document->inline_members, *expected_name, &Manifest::name);
-                if (member != document->inline_members.end())
-                    selected = std::move(*member);
+                if (loaded_document) {
+                    const auto member = std::ranges::find(loaded_document->inline_members, *expected_name, &Manifest::name);
+                    if (member != loaded_document->inline_members.end())
+                        selected = std::move(*member);
+                } else {
+                    const auto member = std::ranges::find(parsed_document->inline_members, *expected_name, &Manifest::name);
+                    if (member != parsed_document->inline_members.end())
+                        selected = *member;
+                }
             }
-        } else if (document->package) {
-            selected = std::move(*document->package);
+        } else if (parsed_document->package) {
+            if (loaded_document)
+                selected = std::move(*loaded_document->package);
+            else
+                selected = *parsed_document->package;
         }
 
         if (!selected) {

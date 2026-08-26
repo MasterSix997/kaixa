@@ -30,6 +30,38 @@ KAIXA_TEST(manifest_document_distinguishes_packages_and_package_sets) {
     context.check_equal(document->package_set->defaults.front(), std::string("editor"), "default package");
 }
 
+KAIXA_TEST(operational_resolution_loads_only_reachable_manifests) {
+    const TempDirectory root("reachable-manifests");
+    root.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"packages/*\"]\n"
+        "default = [\"app\"]\n"
+    );
+    root.write(
+        "packages/app/Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    root.write("unrelated/Kaixa.toml", "[unrelated]\nvalue = true\n");
+
+    kaixa::ResolutionOptions operational;
+    operational.write_lock = false;
+    operational.refresh_sources = false;
+    operational.load_model = false;
+    const auto resolved = kaixa::resolve_workspace(root.path(), operational);
+    context.check(resolved.has_value(), "operational resolution ignores unrelated manifest trees");
+    if (resolved)
+        context.check(resolved->model.documents.empty(), "operational resolution does not retain the authored model");
+
+    kaixa::ResolutionOptions authored;
+    authored.write_lock = false;
+    authored.refresh_sources = false;
+    const auto validated = kaixa::resolve_workspace(root.path(), authored);
+    context.check(!validated.has_value(), "authored model loading still validates every manifest document");
+}
+
 KAIXA_TEST(dependencies_normalize_versions_aliases_and_source_drivers) {
     const auto manifest = kaixa::parse_manifest_string(
         "[package]\n"

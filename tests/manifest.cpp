@@ -167,6 +167,15 @@ KAIXA_TEST(file_sets_expand_globs_and_keep_literal_generated_files) {
         std::ranges::find(*expanded, std::filesystem::path("generated.cpp")) != expanded->end(),
         "literal generated file is preserved"
     );
+
+    kaixa::FileSet direct_sources;
+    direct_sources.include = {"src/*.cpp"};
+    const auto direct = kaixa::expand_file_set(direct_sources, root.path(), root.path());
+    context.check(direct.has_value(), "non-recursive file set expands");
+    if (direct) {
+        context.check_equal(direct->size(), std::size_t{1}, "non-recursive glob stays at its declared depth");
+        context.check_equal(direct->front(), std::filesystem::path("src/first.cpp"), "non-recursive glob keeps the direct match");
+    }
 }
 
 KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {

@@ -18,6 +18,7 @@ namespace kaixa::workspace_detail {
         PackageIndex& packages,
         const std::filesystem::path& directory,
         std::optional<std::string_view> expected_name,
-        const SourceLocation& declaration
+        const SourceLocation& declaration,
+        const ManifestDocument* parsed_document = nullptr
     );
 }
