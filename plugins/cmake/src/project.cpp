@@ -276,6 +276,11 @@ namespace kaixa::plugin::cmake::detail {
             output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n\n";
         }
 
+        for (const std::string& package_name: options.find_packages)
+            output += "find_package(" + package_name + " REQUIRED)\n";
+        if (!options.find_packages.empty())
+            output += "\n";
+
         for (const TargetOptions& target: options.targets) {
             switch (target.type) {
             case TargetType::executable: output += "add_executable(" + target.name; break;

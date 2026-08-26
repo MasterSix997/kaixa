@@ -210,6 +210,58 @@ KAIXA_TEST(prebuilt_descriptors_reach_cmake_consumers) {
     context.check_contains(project->content, "toolkit.dll", "prebuilt runtime file is staged");
 }
 
+KAIXA_TEST(find_package_recipes_generate_discovery_and_link_the_declared_product) {
+    const kaixa::testing::TempDirectory workspace("find-package-consumer");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "sdk = \"*\"\n"
+        "\n"
+        "[bin]\n"
+        "sources = [\"source.cpp\"]\n"
+        "\n"
+        "[providers.system]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.system.package]]\n"
+        "name = \"sdk\"\n"
+        "consumer = { resolver = \"cmake\", mode = \"find-package\", package = \"FakeSDK\" }\n"
+        "products = { default = \"FakeSDK::Core\" }\n"
+    );
+    workspace.write("source.cpp", "int main() { return 0; }\n");
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(resolution.has_value(), "find-package recipe resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(resolution->graph, registry, environment);
+    context.check(plan.has_value(), "find-package consumer plans");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto project = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "CMakeLists.txt";
+    });
+    context.check(project != plan->generated_files().end(), "consumer project is generated");
+    if (project == plan->generated_files().end())
+        return;
+
+    context.check_contains(project->content, "find_package(FakeSDK REQUIRED)", "external package is discovered");
+    context.check_contains(project->content, "FakeSDK::Core", "declared external product is linked");
+}
+
 KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
     const kaixa::testing::TempDirectory workspace("adopted-provider-source");
     workspace.write(
@@ -221,7 +273,7 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         "resolver = \"cmake\"\n"
         "\n"
         "[dependencies]\n"
-        "component = \"1\"\n"
+        "component = { version = \"1\", features = [\"optional-api\"] }\n"
         "\n"
         "[bin]\n"
         "sources = [\"main.cpp\"]\n"
@@ -236,8 +288,16 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "source = { driver = \"path\", path = \"../vendor\" }\n"
-        "consumer = { resolver = \"cmake\", mode = \"add-subdirectory\", path = \"Build\", options = { COMPONENT_VALUE = 42 } }\n"
-        "products = { default = \"UpstreamComponent\" }\n"
+        "consumer = { resolver = \"cmake\", mode = \"add-subdirectory\", path = \"Build\", options = { COMPONENT_VALUE = 42 }, "
+        "feature-includes = { optional-api = [\"feature.cmake\"] }, "
+        "feature-patch-targets = { optional-api = { UpstreamComponent = { compile-features = [\"cxx_std_20\"] } }, "
+        "unused = { MissingTarget = { compile-features = [\"cxx_std_23\"] } } } }\n"
+        "features = [\"optional-api\", \"unused\"]\n"
+        "feature-dependencies = { optional-api = [\"helper\"] }\n"
+        "products = { default = \"UpstreamComponent\", optional-api = \"UpstreamFeature\" }\n"
+        "\n"
+        "[[providers.source.package]]\n"
+        "name = \"helper\"\n"
     );
     workspace.write("main.cpp", "int component_value();\nint main() { return component_value() == 42 ? 0 : 1; }\n");
     workspace.write("vendor/component.cpp", "int component_value() { return COMPONENT_VALUE; }\n");
@@ -247,6 +307,11 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         "project(UpstreamComponent LANGUAGES CXX)\n"
         "add_library(UpstreamComponent STATIC ../component.cpp)\n"
         "target_compile_definitions(UpstreamComponent PRIVATE COMPONENT_VALUE=${COMPONENT_VALUE})\n"
+    );
+    workspace.write(
+        "vendor/Build/feature.cmake",
+        "add_library(UpstreamFeature INTERFACE)\n"
+        "target_link_libraries(UpstreamFeature INTERFACE UpstreamComponent)\n"
     );
 
     kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
@@ -265,6 +330,11 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
     const kaixa::PackageNode& package = resolution->graph[*component];
     context.check(package.kind == kaixa::PackageKind::managed, "adopted source participates in source builds");
     context.check_equal(package.directory, workspace.path() / "vendor/Build", "consumer path selects the external project");
+    context.check(resolution->graph.find_by_name("helper").has_value(), "adopted source feature activates its package dependency");
+    context.check(
+        std::ranges::find(package.active_features, "optional-api") != package.active_features.end(),
+        "declared adopted source feature is activated"
+    );
 
     const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
     const auto plan = kaixa::plan_build(resolution->graph, registry, environment);
@@ -279,15 +349,17 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
     });
     context.check(root_project != plan->generated_files().end(), "consumer project is generated");
     if (root_project != plan->generated_files().end())
-        context.check_contains(root_project->content, "UpstreamComponent", "logical package links its declared default product");
+        context.check_contains(root_project->content, "UpstreamFeature", "requested feature selects its declared external product");
 
     const auto integration = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
         return file.path.filename() == "dependencies.cmake";
     });
     context.check(integration != plan->generated_files().end(), "source integration is generated");
     if (integration != plan->generated_files().end()) {
-        context.check_contains(integration->content, "set(COMPONENT_VALUE 42)", "consumer option is scoped before adoption");
+        context.check_contains(integration->content, "set(COMPONENT_VALUE 42 CACHE INTERNAL", "consumer option is fixed before adoption");
         context.check_contains(integration->content, "vendor/Build", "consumer subdirectory is adopted");
+        context.check_contains(integration->content, "target_compile_features(UpstreamComponent PUBLIC", "active feature patch is emitted");
+        context.check(integration->content.find("MissingTarget") == std::string::npos, "inactive feature patch is omitted");
     }
 
     const auto built = kaixa::execute(*plan);
@@ -410,6 +482,70 @@ KAIXA_TEST(provider_source_recipe_rejects_an_unsupported_consumer_mode) {
             "unsupported mode diagnostic is precise"
         );
     }
+}
+
+KAIXA_TEST(source_only_packages_supply_raw_dependency_sources_without_a_manifest) {
+    const kaixa::testing::TempDirectory workspace("source-only-package");
+    workspace.write(
+        "Kaixa.toml",
+        "imports = [\"config/providers.toml\"]\n"
+        "\n"
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "raw_component = \"*\"\n"
+        "\n"
+        "[bin]\n"
+        "sources = [\"main.cpp\"]\n"
+        "system-include = [\"${dependency:raw_component}\"]\n"
+        "dependency-sources = [\"raw_component:component.cpp\"]\n"
+    );
+    workspace.write(
+        "config/providers.toml",
+        "[providers.raw]\n"
+        "driver = \"package-map\"\n"
+        "default = true\n"
+        "\n"
+        "[[providers.raw.package]]\n"
+        "name = \"raw_component\"\n"
+        "kind = \"source-only\"\n"
+        "source = { driver = \"path\", path = \"../vendor\" }\n"
+    );
+    workspace.write("main.cpp", "#include <component.hpp>\nint main() { return component_value() == 42 ? 0 : 1; }\n");
+    workspace.write("vendor/component.hpp", "#pragma once\nint component_value();\n");
+    workspace.write("vendor/component.cpp", "int component_value() { return 42; }\n");
+
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(workspace.path(), kaixa::ResolutionOptions{{}, &registry});
+    context.check(resolution.has_value(), "source-only package resolves");
+    if (!resolution) {
+        context.fail(kaixa::format_diagnostic(resolution.error()));
+        return;
+    }
+
+    const auto raw = resolution->graph.find_by_name("raw_component");
+    context.check(raw.has_value(), "source-only package enters the graph");
+    if (!raw)
+        return;
+
+    context.check(resolution->graph[*raw].kind == kaixa::PackageKind::opaque, "raw source remains opaque");
+    context.check(!resolution->graph[*raw].manifest.has_value(), "raw source does not require a manifest");
+    context.check_equal(resolution->graph[*raw].directory, workspace.path() / "vendor", "provider-relative source is materialized");
+
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(resolution->graph, registry, environment);
+    context.check(plan.has_value(), "source-only consumer plans");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto built = kaixa::execute(*plan);
+    context.check(built.has_value(), "source-only consumer compiles raw dependency sources");
+    if (!built)
+        context.fail(kaixa::format_diagnostic(built.error()));
 }
 
 KAIXA_TEST(runtime_files_headers_and_exports_are_generated) {

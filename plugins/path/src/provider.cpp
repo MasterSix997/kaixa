@@ -233,6 +233,8 @@ namespace kaixa::plugin::path {
                         if (!consumer_result)
                             return std::unexpected(consumer_result.error());
 
+                        const bool has_consumer = consumer_result->has_value();
+
                         if (*consumer_result) {
                             TableReader consumer = std::move(**consumer_result);
                             auto selected = consumer.string("resolver");
@@ -244,6 +246,16 @@ namespace kaixa::plugin::path {
                             }
                             resolver = std::move(*selected);
                             consumer.take_all();
+                        }
+
+                        auto kind = package.optional_string("kind");
+                        if (!kind)
+                            return std::unexpected(kind.error());
+
+                        if (*kind && **kind != "source-only") {
+                            return std::unexpected(
+                                error_at(package.location_of("kind"), "unknown package-map package kind `" + **kind + "`")
+                            );
                         }
 
                         auto source = read_locator(package.take("source"), "package source");
@@ -258,6 +270,19 @@ namespace kaixa::plugin::path {
                             return std::unexpected(
                                 error_at((*entries)[index].location(), "package cannot declare both `source` and `artifact`")
                             );
+                        }
+
+                        if (*kind) {
+                            if (!*source) {
+                                return std::unexpected(
+                                    error_at(package.location_of("kind"), "source-only package requires a `source` locator")
+                                );
+                            }
+                            if (has_consumer) {
+                                return std::unexpected(
+                                    error_at(package.location_of("consumer"), "source-only package cannot declare a consumer")
+                                );
+                            }
                         }
 
                         package.take_all();

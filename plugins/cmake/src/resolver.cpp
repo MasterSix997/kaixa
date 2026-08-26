@@ -502,6 +502,276 @@ namespace kaixa::plugin::cmake {
             return *entries;
         }
 
+        Result<std::vector<std::filesystem::path>> consumer_feature_includes(const PackageNode& package) {
+            if (!package.descriptor)
+                return std::vector<std::filesystem::path>{};
+
+            const Value* consumer = package.descriptor->find("consumer");
+            const Value* declared = consumer ? consumer->find("feature-includes") : nullptr;
+            if (!declared)
+                return std::vector<std::filesystem::path>{};
+
+            const std::vector<TableEntry>* features = declared->as_table();
+            if (!features)
+                return std::unexpected(error_at(declared->location(), "CMake consumer `feature-includes` must be a table"));
+
+            std::vector<std::filesystem::path> result;
+            for (const std::string& active: package.active_features) {
+                const auto feature = std::ranges::find(*features, active, &TableEntry::key);
+                if (feature == features->end())
+                    continue;
+
+                const std::vector<Value>* paths = feature->value.as_array();
+                if (!paths) {
+                    return std::unexpected(error_at(feature->value.location(), "CMake consumer feature includes must be arrays of paths"));
+                }
+                for (const Value& value: *paths) {
+                    const std::string* text = value.as_string();
+                    if (!text || text->empty())
+                        return std::unexpected(error_at(value.location(), "CMake consumer feature include must be a non-empty path"));
+
+                    const std::filesystem::path relative = *text;
+                    if (relative.is_absolute() || relative.has_root_path() || std::ranges::find(relative, "..") != relative.end()) {
+                        return std::unexpected(
+                            error_at(value.location(), "CMake consumer feature include must stay inside the adopted source tree")
+                        );
+                    }
+
+                    const std::filesystem::path path = (package.directory / relative).lexically_normal();
+                    if (!std::filesystem::is_regular_file(path)) {
+                        return std::unexpected(
+                            error_at(value.location(), "CMake consumer feature include does not exist: " + path.string())
+                        );
+                    }
+                    result.push_back(path);
+                }
+            }
+            return result;
+        }
+
+        Result<std::vector<std::pair<std::string, std::string>>> consumer_aliases(const PackageNode& package) {
+            if (!package.descriptor)
+                return std::vector<std::pair<std::string, std::string>>{};
+
+            const Value* consumer = package.descriptor->find("consumer");
+            const Value* declared = consumer ? consumer->find("aliases") : nullptr;
+            if (!declared)
+                return std::vector<std::pair<std::string, std::string>>{};
+
+            const std::vector<TableEntry>* aliases = declared->as_table();
+            if (!aliases)
+                return std::unexpected(error_at(declared->location(), "CMake consumer `aliases` must be a table"));
+
+            std::vector<std::pair<std::string, std::string>> result;
+            result.reserve(aliases->size());
+            for (const TableEntry& alias: *aliases) {
+                const std::string* target = alias.value.as_string();
+                if (alias.key.empty() || !target || target->empty()) {
+                    return std::unexpected(error_at(alias.value.location(), "CMake consumer aliases require non-empty target names"));
+                }
+                result.emplace_back(alias.key, *target);
+            }
+            return result;
+        }
+
+        struct ConsumerTargetPatch {
+            std::string target;
+            std::vector<std::string> compile_options;
+            std::vector<std::string> definitions;
+            std::vector<std::string> compile_features;
+            std::vector<std::filesystem::path> system_includes;
+            bool exclude_from_all = false;
+        };
+
+        Result<std::vector<std::string>> target_patch_values(const Value* declared, const std::string_view description) {
+            if (!declared)
+                return std::vector<std::string>{};
+
+            const std::vector<Value>* values = declared->as_array();
+            if (!values)
+                return std::unexpected(error_at(declared->location(), std::string(description) + " must be an array"));
+
+            std::vector<std::string> result;
+            result.reserve(values->size());
+            for (const Value& value: *values) {
+                const std::string* text = value.as_string();
+                if (!text || text->empty())
+                    return std::unexpected(error_at(value.location(), std::string(description) + " must contain non-empty strings"));
+
+                result.push_back(*text);
+            }
+            return result;
+        }
+
+        Result<void> append_consumer_target_patches(
+            std::vector<ConsumerTargetPatch>& result,
+            const PackageNode& package,
+            const Value& declared
+        ) {
+            const std::vector<TableEntry>* targets = declared.as_table();
+            if (!targets)
+                return std::unexpected(error_at(declared.location(), "CMake consumer target patches must be a table"));
+
+            for (const TableEntry& target: *targets) {
+                if (target.key.empty() || !target.value.as_table())
+                    return std::unexpected(error_at(target.value.location(), "CMake consumer target patch must be a table"));
+
+                auto options = target_patch_values(target.value.find("compile-options"), "target patch compile options");
+                if (!options)
+                    return std::unexpected(options.error());
+                auto definitions = target_patch_values(target.value.find("defines"), "target patch definitions");
+                if (!definitions)
+                    return std::unexpected(definitions.error());
+                auto features = target_patch_values(target.value.find("compile-features"), "target patch compile features");
+                if (!features)
+                    return std::unexpected(features.error());
+
+                auto includes = target_patch_values(target.value.find("system-include"), "target patch system includes");
+                if (!includes)
+                    return std::unexpected(includes.error());
+                std::vector<std::filesystem::path> resolved_includes;
+                resolved_includes.reserve(includes->size());
+                for (const std::string& include: *includes) {
+                    const std::filesystem::path relative = include;
+                    if (relative.is_absolute() || relative.has_root_path() || std::ranges::find(relative, "..") != relative.end()) {
+                        return std::unexpected(
+                            error_at(target.value.location(), "target patch system include must stay inside the adopted source tree")
+                        );
+                    }
+                    resolved_includes.push_back((package.directory / relative).lexically_normal());
+                }
+
+                bool exclude_from_all = false;
+                if (const Value* excluded = target.value.find("exclude-from-all")) {
+                    const bool* enabled = excluded->as_boolean();
+                    if (!enabled)
+                        return std::unexpected(error_at(excluded->location(), "target patch `exclude-from-all` must be a boolean"));
+
+                    exclude_from_all = *enabled;
+                }
+
+                result.push_back(
+                    {target.key,
+                        std::move(*options),
+                        std::move(*definitions),
+                        std::move(*features),
+                        std::move(resolved_includes),
+                        exclude_from_all}
+                );
+            }
+            return {};
+        }
+
+        Result<std::vector<ConsumerTargetPatch>> consumer_target_patches(const PackageNode& package) {
+            if (!package.descriptor)
+                return std::vector<ConsumerTargetPatch>{};
+
+            const Value* consumer = package.descriptor->find("consumer");
+            if (!consumer)
+                return std::vector<ConsumerTargetPatch>{};
+
+            std::vector<ConsumerTargetPatch> result;
+            if (const Value* declared = consumer->find("patch-targets")) {
+                auto appended = append_consumer_target_patches(result, package, *declared);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+
+            const Value* conditional = consumer->find("feature-patch-targets");
+            if (!conditional)
+                return result;
+
+            const std::vector<TableEntry>* features = conditional->as_table();
+            if (!features) {
+                return std::unexpected(error_at(conditional->location(), "CMake consumer `feature-patch-targets` must be a table"));
+            }
+            for (const std::string& active: package.active_features) {
+                const auto feature = std::ranges::find(*features, active, &TableEntry::key);
+                if (feature == features->end())
+                    continue;
+
+                auto appended = append_consumer_target_patches(result, package, feature->value);
+                if (!appended)
+                    return std::unexpected(appended.error());
+            }
+            return result;
+        }
+
+        Result<std::vector<std::filesystem::path>> source_only_interface_paths(const PackageNode& package, const std::string_view key) {
+            const Value* declared = package.descriptor ? package.descriptor->find(key) : nullptr;
+            if (!declared)
+                return std::vector<std::filesystem::path>{};
+
+            const std::vector<Value>* values = declared->as_array();
+            if (!values)
+                return std::unexpected(error_at(declared->location(), "source-only interface paths must be arrays"));
+
+            std::vector<std::filesystem::path> result;
+            result.reserve(values->size());
+            for (const Value& value: *values) {
+                const std::string* text = value.as_string();
+                if (!text || text->empty())
+                    return std::unexpected(error_at(value.location(), "source-only interface path must be a non-empty string"));
+
+                const std::filesystem::path relative = *text;
+                if (relative.is_absolute() || relative.has_root_path() || std::ranges::find(relative, "..") != relative.end()) {
+                    return std::unexpected(error_at(value.location(), "source-only interface path must stay inside the package"));
+                }
+                result.push_back((package.directory / relative).lexically_normal());
+            }
+            return result;
+        }
+
+        Result<std::string> source_only_interface_integration(const Graph& graph) {
+            std::string result;
+            for (const PackageNode& package: graph.nodes()) {
+                if (package.kind != PackageKind::opaque || !package.descriptor)
+                    continue;
+
+                const Value* kind = package.descriptor->find("kind");
+                const std::string* kind_name = kind ? kind->as_string() : nullptr;
+                const Value* products = package.descriptor->find("products");
+                const Value* declared_product = products ? products->find("default") : nullptr;
+                const std::string* product = declared_product ? declared_product->as_string() : nullptr;
+                if (!kind_name || *kind_name != "source-only" || !product)
+                    continue;
+                if (product->empty() || !std::ranges::all_of(*product, [](const unsigned char character) {
+                        return std::isalnum(character)
+                            || character == '_'
+                            || character == '.'
+                            || character == ':'
+                            || character == '+'
+                            || character == '-';
+                    })) {
+                    return std::unexpected(error_at(declared_product->location(), "invalid source-only CMake interface product name"));
+                }
+
+                auto includes = source_only_interface_paths(package, "include");
+                if (!includes)
+                    return std::unexpected(includes.error());
+                auto system_includes = source_only_interface_paths(package, "system-include");
+                if (!system_includes)
+                    return std::unexpected(system_includes.error());
+
+                result += "  if(NOT TARGET " + *product + ")\n";
+                result += "    add_library(" + *product + " INTERFACE IMPORTED GLOBAL)\n";
+                if (!includes->empty()) {
+                    result += "    target_include_directories(" + *product + " INTERFACE";
+                    for (const std::filesystem::path& include: *includes)
+                        result += " " + cmake_quote(include);
+                    result += ")\n";
+                }
+                if (!system_includes->empty()) {
+                    result += "    target_include_directories(" + *product + " SYSTEM INTERFACE";
+                    for (const std::filesystem::path& include: *system_includes)
+                        result += " " + cmake_quote(include);
+                    result += ")\n";
+                }
+                result += "  endif()\n";
+            }
+            return result;
+        }
+
         std::string product_integration(const BuildContext& context) {
             const std::filesystem::path metadata = product_metadata_directory(context);
             const std::filesystem::path dependencies = context.directory / "_dependencies";
@@ -1193,6 +1463,10 @@ namespace kaixa::plugin::cmake {
                                           "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
                                           "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
                 integration += product_integration(*context);
+                auto source_only_interfaces = source_only_interface_integration(graph);
+                if (!source_only_interfaces)
+                    return std::unexpected(source_only_interfaces.error());
+                integration += std::move(*source_only_interfaces);
                 for (const PackageId id: source_packages) {
                     if (id == package.id)
                         continue;
@@ -1202,6 +1476,15 @@ namespace kaixa::plugin::cmake {
                     auto options = consumer_options(dependency);
                     if (!options)
                         return std::unexpected(options.error());
+                    auto feature_includes = consumer_feature_includes(dependency);
+                    if (!feature_includes)
+                        return std::unexpected(feature_includes.error());
+                    auto aliases = consumer_aliases(dependency);
+                    if (!aliases)
+                        return std::unexpected(aliases.error());
+                    auto target_patches = consumer_target_patches(dependency);
+                    if (!target_patches)
+                        return std::unexpected(target_patches.error());
 
                     const std::string indent = options->empty() ? "  " : "    ";
                     if (!options->empty()) {
@@ -1211,7 +1494,7 @@ namespace kaixa::plugin::cmake {
                             if (!value)
                                 return std::unexpected(value.error());
 
-                            integration += "    set(" + option.key + " " + *value + ")\n";
+                            integration += "    set(" + option.key + " " + *value + " CACHE INTERNAL \"Set by Kaixa\" FORCE)\n";
                         }
                     }
 
@@ -1224,6 +1507,40 @@ namespace kaixa::plugin::cmake {
                         integration += " EXCLUDE_FROM_ALL";
 
                     integration += ")\n";
+                    for (const auto& [alias, target]: *aliases) {
+                        integration += indent + "add_library(" + alias + " INTERFACE)\n";
+                        integration += indent + "target_link_libraries(" + alias + " INTERFACE " + target + ")\n";
+                    }
+                    for (const std::filesystem::path& include: *feature_includes)
+                        integration += indent + "include(" + cmake_quote(include) + ")\n";
+                    for (const ConsumerTargetPatch& patch: *target_patches) {
+                        if (!patch.compile_options.empty()) {
+                            integration += indent + "target_compile_options(" + patch.target + " PRIVATE";
+                            for (const std::string& option: patch.compile_options)
+                                integration += " " + cmake_quote(option);
+                            integration += ")\n";
+                        }
+                        if (!patch.definitions.empty()) {
+                            integration += indent + "target_compile_definitions(" + patch.target + " PRIVATE";
+                            for (const std::string& definition: patch.definitions)
+                                integration += " " + cmake_quote(definition);
+                            integration += ")\n";
+                        }
+                        if (!patch.compile_features.empty()) {
+                            integration += indent + "target_compile_features(" + patch.target + " PUBLIC";
+                            for (const std::string& feature: patch.compile_features)
+                                integration += " " + cmake_quote(feature);
+                            integration += ")\n";
+                        }
+                        if (!patch.system_includes.empty()) {
+                            integration += indent + "target_include_directories(" + patch.target + " SYSTEM PUBLIC";
+                            for (const std::filesystem::path& include: patch.system_includes)
+                                integration += " " + cmake_quote(include);
+                            integration += ")\n";
+                        }
+                        if (patch.exclude_from_all)
+                            integration += indent + "set_target_properties(" + patch.target + " PROPERTIES EXCLUDE_FROM_ALL TRUE)\n";
+                    }
                     if (!options->empty())
                         integration += "  endblock()\n";
                 }

@@ -96,6 +96,7 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<TargetOptions> targets;
         std::vector<TestOptions> tests;
         std::vector<DependencyOption> dependencies;
+        std::vector<std::string> find_packages;
         std::string policy_fingerprint;
     };
 

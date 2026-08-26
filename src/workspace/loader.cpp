@@ -511,6 +511,154 @@ namespace kaixa {
                 return directory.empty() ? fallback : directory;
             }
 
+            bool source_only_candidate(const PackageCandidate& candidate) {
+                if (!candidate.descriptor)
+                    return false;
+
+                const Value* kind = candidate.descriptor->find("kind");
+                const std::string* name = kind ? kind->as_string() : nullptr;
+                return name && *name == "source-only";
+            }
+
+            Result<std::vector<FeatureDefinition>> adopted_source_features(const PackageCandidate& candidate) {
+                if (!candidate.descriptor)
+                    return std::vector<FeatureDefinition>{};
+
+                const Value* declared = candidate.descriptor->find("features");
+                if (!declared)
+                    return std::vector<FeatureDefinition>{};
+
+                const std::vector<Value>* values = declared->as_array();
+                if (!values)
+                    return std::unexpected(error_at(declared->location(), "adopted source `features` must be an array"));
+
+                std::vector<FeatureDefinition> features;
+                features.reserve(values->size());
+                for (const Value& value: *values) {
+                    const std::string* name = value.as_string();
+                    if (!name)
+                        return std::unexpected(error_at(value.location(), "adopted source features must be strings"));
+                    if (!is_valid_identifier(*name))
+                        return std::unexpected(error_at(value.location(), "`" + *name + "` is not a valid feature name"));
+                    if (std::ranges::find(features, *name, &FeatureDefinition::name) != features.end())
+                        return std::unexpected(error_at(value.location(), "duplicate adopted source feature `" + *name + "`"));
+
+                    features.push_back(FeatureDefinition{.name = *name, .location = value.location()});
+                }
+                return features;
+            }
+
+            Result<std::vector<DependencyBinding>> adopted_source_feature_dependencies(
+                const PackageCandidate& candidate,
+                std::vector<FeatureDefinition>& features
+            ) {
+                if (!candidate.descriptor)
+                    return std::vector<DependencyBinding>{};
+
+                const Value* declared = candidate.descriptor->find("feature-dependencies");
+                if (!declared)
+                    return std::vector<DependencyBinding>{};
+
+                const std::vector<TableEntry>* entries = declared->as_table();
+                if (!entries)
+                    return std::unexpected(error_at(declared->location(), "adopted source `feature-dependencies` must be a table"));
+
+                std::vector<DependencyBinding> dependencies;
+                for (const TableEntry& entry: *entries) {
+                    const auto feature = std::ranges::find(features, entry.key, &FeatureDefinition::name);
+                    if (feature == features.end()) {
+                        return std::unexpected(
+                            error_at(entry.value.location(), "feature dependencies configure undeclared feature `" + entry.key + "`")
+                        );
+                    }
+
+                    const std::vector<Value>* names = entry.value.as_array();
+                    if (!names) {
+                        return std::unexpected(
+                            error_at(entry.value.location(), "adopted source feature dependencies must be arrays of package names")
+                        );
+                    }
+                    for (const Value& value: *names) {
+                        const std::string* name = value.as_string();
+                        if (!name || !is_valid_package_name(*name)) {
+                            return std::unexpected(
+                                error_at(value.location(), "adopted source feature dependency must be a valid package name")
+                            );
+                        }
+
+                        feature->dependencies.push_back(*name);
+                        if (std::ranges::find_if(
+                                dependencies,
+                                [&](const DependencyBinding& dependency) { return dependency.request.package == *name; }
+                            )
+                            != dependencies.end()) {
+                            continue;
+                        }
+
+                        DependencyBinding dependency;
+                        dependency.request.package = *name;
+                        dependency.request.optional = true;
+                        dependency.location = value.location();
+                        dependencies.push_back(std::move(dependency));
+                    }
+                }
+                return dependencies;
+            }
+
+            Result<PackageId> load_source_only_dependency(
+                const PackageProvider& provider,
+                const PackageCandidate& candidate,
+                const std::filesystem::path& requester,
+                const DependencyBinding& dependency
+            ) {
+                if (!candidate.source)
+                    return std::unexpected(error_at(dependency.location, "source-only package requires a source"));
+
+                const ProviderInfo info = provider.info();
+                if (const auto existing = m_graph.find_by_name(candidate.package)) {
+                    const std::optional<PackageSource>& resolved = m_graph[*existing].source;
+                    if (!resolved
+                        || resolved->provider != info.name
+                        || resolved->authority != candidate.authority
+                        || resolved->version != candidate.version) {
+                        return std::unexpected(error_at(
+                            dependency.location,
+                            "package `" + candidate.package + "` was already resolved to a different provider candidate"
+                        ));
+                    }
+                    return *existing;
+                }
+
+                auto materialized = workspace_detail::materialize_source(
+                    materialization_context(),
+                    *candidate.source,
+                    provider_locator_requester(*candidate.source, requester),
+                    dependency.request.package,
+                    dependency.location,
+                    workspace_detail::MaterializationKind::package_source
+                );
+                if (!materialized)
+                    return std::unexpected(materialized.error());
+
+                return m_graph.add(
+                    PackageNode{{},
+                        candidate.package,
+                        std::move(materialized->directory),
+                        PackageKind::opaque,
+                        {},
+                        std::nullopt,
+                        {},
+                        {},
+                        PackageSource{info.name,
+                            candidate.authority,
+                            candidate.version,
+                            candidate.source,
+                            std::move(materialized->identity),
+                            std::move(materialized->integrity)},
+                        candidate.descriptor}
+                );
+            }
+
             Result<std::filesystem::path> adopted_source_directory(
                 const PackageCandidate& candidate,
                 const std::filesystem::path& root,
@@ -592,6 +740,14 @@ namespace kaixa {
                 manifest.version = candidate.version;
                 manifest.source = *directory / "Kaixa.toml";
                 manifest.location = dependency.location;
+                auto features = adopted_source_features(candidate);
+                if (!features)
+                    return std::unexpected(features.error());
+                auto dependencies = adopted_source_feature_dependencies(candidate, *features);
+                if (!dependencies)
+                    return std::unexpected(dependencies.error());
+                manifest.features = std::move(*features);
+                manifest.dependencies = std::move(*dependencies);
 
                 return m_graph.add(
                     PackageNode{{},
@@ -706,6 +862,9 @@ namespace kaixa {
                     return std::unexpected(candidate.error());
 
                 const ProviderInfo info = provider.info();
+                if (source_only_candidate(*candidate))
+                    return load_source_only_dependency(provider, *candidate, requester, dependency);
+
                 if (candidate->source && candidate->resolver && candidate->descriptor && candidate->descriptor->find("consumer")) {
                     return load_adopted_source_dependency(provider, *candidate, requester, dependency);
                 }

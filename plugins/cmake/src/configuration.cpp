@@ -97,13 +97,36 @@ namespace kaixa::plugin::cmake::detail {
             return path.has_parent_path() || path.has_extension();
         }
 
-        Result<std::string> dependency_product_name(const PackageNode& package) {
+        Result<std::string> dependency_product_name(const PackageNode& package, const DependencyBinding* binding = nullptr) {
             if (!package.descriptor)
                 return package.name;
 
             const Value* products = package.descriptor->find("products");
             if (!products)
                 return package.name;
+
+            std::optional<std::string> selected;
+            if (binding) {
+                for (const std::string& feature: binding->request.features) {
+                    const Value* feature_product = products->find(feature);
+                    if (!feature_product)
+                        continue;
+
+                    const std::string* name = feature_product->as_string();
+                    if (!name || name->empty()) {
+                        return std::unexpected(error_at(feature_product->location(), "feature package product must be a non-empty string"));
+                    }
+                    if (selected && *selected != *name) {
+                        return std::unexpected(error_at(
+                            feature_product->location(),
+                            "dependency requests features that select different products for package `" + package.name + "`"
+                        ));
+                    }
+                    selected = *name;
+                }
+            }
+            if (selected)
+                return std::move(*selected);
 
             const Value* default_product = products->find("default");
             if (!default_product)
@@ -113,6 +136,32 @@ namespace kaixa::plugin::cmake::detail {
             if (!name || name->empty())
                 return std::unexpected(error_at(default_product->location(), "default package product must be a non-empty string"));
 
+            return *name;
+        }
+
+        Result<std::optional<std::string>> descriptor_find_package(const PackageNode& package) {
+            if (!package.descriptor)
+                return std::nullopt;
+
+            const Value* consumer = package.descriptor->find("consumer");
+            if (!consumer)
+                return std::nullopt;
+            if (!consumer->as_table())
+                return std::unexpected(wrong_kind(consumer->location(), "a consumer table", consumer->kind()));
+
+            const Value* mode = consumer->find("mode");
+            const std::string* mode_name = mode ? mode->as_string() : nullptr;
+            if (!mode || !mode_name || *mode_name != "find-package")
+                return std::nullopt;
+
+            const Value* declared = consumer->find("package");
+            const std::string* name = declared ? declared->as_string() : nullptr;
+            if (!name || name->empty()) {
+                return std::unexpected(error_at(
+                    declared ? declared->location() : consumer->location(),
+                    "find-package consumer requires a non-empty `package` string"
+                ));
+            }
             return *name;
         }
 
@@ -1172,9 +1221,32 @@ namespace kaixa::plugin::cmake::detail {
                     if (!applied)
                         return std::unexpected(applied.error());
 
+                    auto find_package = descriptor_find_package(target);
+                    if (!find_package)
+                        return std::unexpected(find_package.error());
+                    if (*find_package) {
+                        if (std::ranges::find(result.find_packages, **find_package) == result.find_packages.end())
+                            result.find_packages.push_back(**find_package);
+
+                        auto linked_product = dependency_product_name(
+                            target,
+                            binding != package.manifest->dependencies.end() ? &*binding : nullptr
+                        );
+                        if (!linked_product)
+                            return std::unexpected(linked_product.error());
+
+                        if (visibility == DependencyVisibility::public_dependency)
+                            product->public_link_libraries.push_back(std::move(*linked_product));
+                        else
+                            product->link_libraries.push_back(std::move(*linked_product));
+                    }
+
                     continue;
                 }
-                auto linked_product = dependency_product_name(target);
+                auto linked_product = dependency_product_name(
+                    target,
+                    binding != package.manifest->dependencies.end() ? &*binding : nullptr
+                );
                 if (!linked_product)
                     return std::unexpected(linked_product.error());
 
@@ -1249,7 +1321,15 @@ namespace kaixa::plugin::cmake::detail {
                 );
                 if (dependencies != context.package.target_dependencies.end()) {
                     for (const PackageId dependency: dependencies->packages) {
-                        auto linked_product = dependency_product_name(context.graph[dependency]);
+                        const PackageNode& dependency_package = context.graph[dependency];
+                        const auto binding = std::ranges::find_if(
+                            context.package.manifest->dependencies,
+                            [&](const DependencyBinding& candidate) { return candidate.request.package == dependency_package.name; }
+                        );
+                        auto linked_product = dependency_product_name(
+                            dependency_package,
+                            binding != context.package.manifest->dependencies.end() ? &*binding : nullptr
+                        );
                         if (!linked_product)
                             return std::unexpected(linked_product.error());
 
