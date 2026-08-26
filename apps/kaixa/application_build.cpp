@@ -234,21 +234,17 @@ namespace kaixa::cli::detail {
         return result;
     }
 
-    int build_and_run_target(
-        const Workspace& workspace,
+    int execute_and_run_target(
+        const BuildPlan& plan,
         RunTarget selected,
         const std::span<const std::string> arguments,
         const std::string_view operation
     ) {
-        auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, selected.name, selected.package);
-        if (!plan)
-            return fail(plan.error());
-
-        auto printed = print_actions(*plan);
+        auto printed = print_actions(plan);
         if (!printed)
             return fail(printed.error());
 
-        auto built = kaixa::execute(*plan);
+        auto built = kaixa::execute(plan);
         if (!built)
             return fail(built.error());
 
@@ -261,6 +257,19 @@ namespace kaixa::cli::detail {
             return fail(result.error());
 
         return result->exit_code;
+    }
+
+    int build_and_run_target(
+        const Workspace& workspace,
+        RunTarget selected,
+        const std::span<const std::string> arguments,
+        const std::string_view operation
+    ) {
+        auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, selected.name, selected.package);
+        if (!plan)
+            return fail(plan.error());
+
+        return execute_and_run_target(*plan, std::move(selected), arguments, operation);
     }
 
     Result<std::size_t> execute_task_preparation(
@@ -647,6 +656,10 @@ namespace kaixa::cli::detail {
         auto selected = select_run_target(*category, requested, package_name);
         if (!selected)
             return fail(selected.error());
+
+        if (!requested && purpose == ProductPurpose::primary) {
+            return execute_and_run_target(*synchronization, std::move(*selected), command.arguments, "running");
+        }
 
         return build_and_run_target(*workspace, std::move(*selected), command.arguments, "running");
     }

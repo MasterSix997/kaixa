@@ -9,6 +9,7 @@
 #include <kaixa/model/graph.hpp>
 
 #include <cstddef>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -60,11 +61,17 @@ namespace kaixa {
         bool generated_files = false;
     };
 
+    class ResolverSession {
+    public:
+        virtual ~ResolverSession() = default;
+    };
+
     class Resolver {
     public:
         virtual ~Resolver() = default;
 
         [[nodiscard]] virtual ResolverInfo info() const = 0;
+        [[nodiscard]] virtual std::unique_ptr<ResolverSession> start_session(const Graph& graph) const = 0;
         [[nodiscard]] virtual Result<void> plan(
             const Graph& graph,
             const ExtensionRegistry& registry,
@@ -72,7 +79,8 @@ namespace kaixa {
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
             const BuildRequest& request,
-            BuildPlan& plan
+            BuildPlan& plan,
+            ResolverSession& session
         ) const = 0;
 
         [[nodiscard]] virtual Result<void> plan_tests(
@@ -82,7 +90,8 @@ namespace kaixa {
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
             const TestRequest& request,
-            BuildPlan& plan
+            BuildPlan& plan,
+            ResolverSession& session
         ) const = 0;
 
         [[nodiscard]] virtual Result<std::vector<BuildProduct>> products(
@@ -90,7 +99,8 @@ namespace kaixa {
             const ExtensionRegistry& registry,
             const PackageNode& package,
             const BuildEnvironment& environment,
-            std::span<const ConfiguredPackageInstance> instances
+            std::span<const ConfiguredPackageInstance> instances,
+            ResolverSession& session
         ) const = 0;
 
         [[nodiscard]] virtual Result<void> plan_clean(
@@ -100,7 +110,8 @@ namespace kaixa {
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
             const CleanRequest& request,
-            CleanPlan& plan
+            CleanPlan& plan,
+            ResolverSession& session
         ) const = 0;
     };
 }

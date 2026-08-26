@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -24,6 +25,7 @@
 
 namespace kaixa::plugin::cmake {
     namespace {
+        using detail::ConfigurationCache;
         using detail::dependency_mode;
         using detail::DependencyMode;
         using detail::GenerationMode;
@@ -279,7 +281,8 @@ namespace kaixa::plugin::cmake {
             const Graph& graph,
             const ExtensionRegistry& registry,
             const PackageNode& package,
-            const ProductRealizationContext& realization
+            const ProductRealizationContext& realization,
+            ConfigurationCache& cache
         ) {
             for (const PackageNode& candidate: graph.nodes()) {
                 if (candidate.kind != PackageKind::managed || candidate.resolver != "cmake")
@@ -289,7 +292,7 @@ namespace kaixa::plugin::cmake {
                 if (dependency == candidate.dependencies.end())
                     continue;
 
-                auto options = read_options(graph, registry, candidate, realization);
+                auto options = read_options(graph, registry, candidate, realization, nullptr, {}, &cache);
                 if (!options)
                     return std::unexpected(options.error());
 
@@ -306,7 +309,8 @@ namespace kaixa::plugin::cmake {
             const bool include_associated,
             const ProductRealizationContext& realization,
             std::vector<bool>& visited,
-            std::vector<PackageId>& packages
+            std::vector<PackageId>& packages,
+            ConfigurationCache& cache
         ) {
             if (visited[id.index])
                 return {};
@@ -314,7 +318,7 @@ namespace kaixa::plugin::cmake {
             visited[id.index] = true;
 
             const PackageNode& package = graph[id];
-            auto options = read_options(graph, registry, package, realization);
+            auto options = read_options(graph, registry, package, realization, nullptr, {}, &cache);
             if (!options)
                 return std::unexpected(options.error());
 
@@ -326,7 +330,7 @@ namespace kaixa::plugin::cmake {
                 if (dependency_mode(*options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
-                auto collected = collect_source_dependencies(graph, registry, dependency, false, realization, visited, packages);
+                auto collected = collect_source_dependencies(graph, registry, dependency, false, realization, visited, packages, cache);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
@@ -343,7 +347,16 @@ namespace kaixa::plugin::cmake {
                         if (target.kind != PackageKind::managed || target.resolver != "cmake")
                             continue;
 
-                        auto collected = collect_source_dependencies(graph, registry, dependency, false, realization, visited, packages);
+                        auto collected = collect_source_dependencies(
+                            graph,
+                            registry,
+                            dependency,
+                            false,
+                            realization,
+                            visited,
+                            packages,
+                            cache
+                        );
                         if (!collected)
                             return std::unexpected(collected.error());
                     }
@@ -363,6 +376,7 @@ namespace kaixa::plugin::cmake {
             std::vector<bool>& visited;
             std::vector<bool>& added;
             std::vector<std::filesystem::path>& prefixes;
+            ConfigurationCache& cache;
         };
 
         Result<void> collect_package_prefixes(const PackageId id, PackagePrefixContext& context) {
@@ -376,7 +390,10 @@ namespace kaixa::plugin::cmake {
                 context.graph,
                 context.registry,
                 package,
-                {context.environment.configuration.profile, host_target_os()}
+                {context.environment.configuration.profile, host_target_os()},
+                nullptr,
+                {},
+                &context.cache
             );
             if (!options)
                 return std::unexpected(options.error());
@@ -995,7 +1012,8 @@ namespace kaixa::plugin::cmake {
             const PackageNode& package,
             const BuildEnvironment& environment,
             const ConfiguredPackageInstance& instance,
-            const std::string_view configured_context
+            const std::string_view configured_context,
+            ConfigurationCache& cache
         ) {
             auto project = read_options(
                 graph,
@@ -1003,7 +1021,8 @@ namespace kaixa::plugin::cmake {
                 package,
                 {environment.configuration.profile, host_target_os()},
                 &instance.policy,
-                configured_context
+                configured_context,
+                &cache
             );
             if (!project)
                 return std::unexpected(project.error());
@@ -1126,6 +1145,7 @@ namespace kaixa::plugin::cmake {
             std::string_view configured_context;
             bool isolated = false;
             BuildPlan& plan;
+            ConfigurationCache& cache;
         };
 
         bool shares_source_directory(const Graph& graph, const PackageNode& package) {
@@ -1155,7 +1175,8 @@ namespace kaixa::plugin::cmake {
                 package,
                 {context.environment.configuration.profile, host_target_os()},
                 &instance->policy,
-                context.configured_context
+                context.configured_context,
+                &context.cache
             );
             if (!options)
                 return std::unexpected(options.error());
@@ -1330,8 +1351,20 @@ namespace kaixa::plugin::cmake {
         }
 
         class ResolverImpl final : public Resolver {
+            class Session final : public ResolverSession {
+            public:
+                explicit Session(const std::size_t package_count)
+                    : configuration(package_count) {}
+
+                ConfigurationCache configuration;
+            };
+
         public:
             [[nodiscard]] ResolverInfo info() const override { return {"cmake", "generates, adopts and composes CMake projects"}; }
+
+            [[nodiscard]] std::unique_ptr<ResolverSession> start_session(const Graph& graph) const override {
+                return std::make_unique<Session>(graph.size());
+            }
 
             [[nodiscard]] Result<void> plan(
                 const Graph& graph,
@@ -1340,8 +1373,10 @@ namespace kaixa::plugin::cmake {
                 const BuildEnvironment& environment,
                 const std::span<const ConfiguredPackageInstance> instances,
                 const BuildRequest& request,
-                BuildPlan& plan
+                BuildPlan& plan,
+                ResolverSession& resolver_session
             ) const override {
+                ConfigurationCache& cache = static_cast<Session&>(resolver_session).configuration;
                 std::vector<ConfiguredRoute> routes;
                 if (graph.is_root(package.id)) {
                     auto configured = configured_routes(package, request, instances);
@@ -1363,7 +1398,7 @@ namespace kaixa::plugin::cmake {
                 }
 
                 for (const ConfiguredRoute& route: routes) {
-                    auto planned = plan_route(graph, registry, package, environment, instances, route, plan);
+                    auto planned = plan_route(graph, registry, package, environment, instances, route, plan, cache);
                     if (!planned)
                         return std::unexpected(planned.error());
                 }
@@ -1378,11 +1413,12 @@ namespace kaixa::plugin::cmake {
                 const BuildEnvironment& environment,
                 const std::span<const ConfiguredPackageInstance> instances,
                 const ConfiguredRoute& route,
-                BuildPlan& plan
+                BuildPlan& plan,
+                ConfigurationCache& cache
             ) const {
                 const BuildRequest& request = route.request;
                 const ProductRealizationContext realization{environment.configuration.profile, host_target_os()};
-                auto dependency_install = requires_install(graph, registry, package, realization);
+                auto dependency_install = requires_install(graph, registry, package, realization, cache);
                 if (!dependency_install)
                     return std::unexpected(dependency_install.error());
 
@@ -1391,7 +1427,7 @@ namespace kaixa::plugin::cmake {
                 if (!graph.is_root(package.id) && !install)
                     return {};
 
-                auto context = prepare_build_context(graph, registry, package, environment, *route.instance, route.context);
+                auto context = prepare_build_context(graph, registry, package, environment, *route.instance, route.context, cache);
                 if (!context)
                     return std::unexpected(context.error());
 
@@ -1413,7 +1449,8 @@ namespace kaixa::plugin::cmake {
                     false,
                     realization,
                     normal_source_visited,
-                    normal_source_packages
+                    normal_source_packages,
+                    cache
                 );
                 if (!normal_source_result)
                     return std::unexpected(normal_source_result.error());
@@ -1427,7 +1464,8 @@ namespace kaixa::plugin::cmake {
                     true,
                     realization,
                     source_visited,
-                    source_packages
+                    source_packages,
+                    cache
                 );
                 if (!source_result)
                     return std::unexpected(source_result.error());
@@ -1440,7 +1478,8 @@ namespace kaixa::plugin::cmake {
                     instances,
                     route.context,
                     route.context != package.name + ":default",
-                    plan};
+                    plan,
+                    cache};
                 for (const PackageId id: source_packages) {
                     auto project = prepare_project(graph[id], project_context);
                     if (!project)
@@ -1573,7 +1612,7 @@ namespace kaixa::plugin::cmake {
                 std::vector<bool> prefix_added(graph.size(), false);
                 std::vector<std::filesystem::path> prefixes;
                 PackagePrefixContext
-                    prefix_context{graph, registry, environment, instances, route.context, prefix_visited, prefix_added, prefixes};
+                    prefix_context{graph, registry, environment, instances, route.context, prefix_visited, prefix_added, prefixes, cache};
                 auto prefix_result = collect_package_prefixes(package.id, prefix_context);
                 if (!prefix_result)
                     return std::unexpected(prefix_result.error());
@@ -1610,14 +1649,24 @@ namespace kaixa::plugin::cmake {
                 const BuildEnvironment& environment,
                 const std::span<const ConfiguredPackageInstance> instances,
                 const TestRequest& request,
-                BuildPlan& plan
+                BuildPlan& plan,
+                ResolverSession& resolver_session
             ) const override {
+                ConfigurationCache& cache = static_cast<Session&>(resolver_session).configuration;
                 const std::string configured_context = package.name + ":default";
                 const ConfiguredPackageInstance* instance = find_configured_package_instance(instances, package.id, configured_context);
                 if (!instance)
                     return std::unexpected(error("configured default instance is missing for package `" + package.name + "`"));
 
-                auto default_build_context = prepare_build_context(graph, registry, package, environment, *instance, configured_context);
+                auto default_build_context = prepare_build_context(
+                    graph,
+                    registry,
+                    package,
+                    environment,
+                    *instance,
+                    configured_context,
+                    cache
+                );
                 if (!default_build_context)
                     return std::unexpected(default_build_context.error());
 
@@ -1660,12 +1709,12 @@ namespace kaixa::plugin::cmake {
                         ConfiguredRoute build_route = route;
                         build_route.request.targets.clear();
                         build_route.request.build_default = true;
-                        auto planned = plan_route(graph, registry, package, environment, instances, build_route, plan);
+                        auto planned = plan_route(graph, registry, package, environment, instances, build_route, plan, cache);
                         if (!planned)
                             return std::unexpected(planned.error());
                     }
 
-                    auto context = prepare_build_context(graph, registry, package, environment, *route.instance, route.context);
+                    auto context = prepare_build_context(graph, registry, package, environment, *route.instance, route.context, cache);
                     if (!context)
                         return std::unexpected(context.error());
 
@@ -1687,14 +1736,16 @@ namespace kaixa::plugin::cmake {
                 const ExtensionRegistry& registry,
                 const PackageNode& package,
                 const BuildEnvironment& environment,
-                const std::span<const ConfiguredPackageInstance> instances
+                const std::span<const ConfiguredPackageInstance> instances,
+                ResolverSession& resolver_session
             ) const override {
+                ConfigurationCache& cache = static_cast<Session&>(resolver_session).configuration;
                 const std::string configured_context = package.name + ":default";
                 const ConfiguredPackageInstance* instance = find_configured_package_instance(instances, package.id, configured_context);
                 if (!instance)
                     return std::unexpected(error("configured default instance is missing for package `" + package.name + "`"));
 
-                auto context = prepare_build_context(graph, registry, package, environment, *instance, configured_context);
+                auto context = prepare_build_context(graph, registry, package, environment, *instance, configured_context, cache);
                 if (!context)
                     return std::unexpected(context.error());
 
@@ -1708,8 +1759,10 @@ namespace kaixa::plugin::cmake {
                 const BuildEnvironment& environment,
                 const std::span<const ConfiguredPackageInstance> instances,
                 const CleanRequest& request,
-                CleanPlan& plan
+                CleanPlan& plan,
+                ResolverSession& resolver_session
             ) const override {
+                ConfigurationCache& cache = static_cast<Session&>(resolver_session).configuration;
                 const std::string configured_context = package.name + ":default";
                 const ConfiguredPackageInstance* default_instance = find_configured_package_instance(
                     instances,
@@ -1725,7 +1778,7 @@ namespace kaixa::plugin::cmake {
 
                     const bool is_default = instance.artifact == default_instance->artifact;
                     const std::string_view context_name = is_default ? configured_context : instance.contexts.front();
-                    auto context = prepare_build_context(graph, registry, package, environment, instance, context_name);
+                    auto context = prepare_build_context(graph, registry, package, environment, instance, context_name, cache);
                     if (!context)
                         return std::unexpected(context.error());
 
@@ -1734,7 +1787,15 @@ namespace kaixa::plugin::cmake {
                     plan.add(artifact_directory(environment, instance));
                 }
                 if (request.generated_files) {
-                    auto context = prepare_build_context(graph, registry, package, environment, *default_instance, configured_context);
+                    auto context = prepare_build_context(
+                        graph,
+                        registry,
+                        package,
+                        environment,
+                        *default_instance,
+                        configured_context,
+                        cache
+                    );
                     if (!context)
                         return std::unexpected(context.error());
 

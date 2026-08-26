@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <memory>
 #include <system_error>
 #include <utility>
 #include <vector>
@@ -58,6 +59,7 @@ namespace kaixa {
         const BuildEnvironment& environment,
         const CleanRequest& request
     ) {
+        std::vector<std::pair<Resolver*, std::unique_ptr<ResolverSession>>> sessions;
         CleanPlan plan;
         auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
         if (!instances)
@@ -72,7 +74,13 @@ namespace kaixa {
                 return std::unexpected(error("resolver `" + package.resolver + "` is not installed"));
             }
 
-            auto planned = resolver->plan_clean(graph, registry, package, environment, *instances, request, plan);
+            auto session = std::ranges::find_if(sessions, [&](const auto& candidate) { return candidate.first == resolver; });
+            if (session == sessions.end()) {
+                sessions.emplace_back(resolver, resolver->start_session(graph));
+                session = sessions.end() - 1;
+            }
+
+            auto planned = resolver->plan_clean(graph, registry, package, environment, *instances, request, plan, *session->second);
             if (!planned)
                 return std::unexpected(planned.error());
         }

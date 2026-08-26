@@ -358,11 +358,6 @@ namespace kaixa {
             if (!finished)
                 return std::unexpected(finished.error());
 
-            auto source_files = expand_file_set(result.sources, package.directory, package.directory, true);
-            if (!source_files)
-                return std::unexpected(source_files.error());
-
-            result.sources.files = std::move(*source_files);
             auto header_files = expand_file_set(result.headers, package.directory, package.directory, true);
             if (!header_files)
                 return std::unexpected(header_files.error());

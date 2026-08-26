@@ -500,7 +500,8 @@ namespace kaixa::plugin::cmake::detail {
             const PackageId package_id,
             const ProductRealizationContext& realization,
             std::vector<bool>& visited,
-            TargetOptions& destination
+            TargetOptions& destination,
+            ConfigurationCache& cache
         ) {
             if (visited[package_id.index])
                 return {};
@@ -508,16 +509,24 @@ namespace kaixa::plugin::cmake::detail {
             visited[package_id.index] = true;
             const PackageNode& package = graph[package_id];
             for (const PackageId dependency: package.dependencies) {
-                auto collected = collect_runtime_files(graph, dependency, realization, visited, destination);
+                auto collected = collect_runtime_files(graph, dependency, realization, visited, destination, cache);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
             if (package.kind == PackageKind::managed) {
-                auto effective = realize_package(graph, package_id, realization);
-                if (!effective)
-                    return std::unexpected(effective.error());
+                if (cache.effective_packages.size() < graph.size())
+                    cache.effective_packages.resize(graph.size());
 
-                for (const EffectiveProduct& product: effective->products) {
+                std::optional<EffectivePackage>& stored = cache.effective_packages[package_id.index];
+                if (!stored) {
+                    auto effective = realize_package(graph, package_id, realization);
+                    if (!effective)
+                        return std::unexpected(effective.error());
+
+                    stored = std::move(*effective);
+                }
+
+                for (const EffectiveProduct& product: stored->products) {
                     for (const std::filesystem::path& runtime_file: product.runtime_files.files) {
                         auto appended = append_runtime_file(
                             destination,
@@ -1368,19 +1377,20 @@ namespace kaixa::plugin::cmake::detail {
             Options& result,
             const Graph& graph,
             const PackageNode& package,
-            const ProductRealizationContext& realization
+            const ProductRealizationContext& realization,
+            ConfigurationCache& cache
         ) {
             TargetOptions inherited_runtime;
             std::vector<bool> visited(graph.size(), false);
             visited[package.id.index] = true;
             for (const PackageId dependency: package.dependencies) {
-                auto collected = collect_runtime_files(graph, dependency, realization, visited, inherited_runtime);
+                auto collected = collect_runtime_files(graph, dependency, realization, visited, inherited_runtime, cache);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
             for (const PackageTargetDependencies& dependencies: package.target_dependencies) {
                 for (const PackageId dependency: dependencies.packages) {
-                    auto collected = collect_runtime_files(graph, dependency, realization, visited, inherited_runtime);
+                    auto collected = collect_runtime_files(graph, dependency, realization, visited, inherited_runtime, cache);
                     if (!collected)
                         return std::unexpected(collected.error());
                 }
@@ -1412,8 +1422,22 @@ namespace kaixa::plugin::cmake::detail {
         const PackageNode& package,
         const ProductRealizationContext& realization,
         const EffectivePolicy* policy_override,
-        const std::string_view configured_context
+        const std::string_view configured_context,
+        ConfigurationCache* cache
     ) {
+        ConfigurationCache local_cache(graph.size());
+        ConfigurationCache& selected_cache = cache ? *cache : local_cache;
+        if (selected_cache.effective_packages.size() < graph.size())
+            selected_cache.effective_packages.resize(graph.size());
+
+        ConfigurationCacheKey cache_key{package.id, std::string(configured_context), std::nullopt};
+        if (policy_override)
+            cache_key.policy = policy_fingerprint(*policy_override);
+
+        const auto cached = std::ranges::find(selected_cache.options, cache_key, &decltype(selected_cache.options)::value_type::first);
+        if (cached != selected_cache.options.end())
+            return cached->second;
+
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
@@ -1451,11 +1475,16 @@ namespace kaixa::plugin::cmake::detail {
         if (!declared_targets)
             return std::unexpected(declared_targets.error());
 
-        auto effective_package = realize_package(graph, package.id, realization);
-        if (!effective_package)
-            return std::unexpected(effective_package.error());
+        std::optional<EffectivePackage>& stored_effective = selected_cache.effective_packages[package.id.index];
+        if (!stored_effective) {
+            auto effective_package = realize_package(graph, package.id, realization);
+            if (!effective_package)
+                return std::unexpected(effective_package.error());
 
-        auto product = append_effective_product(result, *effective_package, graph, package, package_policy, default_standard);
+            stored_effective = std::move(*effective_package);
+        }
+
+        auto product = append_effective_product(result, *stored_effective, graph, package, package_policy, default_standard);
         if (!product)
             return std::unexpected(product.error());
 
@@ -1466,7 +1495,7 @@ namespace kaixa::plugin::cmake::detail {
         const AssociatedTargetContext target_context{graph,
             registry,
             package,
-            *effective_package,
+            *stored_effective,
             policy_context,
             policy_override,
             configured_context,
@@ -1475,7 +1504,7 @@ namespace kaixa::plugin::cmake::detail {
         if (!associated_targets)
             return std::unexpected(associated_targets.error());
 
-        auto runtime_files = inherit_runtime_files(result, graph, package, realization);
+        auto runtime_files = inherit_runtime_files(result, graph, package, realization, selected_cache);
         if (!runtime_files)
             return std::unexpected(runtime_files.error());
 
@@ -1487,6 +1516,7 @@ namespace kaixa::plugin::cmake::detail {
         if (!finished)
             return std::unexpected(finished.error());
 
+        selected_cache.options.emplace_back(std::move(cache_key), result);
         return result;
     }
 

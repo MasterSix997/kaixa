@@ -1,6 +1,13 @@
-[benchmark]
+[[benchmark]]
 name = "manifest_format"
 sources = ["manifest_format.cpp"]
 
 [benchmark.cmake]
 link-libraries = ["kaixa_core"]
+
+[[benchmark]]
+name = "workspace_planning"
+sources = ["workspace_planning.cpp"]
+
+[benchmark.cmake]
+link-libraries = ["kaixa_core", "kaixa_plugins"]
