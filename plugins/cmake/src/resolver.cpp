@@ -217,6 +217,16 @@ namespace kaixa::plugin::cmake {
             BuildRequest request;
         };
 
+        struct RoutePlanningContext {
+            const Graph& graph;
+            const ExtensionRegistry& registry;
+            const PackageNode& package;
+            const BuildEnvironment& environment;
+            std::span<const ConfiguredPackageInstance> instances;
+            BuildPlan& plan;
+            ConfigurationCache& cache;
+        };
+
         Result<std::vector<ConfiguredRoute>> configured_routes(
             const PackageNode& package,
             const BuildRequest& request,
@@ -304,35 +314,35 @@ namespace kaixa::plugin::cmake {
             return (*cache.install_requirements)[package.id.index];
         }
 
-        Result<void> collect_source_dependencies(
-            const Graph& graph,
-            const ExtensionRegistry& registry,
-            const PackageId id,
-            const bool include_associated,
-            const ProductRealizationContext& realization,
-            std::vector<bool>& visited,
-            std::vector<PackageId>& packages,
-            ConfigurationCache& cache
-        ) {
-            if (visited[id.index])
+        struct SourceDependencyContext {
+            const Graph& graph;
+            const ExtensionRegistry& registry;
+            const ProductRealizationContext& realization;
+            std::vector<bool>& visited;
+            std::vector<PackageId>& packages;
+            ConfigurationCache& cache;
+        };
+
+        Result<void> collect_source_dependencies(const PackageId id, const bool include_associated, SourceDependencyContext& context) {
+            if (context.visited[id.index])
                 return {};
 
-            visited[id.index] = true;
+            context.visited[id.index] = true;
 
-            const PackageNode& package = graph[id];
-            auto options = read_cached_options(graph, registry, package, realization, nullptr, {}, cache);
+            const PackageNode& package = context.graph[id];
+            auto options = read_cached_options(context.graph, context.registry, package, context.realization, nullptr, {}, context.cache);
             if (!options)
                 return std::unexpected(options.error());
 
             for (const PackageId dependency: package.dependencies) {
-                const PackageNode& target = graph[dependency];
+                const PackageNode& target = context.graph[dependency];
                 if (target.kind != PackageKind::managed || target.resolver != "cmake")
                     continue;
 
                 if (dependency_mode(**options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
-                auto collected = collect_source_dependencies(graph, registry, dependency, false, realization, visited, packages, cache);
+                auto collected = collect_source_dependencies(dependency, false, context);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
@@ -345,27 +355,18 @@ namespace kaixa::plugin::cmake {
                         continue;
                     }
                     for (const PackageId dependency: dependencies.packages) {
-                        const PackageNode& target = graph[dependency];
+                        const PackageNode& target = context.graph[dependency];
                         if (target.kind != PackageKind::managed || target.resolver != "cmake")
                             continue;
 
-                        auto collected = collect_source_dependencies(
-                            graph,
-                            registry,
-                            dependency,
-                            false,
-                            realization,
-                            visited,
-                            packages,
-                            cache
-                        );
+                        auto collected = collect_source_dependencies(dependency, false, context);
                         if (!collected)
                             return std::unexpected(collected.error());
                     }
                 }
             }
 
-            packages.push_back(id);
+            context.packages.push_back(id);
             return {};
         }
 
@@ -842,6 +843,112 @@ namespace kaixa::plugin::cmake {
                   "  endfunction()\n"
                   "  cmake_language(DEFER DIRECTORY \"${CMAKE_SOURCE_DIR}\" "
                   "CALL _kaixa_write_products)\n";
+        }
+
+        struct DependencyIntegrationContext {
+            const Graph& graph;
+            const PackageNode& package;
+            const BuildContext& build;
+            const std::vector<bool>& normal_source_visited;
+            std::span<const PackageId> source_packages;
+            const std::vector<std::optional<PreparedProject>>& projects;
+        };
+
+        Result<std::string> dependency_integration(const DependencyIntegrationContext& context) {
+            std::string result = "# Generated by Kaixa.\n"
+                                 "if(KAIXA_CMAKE_PREFIX_PATH)\n"
+                                 "  list(PREPEND CMAKE_PREFIX_PATH ${KAIXA_CMAKE_PREFIX_PATH})\n"
+                                 "endif()\n"
+                                 "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
+                                 "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
+            result += product_integration(context.build);
+            auto source_only_interfaces = source_only_interface_integration(context.graph);
+            if (!source_only_interfaces)
+                return std::unexpected(source_only_interfaces.error());
+
+            result += std::move(*source_only_interfaces);
+            for (const PackageId id: context.source_packages) {
+                if (id == context.package.id)
+                    continue;
+
+                const PackageNode& dependency = context.graph[id];
+                auto options = consumer_options(dependency);
+                if (!options)
+                    return std::unexpected(options.error());
+
+                auto feature_includes = consumer_feature_includes(dependency);
+                if (!feature_includes)
+                    return std::unexpected(feature_includes.error());
+
+                auto aliases = consumer_aliases(dependency);
+                if (!aliases)
+                    return std::unexpected(aliases.error());
+
+                auto target_patches = consumer_target_patches(dependency);
+                if (!target_patches)
+                    return std::unexpected(target_patches.error());
+
+                const std::string indent = options->empty() ? "  " : "    ";
+                if (!options->empty()) {
+                    result += "  block()\n";
+                    for (const TableEntry& option: *options) {
+                        auto value = cmake_option_value(option.value);
+                        if (!value)
+                            return std::unexpected(value.error());
+
+                        result += "    set(" + option.key + " " + *value + " CACHE INTERNAL \"Set by Kaixa\" FORCE)\n";
+                    }
+                }
+
+                result += indent
+                    + "add_subdirectory("
+                    + cmake_quote(context.projects[id.index]->source)
+                    + " "
+                    + cmake_quote(context.build.directory / "_dependencies" / dependency.name);
+                if (!context.normal_source_visited[id.index])
+                    result += " EXCLUDE_FROM_ALL";
+
+                result += ")\n";
+                for (const auto& [alias, target]: *aliases) {
+                    result += indent + "add_library(" + alias + " INTERFACE)\n";
+                    result += indent + "target_link_libraries(" + alias + " INTERFACE " + target + ")\n";
+                }
+                for (const std::filesystem::path& include: *feature_includes)
+                    result += indent + "include(" + cmake_quote(include) + ")\n";
+
+                for (const ConsumerTargetPatch& patch: *target_patches) {
+                    if (!patch.compile_options.empty()) {
+                        result += indent + "target_compile_options(" + patch.target + " PRIVATE";
+                        for (const std::string& option: patch.compile_options)
+                            result += " " + cmake_quote(option);
+                        result += ")\n";
+                    }
+                    if (!patch.definitions.empty()) {
+                        result += indent + "target_compile_definitions(" + patch.target + " PRIVATE";
+                        for (const std::string& definition: patch.definitions)
+                            result += " " + cmake_quote(definition);
+                        result += ")\n";
+                    }
+                    if (!patch.compile_features.empty()) {
+                        result += indent + "target_compile_features(" + patch.target + " PUBLIC";
+                        for (const std::string& feature: patch.compile_features)
+                            result += " " + cmake_quote(feature);
+                        result += ")\n";
+                    }
+                    if (!patch.system_includes.empty()) {
+                        result += indent + "target_include_directories(" + patch.target + " SYSTEM PUBLIC";
+                        for (const std::filesystem::path& include: patch.system_includes)
+                            result += " " + cmake_quote(include);
+                        result += ")\n";
+                    }
+                    if (patch.exclude_from_all)
+                        result += indent + "set_target_properties(" + patch.target + " PROPERTIES EXCLUDE_FROM_ALL TRUE)\n";
+                }
+                if (!options->empty())
+                    result += "  endblock()\n";
+            }
+            result += "endif()\n";
+            return result;
         }
 
         Result<ProductKind> product_kind(const std::string_view type) {
@@ -1403,8 +1510,9 @@ namespace kaixa::plugin::cmake {
                     }
                 }
 
+                RoutePlanningContext planning{graph, registry, package, environment, instances, plan, cache};
                 for (const ConfiguredRoute& route: routes) {
-                    auto planned = plan_route(graph, registry, package, environment, instances, route, plan, cache);
+                    auto planned = plan_route(route, planning);
                     if (!planned)
                         return std::unexpected(planned.error());
                 }
@@ -1412,16 +1520,14 @@ namespace kaixa::plugin::cmake {
             }
 
         private:
-            [[nodiscard]] Result<void> plan_route(
-                const Graph& graph,
-                const ExtensionRegistry& registry,
-                const PackageNode& package,
-                const BuildEnvironment& environment,
-                const std::span<const ConfiguredPackageInstance> instances,
-                const ConfiguredRoute& route,
-                BuildPlan& plan,
-                ConfigurationCache& cache
-            ) const {
+            [[nodiscard]] Result<void> plan_route(const ConfiguredRoute& route, RoutePlanningContext& planning) const {
+                const Graph& graph = planning.graph;
+                const ExtensionRegistry& registry = planning.registry;
+                const PackageNode& package = planning.package;
+                const BuildEnvironment& environment = planning.environment;
+                const std::span<const ConfiguredPackageInstance> instances = planning.instances;
+                BuildPlan& plan = planning.plan;
+                ConfigurationCache& cache = planning.cache;
                 const BuildRequest& request = route.request;
                 const ProductRealizationContext realization{environment.configuration.profile, host_target_os()};
                 auto dependency_install = requires_install(graph, registry, package, realization, cache);
@@ -1448,31 +1554,20 @@ namespace kaixa::plugin::cmake {
 
                 std::vector<bool> normal_source_visited(graph.size(), false);
                 std::vector<PackageId> normal_source_packages;
-                auto normal_source_result = collect_source_dependencies(
-                    graph,
+                SourceDependencyContext normal_source_context{graph,
                     registry,
-                    package.id,
-                    false,
                     realization,
                     normal_source_visited,
                     normal_source_packages,
-                    cache
-                );
+                    cache};
+                auto normal_source_result = collect_source_dependencies(package.id, false, normal_source_context);
                 if (!normal_source_result)
                     return std::unexpected(normal_source_result.error());
 
                 std::vector<bool> source_visited(graph.size(), false);
                 std::vector<PackageId> source_packages;
-                auto source_result = collect_source_dependencies(
-                    graph,
-                    registry,
-                    package.id,
-                    true,
-                    realization,
-                    source_visited,
-                    source_packages,
-                    cache
-                );
+                SourceDependencyContext source_context{graph, registry, realization, source_visited, source_packages, cache};
+                auto source_result = collect_source_dependencies(package.id, true, source_context);
                 if (!source_result)
                     return std::unexpected(source_result.error());
 
@@ -1501,96 +1596,11 @@ namespace kaixa::plugin::cmake {
                     / package.name
                     / "dependencies.cmake";
 
-                std::string integration = "# Generated by Kaixa.\n"
-                                          "if(KAIXA_CMAKE_PREFIX_PATH)\n"
-                                          "  list(PREPEND CMAKE_PREFIX_PATH ${KAIXA_CMAKE_PREFIX_PATH})\n"
-                                          "endif()\n"
-                                          "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
-                                          "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
-                integration += product_integration(*context);
-                auto source_only_interfaces = source_only_interface_integration(graph);
-                if (!source_only_interfaces)
-                    return std::unexpected(source_only_interfaces.error());
-                integration += std::move(*source_only_interfaces);
-                for (const PackageId id: source_packages) {
-                    if (id == package.id)
-                        continue;
+                auto integration = dependency_integration({graph, package, *context, normal_source_visited, source_packages, projects});
+                if (!integration)
+                    return std::unexpected(integration.error());
 
-                    const PackageNode& dependency = graph[id];
-
-                    auto options = consumer_options(dependency);
-                    if (!options)
-                        return std::unexpected(options.error());
-                    auto feature_includes = consumer_feature_includes(dependency);
-                    if (!feature_includes)
-                        return std::unexpected(feature_includes.error());
-                    auto aliases = consumer_aliases(dependency);
-                    if (!aliases)
-                        return std::unexpected(aliases.error());
-                    auto target_patches = consumer_target_patches(dependency);
-                    if (!target_patches)
-                        return std::unexpected(target_patches.error());
-
-                    const std::string indent = options->empty() ? "  " : "    ";
-                    if (!options->empty()) {
-                        integration += "  block()\n";
-                        for (const TableEntry& option: *options) {
-                            auto value = cmake_option_value(option.value);
-                            if (!value)
-                                return std::unexpected(value.error());
-
-                            integration += "    set(" + option.key + " " + *value + " CACHE INTERNAL \"Set by Kaixa\" FORCE)\n";
-                        }
-                    }
-
-                    integration += indent
-                        + "add_subdirectory("
-                        + cmake_quote(projects[id.index]->source)
-                        + " "
-                        + cmake_quote(context->directory / "_dependencies" / dependency.name);
-                    if (!normal_source_visited[id.index])
-                        integration += " EXCLUDE_FROM_ALL";
-
-                    integration += ")\n";
-                    for (const auto& [alias, target]: *aliases) {
-                        integration += indent + "add_library(" + alias + " INTERFACE)\n";
-                        integration += indent + "target_link_libraries(" + alias + " INTERFACE " + target + ")\n";
-                    }
-                    for (const std::filesystem::path& include: *feature_includes)
-                        integration += indent + "include(" + cmake_quote(include) + ")\n";
-                    for (const ConsumerTargetPatch& patch: *target_patches) {
-                        if (!patch.compile_options.empty()) {
-                            integration += indent + "target_compile_options(" + patch.target + " PRIVATE";
-                            for (const std::string& option: patch.compile_options)
-                                integration += " " + cmake_quote(option);
-                            integration += ")\n";
-                        }
-                        if (!patch.definitions.empty()) {
-                            integration += indent + "target_compile_definitions(" + patch.target + " PRIVATE";
-                            for (const std::string& definition: patch.definitions)
-                                integration += " " + cmake_quote(definition);
-                            integration += ")\n";
-                        }
-                        if (!patch.compile_features.empty()) {
-                            integration += indent + "target_compile_features(" + patch.target + " PUBLIC";
-                            for (const std::string& feature: patch.compile_features)
-                                integration += " " + cmake_quote(feature);
-                            integration += ")\n";
-                        }
-                        if (!patch.system_includes.empty()) {
-                            integration += indent + "target_include_directories(" + patch.target + " SYSTEM PUBLIC";
-                            for (const std::filesystem::path& include: patch.system_includes)
-                                integration += " " + cmake_quote(include);
-                            integration += ")\n";
-                        }
-                        if (patch.exclude_from_all)
-                            integration += indent + "set_target_properties(" + patch.target + " PROPERTIES EXCLUDE_FROM_ALL TRUE)\n";
-                    }
-                    if (!options->empty())
-                        integration += "  endblock()\n";
-                }
-                integration += "endif()\n";
-                plan.generate({integration_file, std::move(integration)});
+                plan.generate({integration_file, std::move(*integration)});
                 plan.generate({detail::file_api_query(context->directory), {}});
 
                 if (*reset) {
@@ -1705,6 +1715,7 @@ namespace kaixa::plugin::cmake {
                 if (!routes)
                     return std::unexpected(routes.error());
 
+                RoutePlanningContext planning{graph, registry, package, environment, instances, plan, cache};
                 for (const ConfiguredRoute& route: *routes) {
                     const bool has_build_action = std::ranges::any_of(plan.actions(), [&](const Action& action) {
                         return action.package == package.id
@@ -1715,7 +1726,7 @@ namespace kaixa::plugin::cmake {
                         ConfiguredRoute build_route = route;
                         build_route.request.targets.clear();
                         build_route.request.build_default = true;
-                        auto planned = plan_route(graph, registry, package, environment, instances, build_route, plan, cache);
+                        auto planned = plan_route(build_route, planning);
                         if (!planned)
                             return std::unexpected(planned.error());
                     }
