@@ -10,42 +10,53 @@
 #include <system_error>
 
 namespace kaixa::cli::detail {
-    void print_package(const Graph& graph, const PackageId id, const int depth, const bool verbose) {
-        const PackageNode& package = graph[id];
-        std::cout << std::string(static_cast<std::size_t>(depth) * 2, ' ') << package.name;
-        if (package.kind == PackageKind::opaque)
-            std::cout << " (opaque)";
-        else
-            std::cout << " (" << package.resolver << ')';
-        if (verbose)
-            std::cout << " -> " << package.directory.string();
-
-        std::cout << '\n';
-        if (verbose && package.source) {
-            std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ') << "source: ";
-            if (package.source->locator)
-                std::cout << package.source->locator->driver;
+    namespace {
+        void print_package(std::ostream& output, const Graph& graph, const PackageDependencyEntry& entry, const bool verbose) {
+            const PackageNode& package = graph[entry.package];
+            output << std::string(entry.depth * 2, ' ') << package.name;
+            if (package.kind == PackageKind::opaque)
+                output << " (opaque)";
             else
-                std::cout << "provider descriptor";
+                output << " (" << package.resolver << ')';
 
-            std::cout << ", authority: " << package.source->authority;
-            if (package.source->provider)
-                std::cout << ", provider: " << *package.source->provider;
+            if (entry.repeated) {
+                output << " [already shown]\n";
+                return;
+            }
 
-            if (package.source->identity)
-                std::cout << ", identity: " << *package.source->identity;
+            if (verbose)
+                output << " -> " << package.directory.string();
 
-            std::cout << '\n';
+            output << '\n';
+            if (verbose && package.source) {
+                output << std::string((entry.depth + 1) * 2, ' ') << "source: ";
+                if (package.source->locator)
+                    output << package.source->locator->driver;
+                else
+                    output << "provider descriptor";
+
+                output << ", authority: " << package.source->authority;
+                if (package.source->provider)
+                    output << ", provider: " << *package.source->provider;
+
+                if (package.source->identity)
+                    output << ", identity: " << *package.source->identity;
+
+                output << '\n';
+            }
+            if (verbose && !package.active_features.empty()) {
+                output << std::string((entry.depth + 1) * 2, ' ') << "features:";
+                for (const std::string& feature: package.active_features)
+                    output << ' ' << feature;
+
+                output << '\n';
+            }
         }
-        if (verbose && !package.active_features.empty()) {
-            std::cout << std::string(static_cast<std::size_t>(depth + 1) * 2, ' ') << "features:";
-            for (const std::string& feature: package.active_features)
-                std::cout << ' ' << feature;
+    }
 
-            std::cout << '\n';
-        }
-        for (const PackageId dependency: package.dependencies)
-            print_package(graph, dependency, depth + 1, verbose);
+    void print_packages(std::ostream& output, const Graph& graph, const std::span<const PackageId> roots, const bool verbose) {
+        for (const PackageDependencyEntry& entry: graph.dependency_tree(roots))
+            print_package(output, graph, entry, verbose);
     }
 
     void print_providers(const ExtensionRegistry& registry) {

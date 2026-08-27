@@ -16,13 +16,15 @@ namespace kaixa {
     [[nodiscard]] Result<std::vector<RunTarget>> discover_executable_targets(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 
     [[nodiscard]] Result<std::vector<RunTarget>> discover_run_targets(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 
     [[nodiscard]] Result<RunTarget> select_run_target(
@@ -36,6 +38,7 @@ namespace kaixa {
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         std::string target,
-        std::optional<PackageId> package = std::nullopt
+        std::optional<PackageId> package = std::nullopt,
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 }

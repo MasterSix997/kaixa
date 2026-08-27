@@ -9,18 +9,27 @@
 
 namespace kaixa {
     namespace {
-        Result<std::vector<std::filesystem::path>> expand_members(const PackageSet& package_set, const std::filesystem::path& directory) {
+        Result<std::vector<std::filesystem::path>> expand_members(
+            const PackageSet& package_set,
+            const std::filesystem::path& directory,
+            FileCatalog& files
+        ) {
             FileSet manifests;
             manifests.location = package_set.location;
             manifests.include.reserve(package_set.members.size());
             manifests.exclude.reserve(package_set.exclude.size());
-            for (const std::string& member: package_set.members)
-                manifests.include.push_back((std::filesystem::path(member) / "Kaixa.toml").generic_string());
+            std::vector<std::filesystem::path> literal_members;
+            for (const std::string& member: package_set.members) {
+                const std::filesystem::path manifest = std::filesystem::path(member) / "Kaixa.toml";
+                manifests.include.push_back(manifest.generic_string());
+                if (!is_glob_pattern(member))
+                    literal_members.push_back(manifest.lexically_normal());
+            }
 
             for (const std::string& excluded: package_set.exclude)
                 manifests.exclude.push_back((std::filesystem::path(excluded) / "Kaixa.toml").generic_string());
 
-            auto expanded = expand_file_set(manifests, directory, directory);
+            auto expanded = expand_file_set(manifests, directory, directory, false, &files);
             if (!expanded)
                 return std::unexpected(expanded.error());
 
@@ -29,7 +38,8 @@ namespace kaixa {
             for (const std::filesystem::path& relative: *expanded) {
                 const std::filesystem::path declared = directory / relative;
                 std::error_code failure;
-                if (!std::filesystem::is_regular_file(declared, failure)) {
+                if (std::ranges::find(literal_members, relative.lexically_normal()) != literal_members.end()
+                    && !std::filesystem::is_regular_file(declared, failure)) {
                     return std::unexpected(error_at(
                         package_set.location,
                         failure ? "cannot inspect package set member `" + declared.string() + "`: " + failure.message()
@@ -113,7 +123,7 @@ namespace kaixa {
                 }
 
                 if (document && document->package_set) {
-                    auto members = expand_members(*document->package_set, canonical.parent_path());
+                    auto members = expand_members(*document->package_set, canonical.parent_path(), result.m_files);
                     if (!members)
                         return std::unexpected(members.error());
 
@@ -152,6 +162,10 @@ namespace kaixa {
     const ManifestDocument* PackageIndex::document(const std::filesystem::path& manifest) const {
         const auto document = m_documents.find(manifest);
         return document == m_documents.end() ? nullptr : &document->second;
+    }
+
+    Result<const ManifestDocument*> PackageIndex::load_document(const std::filesystem::path& manifest) {
+        return find_or_parse_document(manifest, {});
     }
 
     Result<const ManifestDocument*> PackageIndex::find_or_parse_document(
@@ -267,7 +281,7 @@ namespace kaixa {
             m_package_scopes[manifest_path] = id;
         }
 
-        auto members = expand_members(*document->package_set, manifest_path.parent_path());
+        auto members = expand_members(*document->package_set, manifest_path.parent_path(), m_files);
         if (!members)
             return std::unexpected(members.error());
 

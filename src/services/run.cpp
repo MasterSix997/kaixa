@@ -10,9 +10,10 @@ namespace kaixa {
     Result<std::vector<RunTarget>> discover_executable_targets(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        const std::span<const ConfiguredPackageInstance> instances
     ) {
-        auto products = discover_products(graph, registry, environment);
+        auto products = discover_products(graph, registry, environment, instances);
         if (!products)
             return std::unexpected(products.error());
 
@@ -21,12 +22,12 @@ namespace kaixa {
             if (product.kind != ProductKind::executable || !product.artifact)
                 continue;
 
-            targets.push_back({
-                product.name,
-                product.purpose,
-                ProcessRequest{{product.artifact->string()}, graph[product.package].directory},
-                product.package
-            });
+            targets.push_back(
+                {product.name,
+                    product.purpose,
+                    ProcessRequest{{product.artifact->string()}, graph[product.package].directory},
+                    product.package}
+            );
         }
         return targets;
     }
@@ -34,9 +35,10 @@ namespace kaixa {
     Result<std::vector<RunTarget>> discover_run_targets(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        const std::span<const ConfiguredPackageInstance> instances
     ) {
-        auto targets = discover_executable_targets(graph, registry, environment);
+        auto targets = discover_executable_targets(graph, registry, environment, instances);
         if (!targets)
             return std::unexpected(targets.error());
 
@@ -106,7 +108,8 @@ namespace kaixa {
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
         std::string target,
-        const std::optional<PackageId> package
+        const std::optional<PackageId> package,
+        const std::span<const ConfiguredPackageInstance> instances
     ) {
         BuildRequest request;
         request.build_default = false;
@@ -115,6 +118,6 @@ namespace kaixa {
         else
             request.targets.push_back(std::move(target));
 
-        return plan_build(graph, registry, environment, request);
+        return plan_build(graph, registry, environment, request, instances);
     }
 }

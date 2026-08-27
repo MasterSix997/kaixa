@@ -266,13 +266,14 @@ namespace kaixa::workspace_detail {
             const std::filesystem::path& root_manifest,
             const PackageTargetKind kind,
             const std::string_view resolver,
-            const std::filesystem::path& package_directory
+            const std::filesystem::path& package_directory,
+            FileCatalog* catalog
         ) {
             const std::filesystem::path root_directory = root_manifest.parent_path();
             FileSet documents;
             documents.include = {(root_directory / "**/Kaixa.toml").lexically_relative(package_directory).generic_string()};
             documents.location.source = root_manifest.string();
-            auto files = expand_file_set(documents, package_directory, package_directory);
+            auto files = expand_file_set(documents, package_directory, package_directory, false, catalog);
             if (!files)
                 return std::unexpected(files.error());
 
@@ -300,7 +301,7 @@ namespace kaixa::workspace_detail {
                         continue;
                 }
 
-                auto parsed = parse_package_targets_file(absolute, kind, resolver);
+                auto parsed = parse_package_targets(*document, absolute, kind, resolver);
                 if (!parsed)
                     return std::unexpected(parsed.error());
 
@@ -317,7 +318,7 @@ namespace kaixa::workspace_detail {
                     continue;
                 }
 
-                auto discovered = expand_file_set(root.sources, root_directory, package_directory, true);
+                auto discovered = expand_file_set(root.sources, root_directory, package_directory, true, catalog);
                 if (!discovered)
                     return std::unexpected(discovered.error());
 
@@ -391,7 +392,11 @@ namespace kaixa::workspace_detail {
         }
     }
 
-    Result<std::vector<PackageTarget>> normalize_package_targets(const Manifest& manifest, const std::filesystem::path& package_directory) {
+    Result<std::vector<PackageTarget>> normalize_package_targets(
+        const Manifest& manifest,
+        const std::filesystem::path& package_directory,
+        FileCatalog* catalog
+    ) {
         std::vector<PackageTarget> declarations = manifest.targets;
         for (const PackageTargetReference& reference: manifest.target_references) {
             std::filesystem::path declared = reference.path;
@@ -404,7 +409,8 @@ namespace kaixa::workspace_detail {
                     (package_directory / declared).lexically_normal(),
                     reference.kind,
                     manifest.resolver,
-                    package_directory
+                    package_directory,
+                    catalog
                 );
                 if (!composed)
                     return std::unexpected(composed.error());
@@ -417,7 +423,7 @@ namespace kaixa::workspace_detail {
             FileSet manifests;
             manifests.include.push_back(declared.generic_string());
             manifests.location = reference.location;
-            auto files = expand_file_set(manifests, package_directory, package_directory);
+            auto files = expand_file_set(manifests, package_directory, package_directory, false, catalog);
             if (!files)
                 return std::unexpected(files.error());
 
@@ -443,7 +449,7 @@ namespace kaixa::workspace_detail {
             }
 
             const std::filesystem::path source_directory = declared.source.parent_path();
-            auto files = expand_file_set(declared.sources, source_directory, package_directory, true);
+            auto files = expand_file_set(declared.sources, source_directory, package_directory, true, catalog);
             if (!files)
                 return std::unexpected(files.error());
 

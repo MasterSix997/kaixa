@@ -167,7 +167,7 @@ namespace kaixa::cli::detail {
         resolution_options.refresh_sources = refresh_sources;
         resolution_options.source_progress = print_source_progress;
         resolution_options.load_model = false;
-        auto resolved = resolve_workspace(options.path, resolution_options);
+        auto resolved = resolve_workspace(*manifest, *manifest_document, resolution_options);
         if (!resolved)
             return std::unexpected(resolved.error());
 

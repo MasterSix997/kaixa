@@ -11,19 +11,22 @@ namespace kaixa {
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        const BuildRequest& request = {}
+        const BuildRequest& request = {},
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 
     [[nodiscard]] Result<std::vector<BuildProduct>> discover_products(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 
     [[nodiscard]] Result<BuildPlan> plan_tests(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        const TestRequest& request
+        const TestRequest& request,
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 }

@@ -3,6 +3,7 @@
 #include <kaixa/model/manifest.hpp>
 #include <kaixa/model/policy.hpp>
 
+#include <compare>
 #include <cstddef>
 #include <filesystem>
 #include <optional>
@@ -17,6 +18,7 @@ namespace kaixa {
         std::size_t index = 0;
 
         [[nodiscard]] bool operator==(const PackageId&) const = default;
+        [[nodiscard]] auto operator<=>(const PackageId&) const = default;
     };
 
     enum class PackageKind {

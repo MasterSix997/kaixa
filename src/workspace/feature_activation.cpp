@@ -5,11 +5,14 @@
 
 namespace kaixa::workspace_detail {
     namespace {
-        const DependencyBinding* find_feature_dependency(const Manifest& manifest, const std::string_view name) {
-            const auto binding = std::ranges::find_if(manifest.dependencies, [&](const DependencyBinding& candidate) {
+        const DependencyBinding* find_feature_dependency(
+            const std::span<const DependencyBinding> dependencies,
+            const std::string_view name
+        ) {
+            const auto binding = std::ranges::find_if(dependencies, [&](const DependencyBinding& candidate) {
                 return candidate.local_name() == name || candidate.request.package == name;
             });
-            return binding == manifest.dependencies.end() ? nullptr : &*binding;
+            return binding == dependencies.end() ? nullptr : &*binding;
         }
     }
 
@@ -27,11 +30,11 @@ namespace kaixa::workspace_detail {
 
     Result<void> FeatureActivator::activate_dependencies(
         const PackageId package,
-        const Manifest& manifest,
+        const std::span<const DependencyBinding> dependencies,
         const FeatureDefinition& feature
     ) {
         for (const std::string& dependency_name: feature.dependencies) {
-            const DependencyBinding* dependency = find_feature_dependency(manifest, dependency_name);
+            const DependencyBinding* dependency = find_feature_dependency(dependencies, dependency_name);
             if (!dependency) {
                 return std::unexpected(
                     error_at(feature.location, "feature `" + feature.name + "` activates unknown dependency `" + dependency_name + "`")
@@ -43,7 +46,7 @@ namespace kaixa::workspace_detail {
         }
 
         for (const auto& [dependency_name, features]: feature.dependency_features) {
-            const DependencyBinding* dependency = find_feature_dependency(manifest, dependency_name);
+            const DependencyBinding* dependency = find_feature_dependency(dependencies, dependency_name);
             if (!dependency) {
                 return std::unexpected(
                     error_at(feature.location, "feature `" + feature.name + "` configures unknown dependency `" + dependency_name + "`")
@@ -71,16 +74,21 @@ namespace kaixa::workspace_detail {
         return {};
     }
 
-    Result<void> FeatureActivator::activate_legacy(const PackageId package, const Manifest& manifest, const FeatureDefinition& feature) {
+    Result<void> FeatureActivator::activate_legacy(
+        const PackageId package,
+        const std::span<const DependencyBinding> dependencies,
+        const std::span<const FeatureDefinition> features,
+        const FeatureDefinition& feature
+    ) {
         for (const std::string& activation: feature.features) {
             const std::size_t separator = activation.find('/');
             if (separator == std::string::npos) {
-                const DependencyBinding* dependency = find_feature_dependency(manifest, activation);
+                const DependencyBinding* dependency = find_feature_dependency(dependencies, activation);
                 if (dependency && dependency->request.optional) {
                     auto resolved = add_dependency(package, *dependency);
                     if (!resolved)
                         return std::unexpected(resolved.error());
-                } else if (std::ranges::find(manifest.features, activation, &FeatureDefinition::name) != manifest.features.end()) {
+                } else if (std::ranges::find(features, activation, &FeatureDefinition::name) != features.end()) {
                     const std::array<std::string, 1> local_name{activation};
                     auto local = activate(package, local_name, feature.location);
                     if (!local)
@@ -90,7 +98,7 @@ namespace kaixa::workspace_detail {
             }
 
             const std::string dependency_name = activation.substr(0, separator);
-            const DependencyBinding* dependency = find_feature_dependency(manifest, dependency_name);
+            const DependencyBinding* dependency = find_feature_dependency(dependencies, dependency_name);
             if (!dependency)
                 continue;
 
@@ -108,6 +116,9 @@ namespace kaixa::workspace_detail {
         const std::span<const std::string> requested,
         const SourceLocation& location
     ) {
+        if (requested.empty())
+            return {};
+
         if (!m_graph[package].manifest) {
             for (const std::string& name: requested) {
                 if (std::ranges::find(m_graph[package].active_features, name) == m_graph[package].active_features.end())
@@ -116,13 +127,14 @@ namespace kaixa::workspace_detail {
             return {};
         }
 
-        const Manifest manifest = *m_graph[package].manifest;
+        const std::vector<DependencyBinding> dependencies = m_graph[package].manifest->dependencies;
+        const std::vector<FeatureDefinition> features = m_graph[package].manifest->features;
         for (const std::string& name: requested) {
             if (std::ranges::find(m_graph[package].active_features, name) != m_graph[package].active_features.end())
                 continue;
 
-            const auto definition = std::ranges::find(manifest.features, name, &FeatureDefinition::name);
-            if (definition == manifest.features.end()) {
+            const auto definition = std::ranges::find(features, name, &FeatureDefinition::name);
+            if (definition == features.end()) {
                 return std::unexpected(error_at(location, "package `" + m_graph[package].name + "` has no feature `" + name + "`"));
             }
             m_graph[package].active_features.push_back(name);
@@ -133,16 +145,16 @@ namespace kaixa::workspace_detail {
                     return std::unexpected(local.error());
             }
 
-            auto dependencies = activate_dependencies(package, manifest, *definition);
-            if (!dependencies)
-                return std::unexpected(dependencies.error());
+            auto activated_dependencies = activate_dependencies(package, dependencies, *definition);
+            if (!activated_dependencies)
+                return std::unexpected(activated_dependencies.error());
 
             auto members = activate_members(package, *definition);
             if (!members)
                 return std::unexpected(members.error());
 
             if (definition->legacy) {
-                auto legacy = activate_legacy(package, manifest, *definition);
+                auto legacy = activate_legacy(package, dependencies, features, *definition);
                 if (!legacy)
                     return std::unexpected(legacy.error());
             }

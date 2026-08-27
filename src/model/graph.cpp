@@ -8,6 +8,8 @@ namespace kaixa {
     PackageId Graph::add(PackageNode node) {
         node.id = PackageId{m_nodes.size()};
         m_nodes.push_back(std::move(node));
+        m_packages_by_name.emplace(m_nodes.back().name, m_nodes.back().id);
+        m_packages_by_directory.emplace(m_nodes.back().directory, m_nodes.back().id);
         return m_nodes.back().id;
     }
 
@@ -29,13 +31,37 @@ namespace kaixa {
     }
 
     std::optional<PackageId> Graph::find_by_directory(const std::filesystem::path& directory) const {
-        const auto found = std::ranges::find_if(m_nodes, [&directory](const PackageNode& node) { return node.directory == directory; });
-        return found == m_nodes.end() ? std::nullopt : std::optional(found->id);
+        const auto found = m_packages_by_directory.find(directory);
+        return found == m_packages_by_directory.end() ? std::nullopt : std::optional(found->second);
     }
 
     std::optional<PackageId> Graph::find_by_name(const std::string_view name) const {
-        const auto found = std::ranges::find_if(m_nodes, [name](const PackageNode& node) { return node.name == name; });
-        return found == m_nodes.end() ? std::nullopt : std::optional(found->id);
+        const auto found = m_packages_by_name.find(name);
+        return found == m_packages_by_name.end() ? std::nullopt : std::optional(found->second);
+    }
+
+    std::vector<PackageDependencyEntry> Graph::dependency_tree(const std::span<const PackageId> roots) const {
+        std::vector<PackageDependencyEntry> result;
+        std::vector<bool> expanded(size(), false);
+        std::vector<PackageDependencyEntry> pending;
+        for (auto root = roots.rbegin(); root != roots.rend(); ++root)
+            pending.push_back({*root});
+
+        while (!pending.empty()) {
+            PackageDependencyEntry entry = pending.back();
+            pending.pop_back();
+            entry.repeated = expanded[entry.package.index];
+            result.push_back(entry);
+            if (entry.repeated)
+                continue;
+
+            expanded[entry.package.index] = true;
+            const std::vector<PackageId>& dependencies = m_nodes[entry.package.index].dependencies;
+            for (auto dependency = dependencies.rbegin(); dependency != dependencies.rend(); ++dependency)
+                pending.push_back({*dependency, entry.depth + 1});
+        }
+
+        return result;
     }
 
     Result<std::vector<PackageId>> Graph::build_order() const {

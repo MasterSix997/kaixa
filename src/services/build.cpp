@@ -107,11 +107,18 @@ namespace kaixa {
     Result<std::vector<BuildProduct>> discover_products(
         const Graph& graph,
         const ExtensionRegistry& registry,
-        const BuildEnvironment& environment
+        const BuildEnvironment& environment,
+        std::span<const ConfiguredPackageInstance> instances
     ) {
-        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
-        if (!instances)
-            return std::unexpected(instances.error());
+        std::vector<ConfiguredPackageInstance> configured_instances;
+        if (instances.empty()) {
+            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            if (!configured)
+                return std::unexpected(configured.error());
+
+            configured_instances = std::move(*configured);
+            instances = configured_instances;
+        }
 
         std::vector<ActiveResolverSession> sessions;
         std::vector<BuildProduct> products;
@@ -123,7 +130,7 @@ namespace kaixa {
             }
 
             auto discovered = resolver
-                                  ->products(graph, registry, root, environment, *instances, resolver_session(*resolver, graph, sessions));
+                                  ->products(graph, registry, root, environment, instances, resolver_session(*resolver, graph, sessions));
             if (!discovered)
                 return std::unexpected(discovered.error());
 
@@ -136,15 +143,22 @@ namespace kaixa {
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        const BuildRequest& request
+        const BuildRequest& request,
+        std::span<const ConfiguredPackageInstance> instances
     ) {
-        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
-        if (!instances)
-            return std::unexpected(instances.error());
+        std::vector<ConfiguredPackageInstance> configured_instances;
+        if (instances.empty()) {
+            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            if (!configured)
+                return std::unexpected(configured.error());
+
+            configured_instances = std::move(*configured);
+            instances = configured_instances;
+        }
 
         std::vector<ActiveResolverSession> sessions;
         BuildPlan plan;
-        auto planned = append_build_plan(graph, registry, environment, request, *instances, sessions, plan);
+        auto planned = append_build_plan(graph, registry, environment, request, instances, sessions, plan);
         if (!planned)
             return std::unexpected(planned.error());
 
@@ -155,15 +169,22 @@ namespace kaixa {
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
-        const TestRequest& request
+        const TestRequest& request,
+        std::span<const ConfiguredPackageInstance> instances
     ) {
-        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
-        if (!instances)
-            return std::unexpected(instances.error());
+        std::vector<ConfiguredPackageInstance> configured_instances;
+        if (instances.empty()) {
+            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            if (!configured)
+                return std::unexpected(configured.error());
+
+            configured_instances = std::move(*configured);
+            instances = configured_instances;
+        }
 
         std::vector<ActiveResolverSession> sessions;
         BuildPlan plan;
-        auto build = append_build_plan(graph, registry, environment, {}, *instances, sessions, plan);
+        auto build = append_build_plan(graph, registry, environment, {}, instances, sessions, plan);
         if (!build)
             return std::unexpected(build.error());
 
@@ -179,7 +200,7 @@ namespace kaixa {
                 registry,
                 root,
                 environment,
-                *instances,
+                instances,
                 request,
                 plan,
                 resolver_session(*resolver, graph, sessions)

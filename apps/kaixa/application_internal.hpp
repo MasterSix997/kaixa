@@ -8,6 +8,7 @@
 #include <kaixa/plugin/bundle.hpp>
 
 #include <filesystem>
+#include <iosfwd>
 #include <optional>
 #include <span>
 #include <string>
@@ -42,7 +43,7 @@ namespace kaixa::cli::detail {
 
     void print_edit(const ManifestEdit& edit);
 
-    void print_package(const Graph& graph, PackageId id, int depth, bool verbose = false);
+    void print_packages(std::ostream& output, const Graph& graph, std::span<const PackageId> roots, bool verbose = false);
     void print_providers(const ExtensionRegistry& registry);
     std::string_view state_name(GeneratedFileState state);
     std::string_view state_name(ActionState state);

@@ -38,6 +38,7 @@ namespace kaixa {
         const BuildEnvironment& environment,
         const TaskPreparation& preparation,
         std::span<const BuildProduct> products = {},
-        std::span<const std::string> arguments = {}
+        std::span<const std::string> arguments = {},
+        std::span<const ConfiguredPackageInstance> instances = {}
     );
 }

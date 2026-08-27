@@ -668,6 +668,19 @@ namespace kaixa {
         return existing;
     }
 
+    bool resolution_locks_equal(const ResolutionLock& left, const ResolutionLock& right) {
+        if (left.packages.size() != right.packages.size())
+            return false;
+
+        for (std::size_t index = 0; index < left.packages.size(); ++index) {
+            const LockedPackage& left_package = left.packages[index];
+            const LockedPackage& right_package = right.packages[index];
+            if (!same_package_identity(left_package, right_package) || left_package.resolutions != right_package.resolutions)
+                return false;
+        }
+        return true;
+    }
+
     Result<void> validate_resolution_lock(const ResolutionLock& expected, const ResolutionLock& current) {
         for (const LockedPackage& package: current.packages) {
             const LockedPackage* locked = expected.find(package.name);

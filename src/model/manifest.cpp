@@ -1774,6 +1774,15 @@ namespace kaixa {
         return parse_package_targets_document(*document, path, kind, resolver);
     }
 
+    Result<std::vector<PackageTarget>> parse_package_targets(
+        const Value& document,
+        const std::filesystem::path& path,
+        const PackageTargetKind kind,
+        const std::string_view resolver
+    ) {
+        return parse_package_targets_document(document, path, kind, resolver);
+    }
+
     Result<ManifestTree> load_manifest_tree(const std::filesystem::path& root) {
         std::error_code failure;
         if (!std::filesystem::is_directory(root, failure)) {

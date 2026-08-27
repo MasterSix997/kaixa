@@ -606,25 +606,32 @@ namespace kaixa {
         const BuildEnvironment& environment,
         const TaskPreparation& preparation,
         const std::span<const BuildProduct> products,
-        const std::span<const std::string> arguments
+        const std::span<const std::string> arguments,
+        std::span<const ConfiguredPackageInstance> instances
     ) {
         if (preparation.tasks.empty())
             return std::unexpected(error("task preparation contains no commands"));
 
         BuildPlan plan;
         if (!preparation.build.packages.empty()) {
-            auto build = plan_build(graph, registry, environment, preparation.build);
+            auto build = plan_build(graph, registry, environment, preparation.build, instances);
             if (!build)
                 return std::unexpected(build.error());
 
             plan.append(std::move(*build));
         }
 
-        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
-        if (!instances)
-            return std::unexpected(instances.error());
+        std::vector<ConfiguredPackageInstance> configured_instances;
+        if (instances.empty()) {
+            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            if (!configured)
+                return std::unexpected(configured.error());
 
-        const CommandPlanningContext context{graph, environment, *instances, products, arguments, preparation.selected};
+            configured_instances = std::move(*configured);
+            instances = configured_instances;
+        }
+
+        const CommandPlanningContext context{graph, environment, instances, products, arguments, preparation.selected};
         for (const TaskDefinition& task: preparation.tasks) {
             auto appended = append_command_action(plan, context, task);
             if (!appended)

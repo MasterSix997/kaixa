@@ -66,6 +66,7 @@ namespace kaixa {
         const std::filesystem::path& context_directory
     );
     [[nodiscard]] ResolutionLock merge_resolution_lock(ResolutionLock existing, const ResolutionLock& current);
+    [[nodiscard]] bool resolution_locks_equal(const ResolutionLock& left, const ResolutionLock& right);
     [[nodiscard]] Result<void> validate_resolution_lock(const ResolutionLock& expected, const ResolutionLock& current);
     [[nodiscard]] bool locked_candidate_matches(
         const LockedPackage& locked,

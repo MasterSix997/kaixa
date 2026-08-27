@@ -31,7 +31,7 @@ namespace kaixa::plugin::cmake {
         using detail::GenerationMode;
         using detail::Options;
         using detail::read_build_options;
-        using detail::read_options;
+        using detail::read_cached_options;
 
         std::string configuration_name(const std::string& profile) {
             if (profile == "debug")
@@ -284,22 +284,24 @@ namespace kaixa::plugin::cmake {
             const ProductRealizationContext& realization,
             ConfigurationCache& cache
         ) {
-            for (const PackageNode& candidate: graph.nodes()) {
-                if (candidate.kind != PackageKind::managed || candidate.resolver != "cmake")
-                    continue;
+            if (!cache.install_requirements) {
+                std::vector<bool> requirements(graph.size(), false);
+                for (const PackageNode& candidate: graph.nodes()) {
+                    if (candidate.kind != PackageKind::managed || candidate.resolver != "cmake")
+                        continue;
 
-                const auto dependency = std::ranges::find(candidate.dependencies, package.id);
-                if (dependency == candidate.dependencies.end())
-                    continue;
+                    auto options = read_cached_options(graph, registry, candidate, realization, nullptr, {}, cache);
+                    if (!options)
+                        return std::unexpected(options.error());
 
-                auto options = read_options(graph, registry, candidate, realization, nullptr, {}, &cache);
-                if (!options)
-                    return std::unexpected(options.error());
-
-                if (dependency_mode(*options, package.id) == DependencyMode::find_package)
-                    return true;
+                    for (const PackageId dependency: candidate.dependencies) {
+                        if (dependency_mode(**options, dependency) == DependencyMode::find_package)
+                            requirements[dependency.index] = true;
+                    }
+                }
+                cache.install_requirements = std::move(requirements);
             }
-            return false;
+            return (*cache.install_requirements)[package.id.index];
         }
 
         Result<void> collect_source_dependencies(
@@ -318,7 +320,7 @@ namespace kaixa::plugin::cmake {
             visited[id.index] = true;
 
             const PackageNode& package = graph[id];
-            auto options = read_options(graph, registry, package, realization, nullptr, {}, &cache);
+            auto options = read_cached_options(graph, registry, package, realization, nullptr, {}, cache);
             if (!options)
                 return std::unexpected(options.error());
 
@@ -327,7 +329,7 @@ namespace kaixa::plugin::cmake {
                 if (target.kind != PackageKind::managed || target.resolver != "cmake")
                     continue;
 
-                if (dependency_mode(*options, dependency) != DependencyMode::add_subdirectory)
+                if (dependency_mode(**options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
                 auto collected = collect_source_dependencies(graph, registry, dependency, false, realization, visited, packages, cache);
@@ -337,7 +339,7 @@ namespace kaixa::plugin::cmake {
 
             if (include_associated) {
                 for (const PackageTargetDependencies& dependencies: package.target_dependencies) {
-                    if (std::ranges::none_of(options->targets, [&](const detail::TargetOptions& target) {
+                    if (std::ranges::none_of((*options)->targets, [&](const detail::TargetOptions& target) {
                             return target.name == dependencies.target;
                         })) {
                         continue;
@@ -386,14 +388,14 @@ namespace kaixa::plugin::cmake {
             context.visited[id.index] = true;
 
             const PackageNode& package = context.graph[id];
-            auto options = read_options(
+            auto options = read_cached_options(
                 context.graph,
                 context.registry,
                 package,
                 {context.environment.configuration.profile, host_target_os()},
                 nullptr,
                 {},
-                &context.cache
+                context.cache
             );
             if (!options)
                 return std::unexpected(options.error());
@@ -403,7 +405,7 @@ namespace kaixa::plugin::cmake {
                 if (target.kind != PackageKind::managed || target.resolver != "cmake")
                     continue;
 
-                if (dependency_mode(*options, dependency) == DependencyMode::find_package && !context.added[dependency.index]) {
+                if (dependency_mode(**options, dependency) == DependencyMode::find_package && !context.added[dependency.index]) {
                     context.added[dependency.index] = true;
                     const ConfiguredPackageInstance* instance = find_configured_package_instance(
                         context.instances,
@@ -1015,21 +1017,23 @@ namespace kaixa::plugin::cmake {
             const std::string_view configured_context,
             ConfigurationCache& cache
         ) {
-            auto project = read_options(
+            auto cached_project = read_cached_options(
                 graph,
                 registry,
                 package,
                 {environment.configuration.profile, host_target_os()},
                 &instance.policy,
                 configured_context,
-                &cache
+                cache
             );
-            if (!project)
-                return std::unexpected(project.error());
+            if (!cached_project)
+                return std::unexpected(cached_project.error());
+
+            Options project = **cached_project;
 
             const bool primary = configured_context == package.name + ":default";
-            if (!primary && !project->targets.empty())
-                project->generation = GenerationMode::state;
+            if (!primary && !project.targets.empty())
+                project.generation = GenerationMode::state;
 
             const ResolverBuildConfiguration* configuration = environment.configuration.find("cmake");
             auto build = read_build_options(configuration && configuration->settings ? &*configuration->settings : nullptr);
@@ -1061,13 +1065,13 @@ namespace kaixa::plugin::cmake {
             if (!generator)
                 generator = build->generator;
 
-            BuildVariant variant = build_variant(environment, *build, build->configure_arguments, *project, instance, primary);
+            BuildVariant variant = build_variant(environment, *build, build->configure_arguments, project, instance, primary);
             const std::filesystem::path directory = cmake_build_root(environment, variant.directory) / package.name;
             const std::filesystem::path output = environment.state_root / "build" / variant.directory;
             const std::filesystem::path metadata = graph.roots().size() == 1 && graph.is_root(package.id)
                 ? directory.parent_path() / "variant.toml"
                 : directory.parent_path() / ".variants" / (package.name + ".toml");
-            return BuildContext{std::move(*project),
+            return BuildContext{std::move(project),
                 std::move(*build),
                 std::move(generator),
                 std::move(variant),
@@ -1169,28 +1173,30 @@ namespace kaixa::plugin::cmake {
             if (!instance)
                 return std::unexpected(error("configured instance is missing for CMake package `" + package.name + "`"));
 
-            auto options = read_options(
+            auto cached_options = read_cached_options(
                 context.graph,
                 context.registry,
                 package,
                 {context.environment.configuration.profile, host_target_os()},
                 &instance->policy,
                 context.configured_context,
-                &context.cache
+                context.cache
             );
-            if (!options)
-                return std::unexpected(options.error());
+            if (!cached_options)
+                return std::unexpected(cached_options.error());
 
-            if ((context.isolated || shares_source_directory(context.graph, package)) && !options->targets.empty())
-                options->generation = GenerationMode::state;
+            Options options = **cached_options;
 
-            std::filesystem::path source = options->source;
-            if (!options->targets.empty() && options->generation == GenerationMode::state) {
+            if ((context.isolated || shares_source_directory(context.graph, package)) && !options.targets.empty())
+                options.generation = GenerationMode::state;
+
+            std::filesystem::path source = options.source;
+            if (!options.targets.empty() && options.generation == GenerationMode::state) {
                 source = context.environment.state_root / "generated" / "cmake" / context.variant / package.name / "project";
             }
             const std::filesystem::path project = source / "CMakeLists.txt";
-            if (!options->targets.empty()) {
-                if (options->generation == GenerationMode::source && std::filesystem::is_regular_file(project)) {
+            if (!options.targets.empty()) {
+                if (options.generation == GenerationMode::source && std::filesystem::is_regular_file(project)) {
                     std::ifstream input(project, std::ios::binary);
                     std::string first_line;
                     if (!input || !std::getline(input, first_line)) {
@@ -1210,7 +1216,7 @@ namespace kaixa::plugin::cmake {
                         ));
                     }
                 }
-                context.plan.generate({project, detail::generate_project(package, *options)});
+                context.plan.generate({project, detail::generate_project(package, options)});
                 return PreparedProject{std::move(source), project};
             }
 

@@ -131,8 +131,7 @@ namespace kaixa::cli {
                         << " target documents\n";
                 }
 
-                for (const PackageId root: workspace->graph.roots())
-                    print_package(workspace->graph, root, 0, command.verbose);
+                print_packages(std::cout, workspace->graph, workspace->graph.roots(), command.verbose);
 
                 if (command.verbose && !workspace->instances.empty()) {
                     std::cout << "configured instances:\n";
@@ -177,7 +176,7 @@ namespace kaixa::cli {
                 return inspected ? 0 : fail(inspected.error());
             }
 
-            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
+            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
             if (!plan)
                 return fail(plan.error());
 
@@ -198,7 +197,7 @@ namespace kaixa::cli {
                 return fail(error("target information is not synchronized").add_note("run `kaixa generate` before inspecting targets"));
             }
 
-            auto products = discover_products(workspace->graph, workspace->registry, workspace->environment);
+            auto products = discover_products(workspace->graph, workspace->registry, workspace->environment, workspace->instances);
             if (!products)
                 return fail(products.error());
 
@@ -212,7 +211,7 @@ namespace kaixa::cli {
             if (!workspace)
                 return fail(workspace.error(), format);
 
-            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
+            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
             if (!plan)
                 return fail(plan.error(), format);
 
@@ -275,7 +274,7 @@ namespace kaixa::cli {
             if (!workspace)
                 return fail(workspace.error());
 
-            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment);
+            auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
             if (!plan)
                 return fail(plan.error());
 

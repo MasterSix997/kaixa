@@ -1,5 +1,6 @@
 #pragma once
 
+#include <kaixa/model/file_set.hpp>
 #include <kaixa/model/manifest.hpp>
 
 #include <cstddef>
@@ -41,7 +42,9 @@ namespace kaixa {
         [[nodiscard]] std::span<const LocalPackageCandidate> candidates() const noexcept { return m_candidates; }
         [[nodiscard]] std::span<const std::filesystem::path> context_manifests() const noexcept { return m_context_manifests; }
         [[nodiscard]] const ManifestDocument* document(const std::filesystem::path& manifest) const;
+        [[nodiscard]] Result<const ManifestDocument*> load_document(const std::filesystem::path& manifest);
         [[nodiscard]] std::vector<Value> policies_for(const std::filesystem::path& requester_manifest) const;
+        [[nodiscard]] FileCatalog& files() noexcept { return m_files; }
 
     private:
         struct Scope {
@@ -70,5 +73,6 @@ namespace kaixa {
         std::map<std::filesystem::path, std::size_t> m_set_scopes;
         std::map<std::filesystem::path, std::size_t> m_package_scopes;
         std::set<std::filesystem::path> m_indexing;
+        FileCatalog m_files;
     };
 }

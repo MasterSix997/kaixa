@@ -519,7 +519,7 @@ namespace kaixa::plugin::cmake::detail {
 
                 std::optional<EffectivePackage>& stored = cache.effective_packages[package_id.index];
                 if (!stored) {
-                    auto effective = realize_package(graph, package_id, realization);
+                    auto effective = realize_package(graph, package_id, realization, &cache.files);
                     if (!effective)
                         return std::unexpected(effective.error());
 
@@ -562,7 +562,7 @@ namespace kaixa::plugin::cmake::detail {
 
                 files.include.push_back(*path);
             }
-            auto expanded = expand_file_set(files, package.directory, package.directory, true);
+            auto expanded = expand_file_set(files, package.directory, package.directory, true, &cache.files);
             if (!expanded)
                 return std::unexpected(expanded.error());
 
@@ -1416,33 +1416,31 @@ namespace kaixa::plugin::cmake::detail {
         }
     }
 
-    Result<Options> read_options(
+    Result<const Options*> read_cached_options(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const PackageNode& package,
         const ProductRealizationContext& realization,
         const EffectivePolicy* policy_override,
         const std::string_view configured_context,
-        ConfigurationCache* cache
+        ConfigurationCache& cache
     ) {
-        ConfigurationCache local_cache(graph.size());
-        ConfigurationCache& selected_cache = cache ? *cache : local_cache;
-        if (selected_cache.effective_packages.size() < graph.size())
-            selected_cache.effective_packages.resize(graph.size());
+        if (cache.effective_packages.size() < graph.size())
+            cache.effective_packages.resize(graph.size());
 
         ConfigurationCacheKey cache_key{package.id, std::string(configured_context), std::nullopt};
         if (policy_override)
             cache_key.policy = policy_fingerprint(*policy_override);
 
-        const auto cached = std::ranges::find(selected_cache.options, cache_key, &decltype(selected_cache.options)::value_type::first);
-        if (cached != selected_cache.options.end())
-            return cached->second;
+        const auto cached = cache.options.find(cache_key);
+        if (cached != cache.options.end())
+            return &cached->second;
 
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
         if (!package.manifest)
-            return result;
+            return &cache.options.emplace(std::move(cache_key), std::move(result)).first->second;
 
         const PolicyContext policy_context{realization.profile, realization.target_os};
         EffectivePolicy resolved_package_policy;
@@ -1475,9 +1473,9 @@ namespace kaixa::plugin::cmake::detail {
         if (!declared_targets)
             return std::unexpected(declared_targets.error());
 
-        std::optional<EffectivePackage>& stored_effective = selected_cache.effective_packages[package.id.index];
+        std::optional<EffectivePackage>& stored_effective = cache.effective_packages[package.id.index];
         if (!stored_effective) {
-            auto effective_package = realize_package(graph, package.id, realization);
+            auto effective_package = realize_package(graph, package.id, realization, &cache.files);
             if (!effective_package)
                 return std::unexpected(effective_package.error());
 
@@ -1504,7 +1502,7 @@ namespace kaixa::plugin::cmake::detail {
         if (!associated_targets)
             return std::unexpected(associated_targets.error());
 
-        auto runtime_files = inherit_runtime_files(result, graph, package, realization, selected_cache);
+        auto runtime_files = inherit_runtime_files(result, graph, package, realization, cache);
         if (!runtime_files)
             return std::unexpected(runtime_files.error());
 
@@ -1516,8 +1514,7 @@ namespace kaixa::plugin::cmake::detail {
         if (!finished)
             return std::unexpected(finished.error());
 
-        selected_cache.options.emplace_back(std::move(cache_key), result);
-        return result;
+        return &cache.options.emplace(std::move(cache_key), std::move(result)).first->second;
     }
 
     Result<BuildOptions> read_build_options(const Value* settings) {

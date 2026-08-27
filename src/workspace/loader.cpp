@@ -19,7 +19,11 @@ namespace kaixa {
     namespace {
         class WorkspaceLoader {
         public:
-            WorkspaceLoader(const ResolutionOptions& options, std::filesystem::path source_cache)
+            WorkspaceLoader(
+                const ResolutionOptions& options,
+                std::filesystem::path source_cache,
+                const ManifestDocument* manifest_document = nullptr
+            )
                 : m_extensions(options.extensions)
                 , m_source_cache(std::move(source_cache))
                 , m_provider_layers(options.provider_layers)
@@ -32,7 +36,8 @@ namespace kaixa {
                 , m_write_lock(options.write_lock)
                 , m_refresh_sources(options.refresh_sources)
                 , m_source_progress(options.source_progress)
-                , m_load_model(options.load_model) {}
+                , m_load_model(options.load_model)
+                , m_manifest_document(manifest_document) {}
 
             Result<PackageResolution> load(
                 const std::filesystem::path& manifest_path,
@@ -114,7 +119,8 @@ namespace kaixa {
                 if (failure)
                     return std::unexpected(error("cannot canonicalize manifest `" + manifest_path.string() + "`: " + failure.message()));
 
-                auto document = parse_manifest_document_file(selected);
+                Result<ManifestDocument> document = m_manifest_document ? Result<ManifestDocument>{*m_manifest_document}
+                                                                        : parse_manifest_document_file(selected);
                 if (!document)
                     return std::unexpected(document.error());
 
@@ -173,14 +179,19 @@ namespace kaixa {
                     return false;
                 }
 
+                if (m_write_lock) {
+                    ResolutionLock merged = m_lock ? merge_resolution_lock(*m_lock, current) : current;
+                    if (m_lock && resolution_locks_equal(*m_lock, merged))
+                        return false;
+
+                    return write_resolution_lock(m_lockfile, merged);
+                }
+
                 auto before = m_lock ? format_resolution_lock(*m_lock) : Result<std::string>{std::string{}};
                 if (!before)
                     return std::unexpected(before.error());
 
-                ResolutionLock merged = m_lock ? merge_resolution_lock(std::move(*m_lock), current) : current;
-                if (m_write_lock)
-                    return write_resolution_lock(m_lockfile, merged);
-
+                ResolutionLock merged = m_lock ? merge_resolution_lock(*m_lock, current) : current;
                 auto after = format_resolution_lock(merged);
                 if (!after)
                     return std::unexpected(after.error());
@@ -227,17 +238,17 @@ namespace kaixa {
             Result<void> configure_context_providers() {
                 std::vector<ProviderLayer> layers;
                 for (const std::filesystem::path& manifest: m_packages.context_manifests()) {
-                    auto document = parse_manifest_document_file(manifest);
+                    auto document = m_packages.load_document(manifest);
                     if (!document)
                         return std::unexpected(document.error());
 
-                    for (const auto& [package, provider]: document->routing)
+                    const ManifestDocument& context = **document;
+                    for (const auto& [package, provider]: context.routing)
                         m_routing[package] = provider;
 
-                    if (!document->providers.empty()) {
+                    if (!context.providers.empty()) {
                         layers.push_back(
-                            {std::move(document->providers),
-                                ProviderContext{manifest.parent_path(), m_source_cache, m_lock_mode == LockMode::frozen}}
+                            {context.providers, ProviderContext{manifest.parent_path(), m_source_cache, m_lock_mode == LockMode::frozen}}
                         );
                     }
                 }
@@ -364,11 +375,10 @@ namespace kaixa {
 
                 const std::filesystem::path directory = *directory_result;
 
-                const auto existing = std::ranges::find_if(m_graph.nodes(), [&](const PackageNode& package) {
-                    return package.directory == directory && (!expected_name || package.name == *expected_name);
-                });
-                if (existing != m_graph.nodes().end())
-                    return existing->id;
+                const std::optional<PackageId> existing = expected_name ? m_graph.find_by_name(*expected_name)
+                                                                        : m_graph.find_by_directory(directory);
+                if (existing && m_graph[*existing].directory == directory)
+                    return *existing;
 
                 const std::filesystem::path package_manifest = directory / "Kaixa.toml";
                 const ManifestDocument* parsed_document = nullptr;
@@ -800,19 +810,20 @@ namespace kaixa {
                 SourcePackageResolution resolution
             ) {
                 const std::filesystem::path manifest_path = directory / "Kaixa.toml";
-                auto document = parse_manifest_document_file(manifest_path);
+                auto document = m_packages.load_document(manifest_path);
                 if (!document)
                     return std::unexpected(document.error());
 
+                const ManifestDocument& source_document = **document;
                 std::optional<std::filesystem::path> package_manifest;
-                if (document->package && document->package->name == dependency.request.package) {
+                if (source_document.package && source_document.package->name == dependency.request.package) {
                     package_manifest = manifest_path;
-                } else if (document->package && !document->package_set) {
+                } else if (source_document.package && !source_document.package_set) {
                     return std::unexpected(error_at(
                         dependency.location,
-                        "source points to package `" + document->package->name + "`, not `" + dependency.request.package + "`"
+                        "source points to package `" + source_document.package->name + "`, not `" + dependency.request.package + "`"
                     ));
-                } else if (document->package_set) {
+                } else if (source_document.package_set) {
                     auto included = m_packages.include(manifest_path);
                     if (!included)
                         return std::unexpected(included.error());
@@ -1121,6 +1132,7 @@ namespace kaixa {
             bool m_refresh_sources = true;
             std::function<void(std::string_view)> m_source_progress;
             bool m_load_model = true;
+            const ManifestDocument* m_manifest_document = nullptr;
         };
     }
 
@@ -1185,5 +1197,18 @@ namespace kaixa {
 
         WorkspaceLoader loader(options, source_cache);
         return loader.load(*manifest, options.packages);
+    }
+
+    Result<PackageResolution> resolve_workspace(
+        const std::filesystem::path& manifest,
+        const ManifestDocument& document,
+        const ResolutionOptions& options
+    ) {
+        std::filesystem::path source_cache = default_source_cache();
+        if (!options.source_cache.empty())
+            source_cache = options.source_cache;
+
+        WorkspaceLoader loader(options, source_cache, &document);
+        return loader.load(manifest, options.packages);
     }
 }

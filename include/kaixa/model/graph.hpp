@@ -4,12 +4,20 @@
 #include <kaixa/model/package.hpp>
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
 namespace kaixa {
+    struct PackageDependencyEntry {
+        PackageId package;
+        std::size_t depth = 0;
+        bool repeated = false;
+    };
+
     class Graph {
     public:
         [[nodiscard]] PackageId add(PackageNode node);
@@ -25,11 +33,14 @@ namespace kaixa {
 
         [[nodiscard]] std::optional<PackageId> find_by_directory(const std::filesystem::path& directory) const;
         [[nodiscard]] std::optional<PackageId> find_by_name(std::string_view name) const;
+        [[nodiscard]] std::vector<PackageDependencyEntry> dependency_tree(std::span<const PackageId> roots) const;
         [[nodiscard]] Result<std::vector<PackageId>> build_order() const;
         [[nodiscard]] Result<std::vector<PackageId>> build_order(std::span<const PackageId> roots) const;
 
     private:
         std::vector<PackageNode> m_nodes;
         std::vector<PackageId> m_roots;
+        std::map<std::string, PackageId, std::less<>> m_packages_by_name;
+        std::map<std::filesystem::path, PackageId> m_packages_by_directory;
     };
 }

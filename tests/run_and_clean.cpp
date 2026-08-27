@@ -5,8 +5,40 @@
 #include <array>
 #include <filesystem>
 #include <string>
+#include <vector>
 
 using kaixa::testing::TempDirectory;
+
+KAIXA_TEST(package_inspection_expands_shared_dependencies_once) {
+    kaixa::Graph graph;
+    const auto add_package = [&](std::string name) {
+        kaixa::PackageNode package;
+        package.name = std::move(name);
+        package.directory = package.name;
+        package.kind = kaixa::PackageKind::managed;
+        package.resolver = "cmake";
+        return graph.add(std::move(package));
+    };
+
+    const kaixa::PackageId root = add_package("root");
+    const kaixa::PackageId left = add_package("left");
+    const kaixa::PackageId right = add_package("right");
+    const kaixa::PackageId shared = add_package("shared");
+    const kaixa::PackageId leaf = add_package("leaf");
+    graph[root].dependencies = {left, right};
+    graph[left].dependencies = {shared};
+    graph[right].dependencies = {shared};
+    graph[shared].dependencies = {leaf};
+    graph.add_root(root);
+
+    const std::vector<kaixa::PackageDependencyEntry> tree = graph.dependency_tree(graph.roots());
+    context.check_equal(tree.size(), std::size_t{6}, "shared dependency retains both incoming edges");
+    if (tree.size() == 6) {
+        context.check(tree[2].package == shared && !tree[2].repeated, "shared dependency is expanded on first use");
+        context.check(tree[3].package == leaf, "first shared dependency expands its subtree");
+        context.check(tree[5].package == shared && tree[5].repeated, "later shared dependency is a reference only");
+    }
+}
 
 KAIXA_TEST(run_target_selection_prefers_the_package_name) {
     const std::array targets = {kaixa::RunTarget{"tools", kaixa::ProductPurpose::primary, {{"tools"}, {}}},

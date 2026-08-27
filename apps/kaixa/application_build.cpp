@@ -265,7 +265,14 @@ namespace kaixa::cli::detail {
         const std::span<const std::string> arguments,
         const std::string_view operation
     ) {
-        auto plan = plan_run(workspace.graph, workspace.registry, workspace.environment, selected.name, selected.package);
+        auto plan = plan_run(
+            workspace.graph,
+            workspace.registry,
+            workspace.environment,
+            selected.name,
+            selected.package,
+            workspace.instances
+        );
         if (!plan)
             return fail(plan.error());
 
@@ -279,7 +286,13 @@ namespace kaixa::cli::detail {
     ) {
         std::vector<BuildProduct> products;
         if (preparation.requires_products) {
-            auto synchronization = plan_build(workspace.graph, workspace.registry, workspace.environment, preparation.build);
+            auto synchronization = plan_build(
+                workspace.graph,
+                workspace.registry,
+                workspace.environment,
+                preparation.build,
+                workspace.instances
+            );
             if (!synchronization)
                 return std::unexpected(synchronization.error());
 
@@ -291,14 +304,22 @@ namespace kaixa::cli::detail {
             if (!generated)
                 return std::unexpected(generated.error());
 
-            auto discovered = discover_products(workspace.graph, workspace.registry, workspace.environment);
+            auto discovered = discover_products(workspace.graph, workspace.registry, workspace.environment, workspace.instances);
             if (!discovered)
                 return std::unexpected(discovered.error());
 
             products = std::move(*discovered);
         }
 
-        auto plan = plan_task(workspace.graph, workspace.registry, workspace.environment, preparation, products, arguments);
+        auto plan = plan_task(
+            workspace.graph,
+            workspace.registry,
+            workspace.environment,
+            preparation,
+            products,
+            arguments,
+            workspace.instances
+        );
         if (!plan)
             return std::unexpected(plan.error());
 
@@ -314,7 +335,7 @@ namespace kaixa::cli::detail {
     }
 
     Result<std::size_t> execute_workflow_generate(const Workspace& workspace) {
-        auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment);
+        auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment, {}, workspace.instances);
         if (!plan)
             return std::unexpected(plan.error());
 
@@ -332,7 +353,7 @@ namespace kaixa::cli::detail {
     Result<std::size_t> execute_workflow_build(const Workspace& workspace) {
         BuildRequest request;
         request.build_default = true;
-        auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment, request);
+        auto plan = plan_build(workspace.graph, workspace.registry, workspace.environment, request, workspace.instances);
         if (!plan)
             return std::unexpected(plan.error());
 
@@ -348,7 +369,7 @@ namespace kaixa::cli::detail {
     }
 
     Result<std::size_t> execute_workflow_tests(const Workspace& workspace) {
-        auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, TestRequest{});
+        auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, TestRequest{}, workspace.instances);
         if (!plan)
             return std::unexpected(plan.error());
 
@@ -366,7 +387,7 @@ namespace kaixa::cli::detail {
     Result<std::size_t> execute_workflow_benchmarks(const Workspace& workspace) {
         TestRequest request;
         request.purpose = ProductPurpose::benchmark;
-        auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, request);
+        auto plan = plan_tests(workspace.graph, workspace.registry, workspace.environment, request, workspace.instances);
         if (!plan)
             return std::unexpected(plan.error());
 
@@ -404,7 +425,7 @@ namespace kaixa::cli::detail {
         ResolvedProductSelection selection;
         bool selection_resolved = false;
         if (command.list || !command.targets.empty() || !command.selection.empty()) {
-            auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment);
+            auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
             if (!synchronization)
                 return fail(synchronization.error());
 
@@ -416,7 +437,7 @@ namespace kaixa::cli::detail {
             if (!generated)
                 return fail(generated.error());
 
-            auto products = discover_products(workspace->graph, workspace->registry, workspace->environment);
+            auto products = discover_products(workspace->graph, workspace->registry, workspace->environment, workspace->instances);
             if (!products)
                 return fail(products.error());
 
@@ -443,7 +464,7 @@ namespace kaixa::cli::detail {
         if (selection_resolved)
             request.packages = selection.packages;
 
-        auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, request);
+        auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, request, workspace->instances);
         if (!plan)
             return fail(plan.error());
 
@@ -456,7 +477,7 @@ namespace kaixa::cli::detail {
             return fail(report.error());
 
         std::cout << "build completed: " << report->executed << " action(s) run\n";
-        auto products = discover_products(workspace->graph, workspace->registry, workspace->environment);
+        auto products = discover_products(workspace->graph, workspace->registry, workspace->environment, workspace->instances);
         if (!products)
             return fail(products.error());
 
@@ -486,7 +507,7 @@ namespace kaixa::cli::detail {
         BuildRequest request;
         request.install = true;
         request.install_prefix = prefix;
-        auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, request);
+        auto plan = plan_build(workspace->graph, workspace->registry, workspace->environment, request, workspace->instances);
         if (!plan)
             return fail(plan.error());
 
@@ -508,7 +529,7 @@ namespace kaixa::cli::detail {
         if (!workspace)
             return fail(workspace.error());
 
-        auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, command.request);
+        auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, command.request, workspace->instances);
         if (!plan)
             return fail(plan.error());
 
@@ -535,7 +556,7 @@ namespace kaixa::cli::detail {
             request.target = command.target;
             request.mode = command.list ? TestMode::list : TestMode::run;
             request.purpose = ProductPurpose::benchmark;
-            auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, request);
+            auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, request, workspace->instances);
             if (!plan)
                 return fail(plan.error());
 
@@ -553,7 +574,7 @@ namespace kaixa::cli::detail {
             return 0;
         }
 
-        auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment);
+        auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
         if (!synchronization)
             return fail(synchronization.error());
 
@@ -565,7 +586,7 @@ namespace kaixa::cli::detail {
         if (!generated)
             return fail(generated.error());
 
-        auto targets = discover_executable_targets(workspace->graph, workspace->registry, workspace->environment);
+        auto targets = discover_executable_targets(workspace->graph, workspace->registry, workspace->environment, workspace->instances);
         if (!targets)
             return fail(targets.error());
 
@@ -608,7 +629,7 @@ namespace kaixa::cli::detail {
         if (!workspace)
             return fail(workspace.error());
 
-        auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment);
+        auto synchronization = plan_build(workspace->graph, workspace->registry, workspace->environment, {}, workspace->instances);
         if (!synchronization)
             return fail(synchronization.error());
 
@@ -620,7 +641,7 @@ namespace kaixa::cli::detail {
         if (!generated)
             return fail(generated.error());
 
-        auto targets = discover_run_targets(workspace->graph, workspace->registry, workspace->environment);
+        auto targets = discover_run_targets(workspace->graph, workspace->registry, workspace->environment, workspace->instances);
         if (!targets)
             return fail(targets.error());
 

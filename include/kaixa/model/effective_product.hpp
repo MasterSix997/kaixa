@@ -61,6 +61,7 @@ namespace kaixa {
     [[nodiscard]] Result<EffectivePackage> realize_package(
         const Graph& graph,
         PackageId package,
-        const ProductRealizationContext& context = {}
+        const ProductRealizationContext& context = {},
+        FileCatalog* files = nullptr
     );
 }

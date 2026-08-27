@@ -246,7 +246,8 @@ namespace kaixa {
             const Graph& graph,
             const ProductDeclaration& declaration,
             const PackageNode& package,
-            const ProductRealizationContext& context
+            const ProductRealizationContext& context,
+            FileCatalog* files
         ) {
             auto value = effective_product_value(declaration, package, context);
             if (!value)
@@ -358,12 +359,12 @@ namespace kaixa {
             if (!finished)
                 return std::unexpected(finished.error());
 
-            auto header_files = expand_file_set(result.headers, package.directory, package.directory, true);
+            auto header_files = expand_file_set(result.headers, package.directory, package.directory, true, files);
             if (!header_files)
                 return std::unexpected(header_files.error());
 
             result.headers.files = std::move(*header_files);
-            auto public_header_files = expand_file_set(result.public_headers, package.directory, package.directory, true);
+            auto public_header_files = expand_file_set(result.public_headers, package.directory, package.directory, true, files);
             if (!public_header_files)
                 return std::unexpected(public_header_files.error());
 
@@ -371,7 +372,7 @@ namespace kaixa {
             std::erase_if(result.headers.files, [&](const std::filesystem::path& header) {
                 return std::ranges::find(result.public_headers.files, header) != result.public_headers.files.end();
             });
-            auto runtime_file_paths = expand_file_set(result.runtime_files, package.directory, package.directory, true);
+            auto runtime_file_paths = expand_file_set(result.runtime_files, package.directory, package.directory, true, files);
             if (!runtime_file_paths)
                 return std::unexpected(runtime_file_paths.error());
 
@@ -435,7 +436,8 @@ namespace kaixa {
             const std::filesystem::path& root,
             const std::filesystem::path& package_directory,
             const bool target,
-            const std::size_t owner
+            const std::size_t owner,
+            FileCatalog* files
         ) {
             const bool already_normalized = !sources.files.empty()
                 && sources.include.size() == sources.files.size()
@@ -450,21 +452,29 @@ namespace kaixa {
             }
             for (const std::string& pattern: sources.include) {
                 FileSet single{{pattern}, sources.exclude, {}, sources.location};
-                auto files = expand_file_set(single, root, package_directory, true);
-                if (!files)
-                    return std::unexpected(files.error());
+                auto expanded = expand_file_set(single, root, package_directory, true, files);
+                if (!expanded)
+                    return std::unexpected(expanded.error());
 
-                for (const std::filesystem::path& file: *files) {
+                for (const std::filesystem::path& file: *expanded) {
                     claims[file.lexically_normal()].push_back({target, owner, pattern, !is_glob_pattern(pattern), sources.location});
                 }
             }
             return {};
         }
 
-        Result<void> resolve_source_claims(EffectivePackage& package, const PackageNode& owner) {
+        Result<void> resolve_source_claims(EffectivePackage& package, const PackageNode& owner, FileCatalog* files) {
             std::map<std::filesystem::path, std::vector<SourceClaim>> claims;
             for (std::size_t index = 0; index < package.products.size(); ++index) {
-                auto added = add_source_claims(claims, package.products[index].sources, owner.directory, owner.directory, false, index);
+                auto added = add_source_claims(
+                    claims,
+                    package.products[index].sources,
+                    owner.directory,
+                    owner.directory,
+                    false,
+                    index,
+                    files
+                );
                 if (!added)
                     return std::unexpected(added.error());
             }
@@ -479,7 +489,8 @@ namespace kaixa {
                     target.target.source.parent_path(),
                     owner.directory,
                     true,
-                    index
+                    index,
+                    files
                 );
                 if (!added)
                     return std::unexpected(added.error());
@@ -547,7 +558,12 @@ namespace kaixa {
 #endif
     }
 
-    Result<EffectivePackage> realize_package(const Graph& graph, const PackageId package_id, const ProductRealizationContext& context) {
+    Result<EffectivePackage> realize_package(
+        const Graph& graph,
+        const PackageId package_id,
+        const ProductRealizationContext& context,
+        FileCatalog* files
+    ) {
         const PackageNode& package = graph[package_id];
         EffectivePackage result;
         result.package = package_id;
@@ -555,7 +571,7 @@ namespace kaixa {
             return result;
 
         for (const ProductDeclaration& declaration: package.manifest->products) {
-            auto product = realize_product(graph, declaration, package, context);
+            auto product = realize_product(graph, declaration, package, context, files);
             if (!product)
                 return std::unexpected(product.error());
 
@@ -564,7 +580,7 @@ namespace kaixa {
         for (const PackageTarget& target: package.targets) {
             result.targets.push_back(realize_target(graph, package, target));
         }
-        auto claims = resolve_source_claims(result, package);
+        auto claims = resolve_source_claims(result, package, files);
         if (!claims)
             return std::unexpected(claims.error());
 

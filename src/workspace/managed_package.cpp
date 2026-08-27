@@ -73,7 +73,7 @@ namespace kaixa::workspace_detail {
             );
         }
 
-        auto targets = normalize_package_targets(*selected, directory);
+        auto targets = normalize_package_targets(*selected, directory, &packages.files());
         if (!targets)
             return std::unexpected(targets.error());
 

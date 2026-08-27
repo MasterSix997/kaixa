@@ -252,6 +252,12 @@ namespace kaixa {
     [[nodiscard]] Result<Manifest> parse_manifest(const Value& document);
     [[nodiscard]] Result<Manifest> parse_manifest_file(const std::filesystem::path& path);
     [[nodiscard]] Result<Manifest> parse_manifest_string(std::string_view text, std::string_view source_name);
+    [[nodiscard]] Result<std::vector<PackageTarget>> parse_package_targets(
+        const Value& document,
+        const std::filesystem::path& path,
+        PackageTargetKind kind,
+        std::string_view resolver
+    );
     [[nodiscard]] Result<std::vector<PackageTarget>> parse_package_targets_file(
         const std::filesystem::path& path,
         PackageTargetKind kind,

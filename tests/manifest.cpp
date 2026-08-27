@@ -170,12 +170,18 @@ KAIXA_TEST(file_sets_expand_globs_and_keep_literal_generated_files) {
 
     kaixa::FileSet direct_sources;
     direct_sources.include = {"src/*.cpp"};
-    const auto direct = kaixa::expand_file_set(direct_sources, root.path(), root.path());
+    kaixa::FileCatalog catalog;
+    const auto recursive = catalog.expand(files, root.path(), root.path());
+    const std::size_t directories_after_recursive = catalog.directories_read();
+    const auto direct = catalog.expand(direct_sources, root.path(), root.path());
+    context.check(recursive.has_value(), "catalog expands a recursive file set");
     context.check(direct.has_value(), "non-recursive file set expands");
     if (direct) {
         context.check_equal(direct->size(), std::size_t{1}, "non-recursive glob stays at its declared depth");
         context.check_equal(direct->front(), std::filesystem::path("src/first.cpp"), "non-recursive glob keeps the direct match");
     }
+    context.check_equal(catalog.directories_read(), directories_after_recursive, "catalog reuses directories already inspected");
+    context.check(catalog.entries_read() >= expanded->size(), "catalog reports inspected entries");
 }
 
 KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {

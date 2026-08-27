@@ -20,9 +20,18 @@ namespace kaixa::workspace_detail {
 
     private:
         [[nodiscard]] Result<PackageId> add_dependency(PackageId package, const DependencyBinding& dependency);
-        [[nodiscard]] Result<void> activate_dependencies(PackageId package, const Manifest& manifest, const FeatureDefinition& feature);
+        [[nodiscard]] Result<void> activate_dependencies(
+            PackageId package,
+            std::span<const DependencyBinding> dependencies,
+            const FeatureDefinition& feature
+        );
         [[nodiscard]] Result<void> activate_members(PackageId package, const FeatureDefinition& feature);
-        [[nodiscard]] Result<void> activate_legacy(PackageId package, const Manifest& manifest, const FeatureDefinition& feature);
+        [[nodiscard]] Result<void> activate_legacy(
+            PackageId package,
+            std::span<const DependencyBinding> dependencies,
+            std::span<const FeatureDefinition> features,
+            const FeatureDefinition& feature
+        );
 
         Graph& m_graph;
         FeatureDependencyResolver m_dependency_resolver;

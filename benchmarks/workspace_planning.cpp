@@ -103,13 +103,13 @@ int main() {
     constexpr std::size_t files_per_package = 8;
     constexpr std::size_t iterations = 9;
 #ifdef NDEBUG
-    constexpr double resolution_budget_ms = 200.0;
-    constexpr double model_budget_ms = 150.0;
-    constexpr double plan_budget_ms = 150.0;
+    constexpr double resolution_budget_ms = 100.0;
+    constexpr double model_budget_ms = 80.0;
+    constexpr double plan_budget_ms = 75.0;
 #else
-    constexpr double resolution_budget_ms = 750.0;
-    constexpr double model_budget_ms = 750.0;
-    constexpr double plan_budget_ms = 750.0;
+    constexpr double resolution_budget_ms = 400.0;
+    constexpr double model_budget_ms = 250.0;
+    constexpr double plan_budget_ms = 500.0;
 #endif
 
     TemporaryWorkspace workspace;
