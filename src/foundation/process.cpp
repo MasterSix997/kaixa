@@ -1,6 +1,7 @@
 #include <kaixa/foundation/process.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cerrno>
 #include <chrono>
@@ -239,7 +240,7 @@ namespace kaixa {
             startup.cb = sizeof(startup);
             PROCESS_INFORMATION process{};
             if (capture) {
-                const HANDLE output = reinterpret_cast<HANDLE>(_get_osfhandle(_fileno(capture)));
+                const HANDLE output = std::bit_cast<HANDLE>(_get_osfhandle(_fileno(capture)));
                 if (output == INVALID_HANDLE_VALUE || !SetHandleInformation(output, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT))
                     return std::unexpected(error("cannot prepare process output capture"));
                 startup.dwFlags |= STARTF_USESTDHANDLES;

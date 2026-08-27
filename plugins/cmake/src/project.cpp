@@ -49,7 +49,7 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         std::string project_source_path(const Options& options, const std::filesystem::path& path) {
-            const std::string value = project_path(options, path.generic_string());
+            std::string value = project_path(options, path.generic_string());
             if (options.generation == GenerationMode::source && std::filesystem::path(value).is_relative())
                 return "${CMAKE_CURRENT_LIST_DIR}/" + value;
 
@@ -136,9 +136,10 @@ namespace kaixa::plugin::cmake::detail {
             for (std::string& include: result) {
                 const std::filesystem::path path = include;
                 if (options.generation == GenerationMode::source && !include.starts_with("$<") && path.is_relative())
-                    include = "${CMAKE_CURRENT_LIST_DIR}/" + include;
+                    include.insert(0, "${CMAKE_CURRENT_LIST_DIR}/");
 
-                include = "$<BUILD_INTERFACE:" + include + ">";
+                include.insert(0, "$<BUILD_INTERFACE:");
+                include += '>';
             }
             result.push_back("$<INSTALL_INTERFACE:include>");
             return result;

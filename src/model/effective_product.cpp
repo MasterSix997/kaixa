@@ -55,11 +55,11 @@ namespace kaixa {
                     expected.push_back(*text);
                 } else if (const std::vector<Value>* values = entry.value.as_array()) {
                     for (const Value& value: *values) {
-                        const std::string* text = value.as_string();
-                        if (!text) {
+                        const std::string* expected_value = value.as_string();
+                        if (!expected_value) {
                             return std::unexpected(wrong_kind(value.location(), "a condition string", value.kind()));
                         }
-                        expected.push_back(*text);
+                        expected.push_back(*expected_value);
                     }
                 } else {
                     return std::unexpected(wrong_kind(entry.value.location(), "a condition string or string array", entry.value.kind()));
@@ -304,7 +304,7 @@ namespace kaixa {
             result.public_headers.location = declaration.location;
 
             for (
-                const auto [key, output]: {std::pair{std::string_view{"include"}, &result.include_directories},
+                const auto& [key, output]: {std::pair{std::string_view{"include"}, &result.include_directories},
                     std::pair{std::string_view{"public-include"}, &result.public_include_directories},
                     std::pair{std::string_view{"system-include"}, &result.system_include_directories},
                     std::pair{std::string_view{"public-system-include"}, &result.public_system_include_directories}}

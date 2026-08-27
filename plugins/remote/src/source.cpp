@@ -63,9 +63,9 @@ namespace kaixa::plugin::remote {
                 );
             }
             if (result.sha256 && (result.sha256->size() != 64 || !std::ranges::all_of(*result.sha256, [](const char character) {
-                    return character >= '0' && character <= '9'
-                        || character >= 'a' && character <= 'f'
-                        || character >= 'A' && character <= 'F';
+                    return (character >= '0' && character <= '9')
+                        || (character >= 'a' && character <= 'f')
+                        || (character >= 'A' && character <= 'F');
                 }))) {
                 return std::unexpected(error_at(source.options.location(), "source `sha256` must contain 64 hexadecimal characters"));
             }
@@ -86,7 +86,7 @@ namespace kaixa::plugin::remote {
             if (!result->succeeded()) {
                 Diagnostic diagnostic = error(std::string(operation) + " failed with exit code " + std::to_string(result->exit_code));
                 if (!result->output.empty())
-                    diagnostic = std::move(diagnostic).add_note(result->output);
+                    diagnostic.notes.push_back(result->output);
 
                 return std::unexpected(std::move(diagnostic));
             }
@@ -185,8 +185,12 @@ namespace kaixa::plugin::remote {
             }
             std::ranges::sort(fields);
             std::string result = source.driver;
-            for (const auto& [key, value]: fields)
-                result += '\n' + key + '=' + value;
+            for (const auto& [key, value]: fields) {
+                result += '\n';
+                result += key;
+                result += '=';
+                result += value;
+            }
 
             return result;
         }
@@ -340,8 +344,7 @@ namespace kaixa::plugin::remote {
                 if (relative.empty()
                     || relative.is_absolute()
                     || relative.has_root_path()
-                    || std::ranges::find(relative, "..") != relative.end()
-                ) {
+                    || std::ranges::find(relative, "..") != relative.end()) {
                     return std::unexpected(error_at(source.options.location(), "URL source filename must stay inside the source tree"));
                 }
                 auto tree = materialize_source_cache(

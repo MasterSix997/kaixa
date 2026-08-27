@@ -53,9 +53,9 @@ namespace kaixa {
             std::string result;
             result.reserve(value.size());
             for (const char character: value) {
-                const bool safe = character >= 'a' && character <= 'z'
-                    || character >= 'A' && character <= 'Z'
-                    || character >= '0' && character <= '9'
+                const bool safe = (character >= 'a' && character <= 'z')
+                    || (character >= 'A' && character <= 'Z')
+                    || (character >= '0' && character <= '9')
                     || character == '-'
                     || character == '_';
                 result += safe ? character : '_';

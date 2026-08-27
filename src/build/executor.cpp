@@ -121,7 +121,7 @@ namespace kaixa {
                             output += line;
                         start = end == std::string::npos ? result->output.size() : end + 1;
                     }
-                    diagnostic = std::move(diagnostic).add_note(std::move(output));
+                    diagnostic.notes.push_back(std::move(output));
                 }
                 return std::unexpected(std::move(diagnostic));
             }

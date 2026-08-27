@@ -469,7 +469,7 @@ namespace kaixa::plugin::cmake {
         }
 
         bool valid_cmake_variable(const std::string_view name) {
-            if (name.empty() || !(std::isalpha(static_cast<unsigned char>(name.front())) || name.front() == '_'))
+            if (name.empty() || (!std::isalpha(static_cast<unsigned char>(name.front())) && name.front() != '_'))
                 return false;
 
             return std::ranges::all_of(name.substr(1), [](const unsigned char character) {
@@ -866,7 +866,7 @@ namespace kaixa::plugin::cmake {
             if (!source_only_interfaces)
                 return std::unexpected(source_only_interfaces.error());
 
-            result += std::move(*source_only_interfaces);
+            result += *source_only_interfaces;
             for (const PackageId id: context.source_packages) {
                 if (id == context.package.id)
                     continue;
@@ -910,8 +910,16 @@ namespace kaixa::plugin::cmake {
 
                 result += ")\n";
                 for (const auto& [alias, target]: *aliases) {
-                    result += indent + "add_library(" + alias + " INTERFACE)\n";
-                    result += indent + "target_link_libraries(" + alias + " INTERFACE " + target + ")\n";
+                    result += indent;
+                    result += "add_library(";
+                    result += alias;
+                    result += " INTERFACE)\n";
+                    result += indent;
+                    result += "target_link_libraries(";
+                    result += alias;
+                    result += " INTERFACE ";
+                    result += target;
+                    result += ")\n";
                 }
                 for (const std::filesystem::path& include: *feature_includes)
                     result += indent + "include(" + cmake_quote(include) + ")\n";

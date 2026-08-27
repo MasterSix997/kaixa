@@ -334,7 +334,7 @@ namespace kaixa {
 
         for (const DependencyBinding& dependency: manifest->dependencies) {
             const SourceLocator* source = dependency.selection.source();
-            const bool local_path = dependency.selection.path() || source && source->driver == "path";
+            const bool local_path = dependency.selection.path() || (source && source->driver == "path");
             if (local_path) {
                 return std::unexpected(
                     error_at(dependency.location, "published dependency `" + dependency.request.package + "` cannot use a local path")

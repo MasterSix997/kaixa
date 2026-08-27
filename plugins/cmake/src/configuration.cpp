@@ -410,11 +410,13 @@ namespace kaixa::plugin::cmake::detail {
                 } else if (const std::string* text = entry.value.as_string()) {
                     result.push_back(entry.key + "=" + *text);
                 } else if (const Value* path = entry.value.find("path")) {
-                    const std::string* text = path->as_string();
-                    if (!text) {
+                    const std::string* path_text = path->as_string();
+                    if (!path_text) {
                         return std::unexpected(wrong_kind(path->location(), "a path string", path->kind()));
                     }
-                    result.push_back(entry.key + "=" + (source_root / std::filesystem::path(*text)).lexically_normal().generic_string());
+                    result.push_back(
+                        entry.key + "=" + (source_root / std::filesystem::path(*path_text)).lexically_normal().generic_string()
+                    );
                 } else {
                     return std::unexpected(error_at(entry.value.location(), "definition `" + entry.key + "` has an unsupported value"));
                 }
@@ -855,7 +857,6 @@ namespace kaixa::plugin::cmake::detail {
         Result<void> read_project_configuration(
             TableReader& options,
             Options& result,
-            const PackageNode& package,
             const EffectivePolicy& package_policy,
             std::optional<std::int64_t>& default_standard
         ) {
@@ -1465,7 +1466,7 @@ namespace kaixa::plugin::cmake::detail {
         TableReader options = std::move(*options_result);
 
         std::optional<std::int64_t> default_standard;
-        auto project_configuration = read_project_configuration(options, result, package, package_policy, default_standard);
+        auto project_configuration = read_project_configuration(options, result, package_policy, default_standard);
         if (!project_configuration)
             return std::unexpected(project_configuration.error());
 

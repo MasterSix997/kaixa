@@ -26,20 +26,6 @@ namespace kaixa {
             return is_valid_target_name(value);
         }
 
-        Result<std::string> read_identifier(TableReader& table, const std::string_view key) {
-            auto value = table.string(key);
-            if (!value)
-                return std::unexpected(value.error());
-
-            if (!is_valid_identifier(*value))
-                return std::unexpected(
-
-                    error_at(table.location_of(key), "`" + *value + "` is not a valid name; use letters, digits, `_` and `-`")
-                );
-
-            return *value;
-        }
-
         Result<std::string> read_package_name(TableReader& table, const std::string_view key) {
             auto value = table.string(key);
             if (!value)
@@ -1010,7 +996,7 @@ namespace kaixa {
             if (*provider)
                 dependency.selection = CandidateSelection::from_provider(std::move(**provider));
             else if (*directory)
-                dependency.selection = CandidateSelection::from_path(std::filesystem::path(std::move(**directory)));
+                dependency.selection = CandidateSelection::from_path(std::filesystem::path(**directory));
             else if (source)
                 dependency.selection = CandidateSelection::from_source(std::move(*source));
 
@@ -1052,9 +1038,11 @@ namespace kaixa {
             if (!defaults)
                 return std::unexpected(defaults.error());
 
-            for (const std::string& name: *defaults) {
-                if (!is_valid_package_name(name)) {
-                    return std::unexpected(error_at(table.location_of("default"), "`" + name + "` is not a valid default package name"));
+            for (const std::string& default_name: *defaults) {
+                if (!is_valid_package_name(default_name)) {
+                    return std::unexpected(
+                        error_at(table.location_of("default"), "`" + default_name + "` is not a valid default package name")
+                    );
                 }
             }
             package_set.defaults = std::move(*defaults);
@@ -1086,7 +1074,7 @@ namespace kaixa {
 
         Result<void> read_products(TableReader& root, Manifest& manifest) {
             for (
-                const auto [key, kind]: {std::pair{std::string_view{"lib"}, ProductDeclarationKind::library},
+                const auto& [key, kind]: {std::pair{std::string_view{"lib"}, ProductDeclarationKind::library},
                     std::pair{std::string_view{"bin"}, ProductDeclarationKind::executable}}
             ) {
                 const Value* product = root.take(key);

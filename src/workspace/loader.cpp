@@ -47,7 +47,7 @@ namespace kaixa {
                 if (!workspace)
                     return std::unexpected(workspace.error());
 
-                m_model = &workspace->tree;
+                m_model = std::move(workspace->tree);
 
                 auto lock = read_lockfile();
                 if (!lock)
@@ -102,7 +102,7 @@ namespace kaixa {
                     std::move(workspace->manifest),
                     std::move(context),
                     *lock_changed,
-                    std::move(workspace->tree),
+                    std::move(*m_model),
                     std::move(*instances)};
             }
 
@@ -349,7 +349,7 @@ namespace kaixa {
                             available = document.package->name;
 
                         if (!available.empty()) {
-                            diagnostic = std::move(diagnostic).add_note("available packages: " + available);
+                            diagnostic.notes.push_back("available packages: " + available);
                         }
 
                         return std::unexpected(std::move(diagnostic));
@@ -1115,7 +1115,7 @@ namespace kaixa {
             Graph m_graph;
             PackageIndex m_packages;
             ExtensionRegistry* m_extensions = nullptr;
-            const ManifestTree* m_model = nullptr;
+            std::optional<ManifestTree> m_model;
             std::filesystem::path m_source_cache;
             std::span<const ProviderLayer> m_provider_layers;
             const Value* m_feature_settings = nullptr;

@@ -21,7 +21,6 @@ namespace kaixa {
 
         Result<void> append_task(
             std::vector<TaskDefinition>& tasks,
-            const Graph& graph,
             const PackageNode& package,
             const TaskDeclaration& declaration,
             std::optional<std::string> associated_target
@@ -262,7 +261,6 @@ namespace kaixa {
         }
 
         Result<std::string> product_artifact(
-            const Graph& graph,
             const std::span<const BuildProduct> products,
             const TaskDefinition& task,
             const std::string_view name
@@ -380,12 +378,7 @@ namespace kaixa {
                         std::string_view(name).substr(std::string_view("artifact:").size())
                     );
                 else if (name.starts_with("target:"))
-                    replacement = product_artifact(
-                        graph,
-                        products,
-                        task,
-                        std::string_view(name).substr(std::string_view("target:").size())
-                    );
+                    replacement = product_artifact(products, task, std::string_view(name).substr(std::string_view("target:").size()));
 
                 if (!replacement)
                     return std::unexpected(replacement.error());
@@ -565,13 +558,13 @@ namespace kaixa {
                 continue;
 
             for (const TaskDeclaration& declaration: package.manifest->commands) {
-                auto appended = append_task(result, graph, package, declaration, std::nullopt);
+                auto appended = append_task(result, package, declaration, std::nullopt);
                 if (!appended)
                     return std::unexpected(appended.error());
             }
             for (const PackageTarget& target: package.targets) {
                 for (const TaskDeclaration& declaration: target.commands) {
-                    auto appended = append_task(result, graph, package, declaration, target.name);
+                    auto appended = append_task(result, package, declaration, target.name);
                     if (!appended)
                         return std::unexpected(appended.error());
                 }

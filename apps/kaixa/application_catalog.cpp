@@ -51,7 +51,7 @@ namespace kaixa::cli::detail {
         std::optional<std::size_t> selected;
         for (std::size_t index = 0; index < candidates->size(); ++index) {
             const PackageCandidate& candidate = (*candidates)[index];
-            if (!candidate.version || parsed_requirement && !matches(*parsed_requirement, *candidate.version))
+            if (!candidate.version || (parsed_requirement && !matches(*parsed_requirement, *candidate.version)))
                 continue;
 
             if (!selected || compare_versions(*candidate.version, *(*candidates)[*selected].version) > 0)
@@ -207,9 +207,9 @@ namespace kaixa::cli::detail {
         if (!resolved) {
             auto restored = write_file_atomic(edit->path, edit->before);
             Diagnostic diagnostic = resolved.error();
-            diagnostic = std::move(diagnostic).add_note("manifest edit was rolled back");
+            diagnostic.notes.emplace_back("manifest edit was rolled back");
             if (!restored)
-                diagnostic = std::move(diagnostic).add_note("rollback failed: " + format_diagnostic(restored.error()));
+                diagnostic.notes.push_back("rollback failed: " + format_diagnostic(restored.error()));
 
             return fail(diagnostic);
         }
@@ -238,9 +238,9 @@ namespace kaixa::cli::detail {
         if (!resolved) {
             auto restored = write_file_atomic(edit->path, edit->before);
             Diagnostic diagnostic = resolved.error();
-            diagnostic = std::move(diagnostic).add_note("manifest edit was rolled back");
+            diagnostic.notes.emplace_back("manifest edit was rolled back");
             if (!restored)
-                diagnostic = std::move(diagnostic).add_note("rollback failed: " + format_diagnostic(restored.error()));
+                diagnostic.notes.push_back("rollback failed: " + format_diagnostic(restored.error()));
 
             return fail(diagnostic);
         }
