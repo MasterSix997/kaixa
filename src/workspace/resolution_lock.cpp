@@ -25,13 +25,12 @@ namespace kaixa {
         constexpr std::int64_t lock_schema = 1;
 
         bool is_not_found(const std::error_code& failure) {
-            if (failure == std::errc::no_such_file_or_directory)
-                return true;
-
 #ifdef _WIN32
-            return failure.value() == ERROR_FILE_NOT_FOUND || failure.value() == ERROR_PATH_NOT_FOUND;
+            return failure == std::errc::no_such_file_or_directory
+                || failure.value() == ERROR_FILE_NOT_FOUND
+                || failure.value() == ERROR_PATH_NOT_FOUND;
 #else
-            return false;
+            return failure == std::errc::no_such_file_or_directory;
 #endif
         }
 

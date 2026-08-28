@@ -116,14 +116,23 @@ namespace kaixa::testing {
 
     TempDirectory::TempDirectory(const std::string_view label) {
         std::error_code failure;
-        const std::filesystem::path temporary = std::filesystem::temp_directory_path(failure);
-        if (failure)
-            throw std::runtime_error("cannot locate the temporary directory: " + failure.message());
+        std::filesystem::path temporary;
+        if (const char* configured = std::getenv("KAIXA_TEST_TEMP"); configured && *configured) {
+            temporary = configured;
+        } else {
+            temporary = std::filesystem::temp_directory_path(failure);
+            if (failure)
+                throw std::runtime_error("cannot locate the temporary directory: " + failure.message());
+        }
 
         m_path = temporary / unique_name(label);
         std::filesystem::create_directories(m_path, failure);
         if (failure)
             throw std::runtime_error("cannot create test directory: " + failure.message());
+
+        m_path = std::filesystem::canonical(m_path, failure);
+        if (failure)
+            throw std::runtime_error("cannot canonicalize test directory: " + failure.message());
     }
 
     TempDirectory::~TempDirectory() {
