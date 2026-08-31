@@ -16,8 +16,11 @@ namespace kaixa::cli::detail {
             output << std::string(entry.depth * 2, ' ') << package.name;
             if (package.kind == PackageKind::opaque)
                 output << " (opaque)";
-            else
+            else {
                 output << " (" << package.resolver << ')';
+                if (package.kind == PackageKind::adopted)
+                    output << " [adopted]";
+            }
 
             if (entry.repeated) {
                 output << " [already shown]\n";

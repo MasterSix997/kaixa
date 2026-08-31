@@ -23,8 +23,13 @@ namespace kaixa {
 
     enum class PackageKind {
         managed,
+        adopted,
         opaque
     };
+
+    [[nodiscard]] constexpr bool has_build_semantics(const PackageKind kind) noexcept {
+        return kind != PackageKind::opaque;
+    }
 
     struct PackageTargetDependencies {
         std::string target;

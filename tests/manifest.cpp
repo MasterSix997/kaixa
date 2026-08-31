@@ -101,7 +101,7 @@ KAIXA_TEST(manifest_tree_loads_target_layers_and_advanced_target_data) {
         "examples = [\"examples\"]\n"
     );
     root.write(
-        "app/examples/Kaixa.toml",
+        "app/examples/Kaixa.example.toml",
         "[examples]\n"
         "name-template = \"demo.{stem}\"\n"
         "source = \"template.cpp\"\n"
@@ -119,13 +119,43 @@ KAIXA_TEST(manifest_tree_loads_target_layers_and_advanced_target_data) {
     context.check_equal(tree->summary.packages, std::size_t{1}, "package count");
     context.check_equal(tree->summary.package_sets, std::size_t{1}, "package-set count");
     context.check_equal(tree->summary.target_documents, std::size_t{1}, "target document count");
-    const kaixa::PackageTarget& target = tree->target_documents.front().targets.front();
+    const auto target_document = std::ranges::find_if(tree->documents, [](const kaixa::KaixaDocument& document) {
+        return std::holds_alternative<kaixa::TargetManifestDocument>(document);
+    });
+    context.check(target_document != tree->documents.end(), "associated-target document is represented");
+    if (target_document == tree->documents.end())
+        return;
+
+    const kaixa::PackageTarget& target = std::get<kaixa::TargetManifestDocument>(*target_document).targets.front();
     context.check(target.matrix.has_value(), "target matrix is normalized");
     context.check_equal(
         target.required_dependency_features.at("graphics").front(),
         std::string("vulkan"),
         "dependency feature requirement is normalized"
     );
+
+    const auto package_document = kaixa::parse_kaixa_document_file(root.path() / "app/Kaixa.toml");
+    context.check(
+        package_document && std::holds_alternative<kaixa::ManifestDocument>(*package_document),
+        "package filename selects a package document"
+    );
+    const auto associated_document = kaixa::parse_kaixa_document_file(root.path() / "app/examples/Kaixa.example.toml");
+    context.check(
+        associated_document && std::holds_alternative<kaixa::TargetManifestDocument>(*associated_document),
+        "associated-target filename selects a target document"
+    );
+}
+
+KAIXA_TEST(kaixa_document_filenames_define_their_roles) {
+    const TempDirectory root("manifest-roles");
+    root.write("Kaixa.toml", "[[test]]\nname = \"legacy\"\nsources = [\"test.cpp\"]\n");
+    root.write("Kaixa.test.toml", "[[example]]\nname = \"wrong-role\"\nsources = [\"example.cpp\"]\n");
+
+    const auto legacy = kaixa::parse_kaixa_document_file(root.path() / "Kaixa.toml");
+    context.check(!legacy, "Kaixa.toml cannot masquerade as an associated-target document");
+
+    const auto mismatched = kaixa::parse_kaixa_document_file(root.path() / "Kaixa.test.toml");
+    context.check(!mismatched, "an associated-target filename cannot declare a different target role");
 }
 
 KAIXA_TEST(manifest_rejects_unknown_keys) {

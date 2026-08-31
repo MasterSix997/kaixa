@@ -76,7 +76,7 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
     );
     workspace.write("app/app.cpp", "int app() { return 0; }\n");
     workspace.write(
-        "app/tests/Kaixa.toml",
+        "app/tests/Kaixa.test.toml",
         "[[test]]\n"
         "name = \"app.tests\"\n"
         "sources = [\"tests.cpp\"]\n"
@@ -89,7 +89,7 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
     );
     workspace.write("app/tests/tests.cpp", "int test_source() { return 0; }\n");
     workspace.write(
-        "app/benchmarks/Kaixa.toml",
+        "app/benchmarks/Kaixa.benchmark.toml",
         "[[benchmark]]\n"
         "name = \"app.benchmarks\"\n"
         "sources = [\"bench.cpp\"]\n"
@@ -126,6 +126,10 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
     context.check(project != plan->generated_files().end(), "application project is generated");
     if (project != plan->generated_files().end()) {
         context.check_contains(project->content, "googletest", "GoogleTest default product is linked implicitly");
+        context.check(
+            !project->content.contains("[[googletest]]\n    [[googletest]]"),
+            "framework product and adapter main product collapse into a single link entry"
+        );
         context.check_contains(project->content, "gtest_discover_tests", "GoogleTest cases are registered with CTest");
         context.check_contains(project->content, "--benchmark_list_tests=true", "benchmark cases are discovered for CTest and IDEs");
         context.check_contains(project->content, "if(NOT EXISTS", "unbuilt discovery targets do not break the selected catalog");
@@ -328,7 +332,7 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         return;
 
     const kaixa::PackageNode& package = resolution->graph[*component];
-    context.check(package.kind == kaixa::PackageKind::managed, "adopted source participates in source builds");
+    context.check(package.kind == kaixa::PackageKind::adopted, "manifest-free source is represented as adopted");
     context.check_equal(package.directory, workspace.path() / "vendor/Build", "consumer path selects the external project");
     context.check(resolution->graph.find_by_name("helper").has_value(), "adopted source feature activates its package dependency");
     context.check(

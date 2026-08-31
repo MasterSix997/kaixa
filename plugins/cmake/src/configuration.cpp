@@ -973,6 +973,7 @@ namespace kaixa::plugin::cmake::detail {
             if (default_standard && *default_standard <= 0) {
                 return std::unexpected(error_at(options.location_of("cxx-standard"), "C++ standard must be positive"));
             }
+            result.cxx_standard = default_standard;
             return {};
         }
 
@@ -1171,9 +1172,9 @@ namespace kaixa::plugin::cmake::detail {
                         error_at(std::move(location), "`" + entry.key + "` is not a dependency of `" + package.name + "`")
                     );
                 }
-                if (graph[*dependency].kind != PackageKind::managed || graph[*dependency].resolver != "cmake") {
+                if (!has_build_semantics(graph[*dependency].kind) || graph[*dependency].resolver != "cmake") {
                     return std::unexpected(
-                        error_at(std::move(location), "CMake integration can only be selected for a managed CMake dependency")
+                        error_at(std::move(location), "CMake integration requires a managed or adopted CMake dependency")
                     );
                 }
 
@@ -1364,8 +1365,10 @@ namespace kaixa::plugin::cmake::detail {
                     adapter = std::move(*resolved);
                 }
 
-                if (!adapter.main_product.empty())
-                    result.targets.back().link_libraries.push_back(adapter.main_product);
+                std::vector<std::string>& link_libraries = result.targets.back().link_libraries;
+                if (!adapter.main_product.empty() && std::ranges::find(link_libraries, adapter.main_product) == link_libraries.end()) {
+                    link_libraries.push_back(adapter.main_product);
+                }
 
                 result.tests.push_back(
                     {declared.display_name.value_or(*declared.name), *declared.name, declared.arguments, std::move(adapter)}

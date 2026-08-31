@@ -1698,6 +1698,49 @@ namespace kaixa {
         return manifest;
     }
 
+    std::string_view target_manifest_filename(const PackageTargetKind kind) noexcept {
+        switch (kind) {
+        case PackageTargetKind::test: return "Kaixa.test.toml";
+        case PackageTargetKind::example: return "Kaixa.example.toml";
+        case PackageTargetKind::benchmark: return "Kaixa.benchmark.toml";
+        }
+        return {};
+    }
+
+    Result<KaixaDocument> parse_kaixa_document_file(const std::filesystem::path& path) {
+        auto document = parse_file(path);
+        if (!document)
+            return std::unexpected(document.error());
+
+        if (path.filename() == "Kaixa.toml") {
+            auto manifest = complete_manifest_document(*document, path);
+            if (!manifest)
+                return std::unexpected(manifest.error());
+
+            return KaixaDocument{std::move(*manifest)};
+        }
+
+        std::optional<PackageTargetKind> kind;
+        for (const PackageTargetKind candidate: {PackageTargetKind::test, PackageTargetKind::example, PackageTargetKind::benchmark}) {
+            if (path.filename() == target_manifest_filename(candidate)) {
+                kind = candidate;
+                break;
+            }
+        }
+        if (!kind)
+            return std::unexpected(error("unrecognized Kaixa document filename: " + path.filename().string()));
+
+        if (document->find("package") || document->find("package-set")) {
+            return std::unexpected(error_at(document->location(), "associated-target documents cannot declare packages or package sets"));
+        }
+
+        auto targets = parse_package_targets_document(*document, path, *kind, {});
+        if (!targets)
+            return std::unexpected(targets.error());
+
+        return KaixaDocument{TargetManifestDocument{path, std::move(*targets)}};
+    }
+
     Result<ManifestDocument> parse_manifest_document_string(const std::string_view text, const std::string_view source_name) {
         auto document = parse_string(text, source_name);
         if (!document)
@@ -1786,8 +1829,15 @@ namespace kaixa {
         while (!failure && iterator != end) {
             if (iterator->is_directory(failure) && iterator->path().filename() == ".kaixa") {
                 iterator.disable_recursion_pending();
-            } else if (iterator->is_regular_file(failure) && iterator->path().filename() == "Kaixa.toml") {
-                manifests.push_back(iterator->path());
+            } else if (iterator->is_regular_file(failure)) {
+                const std::filesystem::path filename = iterator->path().filename();
+                const bool package_document = filename == "Kaixa.toml";
+                constexpr std::array target_kinds{PackageTargetKind::test, PackageTargetKind::example, PackageTargetKind::benchmark};
+                const bool target_document = std::ranges::any_of(target_kinds, [&](const PackageTargetKind kind) {
+                    return filename == target_manifest_filename(kind);
+                });
+                if (package_document || target_document)
+                    manifests.push_back(iterator->path());
             }
             iterator.increment(failure);
         }
@@ -1798,46 +1848,18 @@ namespace kaixa {
 
         ManifestTree tree;
         for (const std::filesystem::path& path: manifests) {
-            auto value = parse_file(path);
-            if (!value)
-                return std::unexpected(value.error());
+            auto document = parse_kaixa_document_file(path);
+            if (!document)
+                return std::unexpected(document.error());
 
-            const bool is_package_document = value->find("package") || value->find("package-set");
-            if (is_package_document) {
-                auto document = complete_manifest_document(*value, path);
-                if (!document)
-                    return std::unexpected(document.error());
-
-                tree.summary.packages += document->package ? 1 : 0;
-                tree.summary.packages += document->inline_members.size();
-                tree.summary.package_sets += document->package_set ? 1 : 0;
-                tree.documents.push_back(std::move(*document));
+            if (const auto* package = std::get_if<ManifestDocument>(&*document)) {
+                tree.summary.packages += package->package ? 1 : 0;
+                tree.summary.packages += package->inline_members.size();
+                tree.summary.package_sets += package->package_set ? 1 : 0;
             } else {
-                std::optional<PackageTargetKind> kind;
-                for (
-                    const auto& [singular, plural, candidate]: {std::tuple{"test", "tests", PackageTargetKind::test},
-                        std::tuple{"example", "examples", PackageTargetKind::example},
-                        std::tuple{"benchmark", "benchmarks", PackageTargetKind::benchmark}}
-                ) {
-                    if (value->find(singular) || value->find(plural)) {
-                        if (kind && *kind != candidate) {
-                            return std::unexpected(error_at(value->location(), "a target-only manifest cannot mix target kinds"));
-                        }
-                        kind = candidate;
-                    }
-                }
-                if (!kind) {
-                    return std::unexpected(
-                        error_at(value->location(), "Kaixa.toml declares neither a package, package set, nor package targets")
-                    );
-                }
-                auto targets = parse_package_targets_document(*value, path, *kind, {});
-                if (!targets)
-                    return std::unexpected(targets.error());
-
-                tree.target_documents.push_back({path, std::move(*targets)});
                 ++tree.summary.target_documents;
             }
+            tree.documents.push_back(std::move(*document));
             ++tree.summary.documents;
         }
         return tree;

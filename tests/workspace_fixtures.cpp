@@ -132,13 +132,13 @@ KAIXA_TEST(target_directories_compose_layers_captures_and_skip_requirements) {
         "examples = [\"examples\"]\n"
     );
     workspace.write(
-        "examples/Kaixa.toml",
+        "examples/Kaixa.example.toml",
         "[examples]\n"
         "sources = [\"*/*.cpp\"]\n"
         "name = \"ex.{parent}.{stem}\"\n"
     );
     workspace.write(
-        "examples/render/Kaixa.toml",
+        "examples/render/Kaixa.example.toml",
         "[examples]\n"
         "category = \"Rendering\"\n"
         "required-features = [\"vulkan\"]\n"
@@ -839,7 +839,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
     );
     workspace.write("inline.cpp", "int main() { return 0; }\n");
     workspace.write(
-        "tests/Kaixa.toml",
+        "tests/Kaixa.test.toml",
         "[test]\n"
         "sources = [\"*.cpp\"]\n"
         "\n"
@@ -862,7 +862,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
     );
     workspace.write("test_support/support.cpp", "int test_support() { return 1; }\n");
     workspace.write(
-        "examples/rendering/Kaixa.toml",
+        "examples/rendering/Kaixa.example.toml",
         "[examples]\n"
         "sources = [\"*.cpp\"]\n"
         "category = \"Rendering\"\n"
@@ -876,7 +876,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
     workspace.write("examples/rendering/first.cpp", "int main() { return 0; }\n");
     workspace.write("examples/rendering/second.cpp", "int main() { return 0; }\n");
     workspace.write(
-        "benchmarks/Kaixa.toml",
+        "benchmarks/Kaixa.benchmark.toml",
         "[benchmark]\n"
         "sources = [\"*.cpp\"]\n"
         "\n"

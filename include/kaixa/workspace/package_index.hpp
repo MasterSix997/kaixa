@@ -30,7 +30,7 @@ namespace kaixa {
         [[nodiscard]] static Result<PackageIndex> discover(
             const std::filesystem::path& selected_manifest,
             const ManifestDocument& selected_document,
-            std::span<const ManifestDocument> parsed_documents
+            std::span<const KaixaDocument> parsed_documents
         );
 
         [[nodiscard]] Result<void> include(const std::filesystem::path& package_set_manifest);
@@ -57,13 +57,13 @@ namespace kaixa {
         [[nodiscard]] Result<std::size_t> index_scope(
             const std::filesystem::path& manifest,
             std::optional<std::size_t> parent,
-            std::span<const ManifestDocument> parsed_documents = {}
+            std::span<const KaixaDocument> parsed_documents = {}
         );
         [[nodiscard]] Result<void> add_candidate(std::size_t scope, const Manifest& package, const std::filesystem::path& manifest);
         [[nodiscard]] Result<void> add_candidate(std::size_t scope, std::size_t candidate);
         [[nodiscard]] Result<const ManifestDocument*> find_or_parse_document(
             const std::filesystem::path& manifest,
-            std::span<const ManifestDocument> parsed_documents
+            std::span<const KaixaDocument> parsed_documents
         );
 
         std::vector<LocalPackageCandidate> m_candidates;

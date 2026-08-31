@@ -271,7 +271,9 @@ namespace kaixa::workspace_detail {
         ) {
             const std::filesystem::path root_directory = root_manifest.parent_path();
             FileSet documents;
-            documents.include = {(root_directory / "**/Kaixa.toml").lexically_relative(package_directory).generic_string()};
+            documents.include = {
+                (root_directory / "**" / target_manifest_filename(kind)).lexically_relative(package_directory).generic_string()
+            };
             documents.location.source = root_manifest.string();
             auto files = expand_file_set(documents, package_directory, package_directory, false, catalog);
             if (!files)
@@ -284,22 +286,6 @@ namespace kaixa::workspace_detail {
                 auto document = parse_file(absolute);
                 if (!document)
                     return std::unexpected(document.error());
-
-                if (absolute.lexically_normal() != root_manifest.lexically_normal()) {
-                    if (document->find("package") || document->find("package-set"))
-                        continue;
-
-                    const auto keys = [kind]() -> std::pair<std::string_view, std::string_view> {
-                        switch (kind) {
-                        case PackageTargetKind::test: return {"test", "tests"};
-                        case PackageTargetKind::example: return {"example", "examples"};
-                        case PackageTargetKind::benchmark: return {"benchmark", "benchmarks"};
-                        }
-                        return {};
-                    }();
-                    if (!document->find(keys.first) && !document->find(keys.second))
-                        continue;
-                }
 
                 auto parsed = parse_package_targets(*document, absolute, kind, resolver);
                 if (!parsed)
@@ -400,9 +386,10 @@ namespace kaixa::workspace_detail {
         std::vector<PackageTarget> declarations = manifest.targets;
         for (const PackageTargetReference& reference: manifest.target_references) {
             std::filesystem::path declared = reference.path;
-            const bool directory_reference = declared.filename() != "Kaixa.toml" && !is_glob_pattern(declared.generic_string());
-            if (declared.filename() != "Kaixa.toml")
-                declared /= "Kaixa.toml";
+            const bool explicit_document = declared.extension() == ".toml";
+            const bool directory_reference = !explicit_document && !is_glob_pattern(declared.generic_string());
+            if (!explicit_document)
+                declared /= target_manifest_filename(reference.kind);
 
             if (directory_reference) {
                 auto composed = compose_target_directory(

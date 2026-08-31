@@ -93,6 +93,7 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<std::string> languages;
         GenerationMode generation = GenerationMode::source;
         MsvcRuntime msvc_runtime = MsvcRuntime::default_runtime;
+        std::optional<std::int64_t> cxx_standard;
         std::optional<std::filesystem::path> runtime_output;
         std::optional<std::filesystem::path> library_output;
         std::optional<std::filesystem::path> archive_output;

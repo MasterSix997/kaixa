@@ -367,3 +367,83 @@ KAIXA_TEST(cmake_plans_default_and_target_abi_instances_in_separate_projects) {
     if (!executed)
         context.fail(kaixa::format_diagnostic(executed.error()));
 }
+
+KAIXA_TEST(package_policy_reaches_adopted_dependency_projects) {
+    const kaixa::testing::TempDirectory workspace("dependency-policy");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"policy_consumer\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "default = [\"policy_consumer\"]\n"
+        "\n"
+        "[package-set.policy]\n"
+        "cxx = 23\n"
+        "msvc-runtime = \"static\"\n"
+        "\n"
+        "[lib]\n"
+        "type = \"static\"\n"
+        "sources = [\"app.cpp\"]\n"
+        "\n"
+        "[dependencies]\n"
+        "vendor = { path = \"vendor\" }\n"
+    );
+    workspace.write("app.cpp", "int answer() { return 42; }\n");
+    workspace.write(
+        "vendor/Kaixa.toml",
+        "[package]\n"
+        "name = \"vendor\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    workspace.write(
+        "vendor/CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(vendor LANGUAGES CXX)\n"
+        "if(NOT CMAKE_CXX_STANDARD EQUAL 23)\n"
+        "  message(FATAL_ERROR \"expected C++23 from the consuming package policy\")\n"
+        "endif()\n"
+        "if(MSVC AND NOT CMAKE_MSVC_RUNTIME_LIBRARY MATCHES \"^MultiThreaded\")\n"
+        "  message(FATAL_ERROR \"expected the static MSVC runtime from the consuming package policy\")\n"
+        "endif()\n"
+        "add_library(vendor INTERFACE)\n"
+        "install(TARGETS vendor EXPORT policy_consumerTargets)\n"
+    );
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "dependency policy workspace loads");
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "dependency policy workspace plans");
+    if (!plan) {
+        context.fail(kaixa::format_diagnostic(plan.error()));
+        return;
+    }
+
+    const auto integration = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "dependencies.cmake";
+    });
+    context.check(integration != plan->generated_files().end(), "dependency integration is generated");
+    if (integration == plan->generated_files().end())
+        return;
+
+    const std::size_t runtime = integration->content.find("set(CMAKE_MSVC_RUNTIME_LIBRARY");
+    const std::size_t standard = integration->content.find("set(CMAKE_CXX_STANDARD 23)");
+    const std::size_t adoption = integration->content.find("add_subdirectory(");
+    context.check(runtime != std::string::npos, "runtime policy reaches adopted dependencies");
+    context.check(standard != std::string::npos, "language floor reaches adopted dependencies");
+    context.check(runtime < adoption && standard < adoption, "policy is fixed before dependencies are adopted");
+
+    const auto executed = kaixa::execute(*plan);
+    context.check(executed.has_value(), "the adopted project observes the propagated policy while configuring");
+    if (!executed)
+        context.fail(kaixa::format_diagnostic(executed.error()));
+}

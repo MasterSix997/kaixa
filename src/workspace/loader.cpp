@@ -383,9 +383,12 @@ namespace kaixa {
                 const std::filesystem::path package_manifest = directory / "Kaixa.toml";
                 const ManifestDocument* parsed_document = nullptr;
                 if (m_model) {
-                    const auto document = std::ranges::find(m_model->documents, package_manifest, &ManifestDocument::source);
+                    const auto document = std::ranges::find_if(m_model->documents, [&](const KaixaDocument& candidate) {
+                        const auto* package = std::get_if<ManifestDocument>(&candidate);
+                        return package && package->source == package_manifest;
+                    });
                     if (document != m_model->documents.end())
-                        parsed_document = &*document;
+                        parsed_document = std::get_if<ManifestDocument>(&*document);
                 }
                 if (!parsed_document)
                     parsed_document = m_packages.document(package_manifest);
@@ -788,7 +791,7 @@ namespace kaixa {
                     PackageNode{{},
                         candidate.package,
                         std::move(*directory),
-                        PackageKind::managed,
+                        PackageKind::adopted,
                         *candidate.resolver,
                         std::move(manifest),
                         {},

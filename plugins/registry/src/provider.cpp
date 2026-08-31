@@ -295,15 +295,21 @@ namespace kaixa::plugin::registry {
 
         class RegistryProvider final : public PackageProvider {
         public:
-            RegistryProvider(ProviderInfo info, std::vector<RegistryPackage> packages)
+            RegistryProvider(ProviderInfo info, std::string index, std::optional<std::string> token_environment, ProviderContext context)
                 : m_info(std::move(info))
-                , m_packages(std::move(packages)) {}
+                , m_index(std::move(index))
+                , m_token_environment(std::move(token_environment))
+                , m_context(std::move(context)) {}
 
             [[nodiscard]] ProviderInfo info() const override { return m_info; }
 
             [[nodiscard]] Result<std::vector<PackageCandidate>> candidates(const PackageRequest& request) const override {
+                auto available = packages();
+                if (!available)
+                    return std::unexpected(available.error());
+
                 std::vector<PackageCandidate> result;
-                for (const RegistryPackage& package: m_packages) {
+                for (const RegistryPackage& package: **available) {
                     if (package.candidate.package == request.package)
                         result.push_back(package.candidate);
                 }
@@ -311,9 +317,13 @@ namespace kaixa::plugin::registry {
             }
 
             [[nodiscard]] Result<std::vector<PackageSummary>> query(const PackageQuery& query) const override {
+                auto available = packages();
+                if (!available)
+                    return std::unexpected(available.error());
+
                 std::vector<PackageSummary> result;
                 const std::string text = lower(query.text);
-                for (const RegistryPackage& package: m_packages) {
+                for (const RegistryPackage& package: **available) {
                     const PackageSummary& summary = package.summary;
                     if (!text.empty() && !lower(summary.name).contains(text) && !lower(summary.description).contains(text))
                         continue;
@@ -341,8 +351,27 @@ namespace kaixa::plugin::registry {
             }
 
         private:
+            Result<const std::vector<RegistryPackage>*> packages() const {
+                if (m_packages)
+                    return &*m_packages;
+
+                auto path = registry_index(m_index, m_token_environment, m_context);
+                if (!path)
+                    return std::unexpected(path.error());
+
+                auto loaded = read_packages(*path, m_index, m_info);
+                if (!loaded)
+                    return std::unexpected(loaded.error());
+
+                m_packages = std::move(*loaded);
+                return &*m_packages;
+            }
+
             ProviderInfo m_info;
-            std::vector<RegistryPackage> m_packages;
+            std::string m_index;
+            std::optional<std::string> m_token_environment;
+            ProviderContext m_context;
+            mutable std::optional<std::vector<RegistryPackage>> m_packages;
         };
 
         class RegistryProviderDriver final : public ProviderDriver {
@@ -372,16 +401,13 @@ namespace kaixa::plugin::registry {
                 if (!finished)
                     return std::unexpected(finished.error());
 
-                auto path = registry_index(*index, *token_environment, context);
-                if (!path)
-                    return std::unexpected(path.error());
-
                 ProviderInfo info{definition.name, "kaixa-registry", definition.is_default};
-                auto packages = read_packages(*path, *index, info);
-                if (!packages)
-                    return std::unexpected(packages.error());
-
-                std::unique_ptr<PackageProvider> provider = std::make_unique<RegistryProvider>(std::move(info), std::move(*packages));
+                std::unique_ptr<PackageProvider> provider = std::make_unique<RegistryProvider>(
+                    std::move(info),
+                    std::move(*index),
+                    std::move(*token_environment),
+                    context
+                );
                 return provider;
             }
         };

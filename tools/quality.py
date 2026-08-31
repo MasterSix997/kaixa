@@ -36,7 +36,7 @@ def repository_files() -> list[Path]:
             continue
         relative = Path(os.fsdecode(raw))
         normalized = relative.as_posix()
-        if normalized.startswith(EXCLUDED_PREFIXES):
+        if normalized.startswith(EXCLUDED_PREFIXES) or not (ROOT / relative).is_file():
             continue
         files.append(relative)
     return files

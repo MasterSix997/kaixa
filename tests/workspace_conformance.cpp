@@ -64,7 +64,7 @@ namespace {
             "#include <sample/error.hpp>\n#include <memory_core/memory.hpp>\nint error_value() { return memory_value() + 1; }\n"
         );
         root.write(
-            "workspace/error/tests/Kaixa.toml",
+            "workspace/error/tests/Kaixa.test.toml",
             "[[test]]\n"
             "name = \"error.tests\"\n"
             "sources = [\"error_tests.cpp\"]\n"
@@ -114,7 +114,7 @@ namespace {
             "#include <sample/error.hpp>\n#include <sample/threading.hpp>\nint threaded_value() { return error_value() + 1; }\n"
         );
         root.write(
-            "workspace/threading/benchmarks/Kaixa.toml",
+            "workspace/threading/benchmarks/Kaixa.benchmark.toml",
             "[[benchmark]]\n"
             "name = \"threading.benchmarks\"\n"
             "sources = [\"threading_benchmarks.cpp\"]\n"
@@ -179,7 +179,8 @@ KAIXA_TEST(workspace_conformance_runs_a_reproducible_vertical_slice) {
         return;
     }
 
-    context.check_equal(resolution->model.documents.size(), std::size_t{4}, "the complete authored model is retained");
+    context.check_equal(resolution->model.documents.size(), std::size_t{6}, "the complete authored model is retained");
+    context.check_equal(resolution->model.summary.target_documents, std::size_t{2}, "associated-target documents share the authored model");
     context.check(resolution->graph.find_by_name("memory_core").has_value(), "remote dependency enters the graph");
     const auto initial_lock = kaixa::read_file(resolution->context.lockfile);
     context.check(initial_lock.has_value(), "resolution lock is readable");

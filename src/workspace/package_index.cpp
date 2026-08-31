@@ -62,9 +62,12 @@ namespace kaixa {
             return result;
         }
 
-        const ManifestDocument* find_document(const std::span<const ManifestDocument> documents, const std::filesystem::path& manifest) {
-            const auto document = std::ranges::find(documents, manifest, &ManifestDocument::source);
-            return document == documents.end() ? nullptr : &*document;
+        const ManifestDocument* find_document(const std::span<const KaixaDocument> documents, const std::filesystem::path& manifest) {
+            const auto document = std::ranges::find_if(documents, [&](const KaixaDocument& candidate) {
+                const auto* package = std::get_if<ManifestDocument>(&candidate);
+                return package && package->source == manifest;
+            });
+            return document == documents.end() ? nullptr : std::get_if<ManifestDocument>(&*document);
         }
     }
 
@@ -75,7 +78,7 @@ namespace kaixa {
     Result<PackageIndex> PackageIndex::discover(
         const std::filesystem::path& selected_manifest,
         const ManifestDocument& selected_document,
-        const std::span<const ManifestDocument> parsed_documents
+        const std::span<const KaixaDocument> parsed_documents
     ) {
         PackageIndex result;
         std::error_code canonical_failure;
@@ -170,7 +173,7 @@ namespace kaixa {
 
     Result<const ManifestDocument*> PackageIndex::find_or_parse_document(
         const std::filesystem::path& manifest,
-        const std::span<const ManifestDocument> parsed_documents
+        const std::span<const KaixaDocument> parsed_documents
     ) {
         if (const ManifestDocument* parsed = find_document(parsed_documents, manifest))
             return parsed;
@@ -239,7 +242,7 @@ namespace kaixa {
     Result<std::size_t> PackageIndex::index_scope(
         const std::filesystem::path& manifest_path,
         const std::optional<std::size_t> parent,
-        const std::span<const ManifestDocument> parsed_documents
+        const std::span<const KaixaDocument> parsed_documents
     ) {
         if (m_indexing.contains(manifest_path)) {
             return std::unexpected(error("package set inclusion cycle reaches `" + manifest_path.string() + "`"));

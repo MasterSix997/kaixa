@@ -56,7 +56,13 @@ namespace kaixa {
                 continue;
 
             expanded[entry.package.index] = true;
-            const std::vector<PackageId>& dependencies = m_nodes[entry.package.index].dependencies;
+            std::vector<PackageId> dependencies = m_nodes[entry.package.index].dependencies;
+            for (const PackageTargetDependencies& target: m_nodes[entry.package.index].target_dependencies) {
+                for (const PackageId dependency: target.packages) {
+                    if (std::ranges::find(dependencies, dependency) == dependencies.end())
+                        dependencies.push_back(dependency);
+                }
+            }
             for (auto dependency = dependencies.rbegin(); dependency != dependencies.rend(); ++dependency)
                 pending.push_back({*dependency, entry.depth + 1});
         }

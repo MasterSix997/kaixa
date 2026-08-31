@@ -497,12 +497,9 @@ namespace kaixa {
                 return std::unexpected(error("package target requires source patterns"));
 
             for (const DependencyBinding& dependency: target.dependencies) {
-                if (!is_valid_package_name(dependency.request.package)) {
-                    return std::unexpected(error("invalid package target dependency name `" + dependency.request.package + "`"));
-                }
-                if (const std::filesystem::path* path = dependency.selection.path(); path && path->empty()) {
-                    return std::unexpected(error("package target dependency `" + dependency.request.package + "` has an empty path"));
-                }
+                auto valid = validate_dependency(dependency);
+                if (!valid)
+                    return std::unexpected(valid.error());
             }
 
             if (target.resolver_options && !target.resolver_options->is_table())

@@ -235,6 +235,30 @@ KAIXA_TEST(published_source_is_searchable_downloadable_and_lockable) {
         context.fail(kaixa::format_diagnostic(frozen.error()));
 }
 
+KAIXA_TEST(registry_provider_loads_its_index_on_first_use) {
+    const TempDirectory root("lazy-registry-provider");
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::ProviderDefinition definition{
+        "remote",
+        "kaixa-registry",
+        true,
+        kaixa::Value::table({{"index", "missing.toml"}}),
+        {},
+    };
+    const auto configured = registry.configure_provider(definition, {root.path()});
+    context.check(configured.has_value(), "registry configuration does not read an unused index");
+    if (!configured)
+        return;
+
+    kaixa::PackageProvider* provider = registry.find_provider("remote");
+    context.check(provider != nullptr, "lazy registry provider is installed");
+    if (!provider)
+        return;
+
+    const auto candidates = provider->candidates({"missing"});
+    context.check(!candidates.has_value(), "first package request reads the unavailable index");
+}
+
 KAIXA_TEST(prebuilt_publication_materializes_an_opaque_package) {
     const TempDirectory root("published-prebuilt");
     root.write("library/Kaixa.toml", "[package]\nname = \"binary_library\"\nversion = \"2.0.0\"\nresolver = \"cmake\"\n");

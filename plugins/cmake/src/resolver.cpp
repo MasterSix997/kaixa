@@ -29,6 +29,7 @@ namespace kaixa::plugin::cmake {
         using detail::dependency_mode;
         using detail::DependencyMode;
         using detail::GenerationMode;
+        using detail::MsvcRuntime;
         using detail::Options;
         using detail::read_build_options;
         using detail::read_cached_options;
@@ -297,7 +298,7 @@ namespace kaixa::plugin::cmake {
             if (!cache.install_requirements) {
                 std::vector<bool> requirements(graph.size(), false);
                 for (const PackageNode& candidate: graph.nodes()) {
-                    if (candidate.kind != PackageKind::managed || candidate.resolver != "cmake")
+                    if (!has_build_semantics(candidate.kind) || candidate.resolver != "cmake")
                         continue;
 
                     auto options = read_cached_options(graph, registry, candidate, realization, nullptr, {}, cache);
@@ -336,7 +337,7 @@ namespace kaixa::plugin::cmake {
 
             for (const PackageId dependency: package.dependencies) {
                 const PackageNode& target = context.graph[dependency];
-                if (target.kind != PackageKind::managed || target.resolver != "cmake")
+                if (!has_build_semantics(target.kind) || target.resolver != "cmake")
                     continue;
 
                 if (dependency_mode(**options, dependency) != DependencyMode::add_subdirectory)
@@ -356,7 +357,7 @@ namespace kaixa::plugin::cmake {
                     }
                     for (const PackageId dependency: dependencies.packages) {
                         const PackageNode& target = context.graph[dependency];
-                        if (target.kind != PackageKind::managed || target.resolver != "cmake")
+                        if (!has_build_semantics(target.kind) || target.resolver != "cmake")
                             continue;
 
                         auto collected = collect_source_dependencies(dependency, false, context);
@@ -403,7 +404,7 @@ namespace kaixa::plugin::cmake {
 
             for (const PackageId dependency: package.dependencies) {
                 const PackageNode& target = context.graph[dependency];
-                if (target.kind != PackageKind::managed || target.resolver != "cmake")
+                if (!has_build_semantics(target.kind) || target.resolver != "cmake")
                     continue;
 
                 if (dependency_mode(**options, dependency) == DependencyMode::find_package && !context.added[dependency.index]) {
@@ -845,6 +846,19 @@ namespace kaixa::plugin::cmake {
                   "CALL _kaixa_write_products)\n";
         }
 
+        std::string dependency_policy(const Options& options) {
+            std::string result;
+            if (options.msvc_runtime != MsvcRuntime::default_runtime) {
+                const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
+                result += "  set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n";
+            }
+            if (options.cxx_standard) {
+                result += "  set(CMAKE_CXX_STANDARD " + std::to_string(*options.cxx_standard) + ")\n";
+                result += "  set(CMAKE_CXX_EXTENSIONS OFF)\n";
+            }
+            return result;
+        }
+
         struct DependencyIntegrationContext {
             const Graph& graph;
             const PackageNode& package;
@@ -861,6 +875,7 @@ namespace kaixa::plugin::cmake {
                                  "endif()\n"
                                  "if(NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
                                  "  set(KAIXA_CMAKE_DEPENDENCIES_INCLUDED TRUE)\n";
+            result += dependency_policy(context.build.project);
             result += product_integration(context.build);
             auto source_only_interfaces = source_only_interface_integration(context.graph);
             if (!source_only_interfaces)
@@ -1269,7 +1284,7 @@ namespace kaixa::plugin::cmake {
 
         bool shares_source_directory(const Graph& graph, const PackageNode& package) {
             return std::ranges::count_if(graph.nodes(), [&](const PackageNode& candidate) {
-                return candidate.kind == PackageKind::managed
+                return has_build_semantics(candidate.kind)
                     && candidate.resolver == package.resolver
                     && candidate.directory == package.directory;
             }) > 1;

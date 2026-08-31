@@ -25,18 +25,21 @@ KAIXA_TEST(package_inspection_expands_shared_dependencies_once) {
     const kaixa::PackageId right = add_package("right");
     const kaixa::PackageId shared = add_package("shared");
     const kaixa::PackageId leaf = add_package("leaf");
+    const kaixa::PackageId test_support = add_package("test_support");
     graph[root].dependencies = {left, right};
+    graph[root].target_dependencies = {{"root_tests", kaixa::PackageTargetKind::test, {test_support}}};
     graph[left].dependencies = {shared};
     graph[right].dependencies = {shared};
     graph[shared].dependencies = {leaf};
     graph.add_root(root);
 
     const std::vector<kaixa::PackageDependencyEntry> tree = graph.dependency_tree(graph.roots());
-    context.check_equal(tree.size(), std::size_t{6}, "shared dependency retains both incoming edges");
-    if (tree.size() == 6) {
+    context.check_equal(tree.size(), std::size_t{7}, "package and target dependency edges are visible");
+    if (tree.size() == 7) {
         context.check(tree[2].package == shared && !tree[2].repeated, "shared dependency is expanded on first use");
         context.check(tree[3].package == leaf, "first shared dependency expands its subtree");
         context.check(tree[5].package == shared && tree[5].repeated, "later shared dependency is a reference only");
+        context.check(tree[6].package == test_support, "target-only dependency is included in the package tree");
     }
 }
 

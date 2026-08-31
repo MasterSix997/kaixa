@@ -236,18 +236,21 @@ namespace kaixa {
         std::vector<PackageTarget> targets;
     };
 
+    using KaixaDocument = std::variant<ManifestDocument, TargetManifestDocument>;
+
     struct ManifestTree {
         ManifestTreeSummary summary;
-        std::vector<ManifestDocument> documents;
-        std::vector<TargetManifestDocument> target_documents;
+        std::vector<KaixaDocument> documents;
     };
 
     [[nodiscard]] bool is_valid_identifier(std::string_view name) noexcept;
     [[nodiscard]] bool is_valid_package_name(std::string_view name) noexcept;
     [[nodiscard]] bool is_valid_target_name(std::string_view name) noexcept;
+    [[nodiscard]] std::string_view target_manifest_filename(PackageTargetKind kind) noexcept;
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document(const Value& document);
     [[nodiscard]] Result<AutomationDocument> read_automation_document(TableReader& root, bool allow_package_scope = false);
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document_file(const std::filesystem::path& path);
+    [[nodiscard]] Result<KaixaDocument> parse_kaixa_document_file(const std::filesystem::path& path);
     [[nodiscard]] Result<ManifestDocument> parse_manifest_document_string(std::string_view text, std::string_view source_name);
     [[nodiscard]] Result<Manifest> parse_manifest(const Value& document);
     [[nodiscard]] Result<Manifest> parse_manifest_file(const std::filesystem::path& path);
