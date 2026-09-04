@@ -37,34 +37,6 @@ namespace kaixa {
             return *value;
         }
 
-        Result<std::vector<std::string>> read_string_array(TableReader& table, const std::string_view key) {
-            const Value* value = table.take(key);
-            if (!value)
-                return std::vector<std::string>{};
-
-            const std::vector<Value>* array = value->as_array();
-            if (!array) {
-                return std::unexpected(
-                    error_at(table.location_of(key), "expected an array, found " + std::string(value_kind_name(value->kind())))
-                );
-            }
-
-            std::vector<std::string> result;
-            result.reserve(array->size());
-            for (const Value& item: *array) {
-                const std::string* text = item.as_string();
-                if (!text)
-                    return std::unexpected(error_at(item.location(), "expected a string array element"));
-
-                if (text->empty())
-                    return std::unexpected(error_at(item.location(), "array values cannot be empty"));
-
-                result.push_back(*text);
-            }
-
-            return result;
-        }
-
         Result<std::vector<std::string>> read_string_array_value(const Value& value, const std::string_view description) {
             const std::vector<Value>* array = value.as_array();
             if (!array) {
@@ -188,21 +160,21 @@ namespace kaixa {
                 environment.take_all();
             }
 
-            auto inputs = read_string_array(table, "inputs");
+            auto inputs = table.string_array("inputs");
             if (!inputs)
                 return std::unexpected(inputs.error());
 
             for (std::string& input: *inputs)
                 result.inputs.emplace_back(std::move(input));
 
-            auto outputs = read_string_array(table, "outputs");
+            auto outputs = table.string_array("outputs");
             if (!outputs)
                 return std::unexpected(outputs.error());
 
             for (std::string& output: *outputs)
                 result.outputs.emplace_back(std::move(output));
 
-            auto after = read_string_array(table, "after");
+            auto after = table.string_array("after");
             if (!after)
                 return std::unexpected(after.error());
 
@@ -282,7 +254,7 @@ namespace kaixa {
                     }
                 }
 
-                auto steps = read_string_array(declaration, "steps");
+                auto steps = declaration.string_array("steps");
                 if (!steps)
                     return std::unexpected(steps.error());
 
@@ -298,21 +270,6 @@ namespace kaixa {
             }
             workflows.take_all();
             return result;
-        }
-
-        Result<bool> read_boolean(TableReader& table, const std::string_view key, const bool default_value = false) {
-            const Value* value = table.take(key);
-            if (!value)
-                return default_value;
-
-            const bool* boolean = value->as_boolean();
-            if (!boolean) {
-                return std::unexpected(
-                    error_at(table.location_of(key), "expected a boolean, found " + std::string(value_kind_name(value->kind())))
-                );
-            }
-
-            return *boolean;
         }
 
         Result<std::vector<DependencyBinding>> read_dependencies(
@@ -358,12 +315,7 @@ namespace kaixa {
                 }
 
                 if (entry.key == "default") {
-                    Value default_values = Value::table({{"values", entry.value}}, entry.value.location());
-                    auto defaults_table = TableReader::bind(default_values);
-                    if (!defaults_table)
-                        return std::unexpected(defaults_table.error());
-
-                    auto values = read_string_array(*defaults_table, "values");
+                    auto values = read_string_array_value(entry.value, "default features");
                     if (!values)
                         return std::unexpected(values.error());
 
@@ -377,12 +329,7 @@ namespace kaixa {
                 definition.location = entry.value.location();
                 if (entry.value.as_array()) {
                     definition.legacy = true;
-                    Value legacy_values = Value::table({{"features", entry.value}}, entry.value.location());
-                    auto legacy_table = TableReader::bind(legacy_values);
-                    if (!legacy_table)
-                        return std::unexpected(legacy_table.error());
-
-                    auto values = read_string_array(*legacy_table, "features");
+                    auto values = read_string_array_value(entry.value, "feature dependencies");
                     if (!values)
                         return std::unexpected(values.error());
 
@@ -398,19 +345,19 @@ namespace kaixa {
 
                 TableReader feature = std::move(*definition_result);
 
-                auto local_features = read_string_array(feature, "features");
+                auto local_features = feature.string_array("features");
                 if (!local_features)
                     return std::unexpected(local_features.error());
 
                 definition.features = std::move(*local_features);
 
-                auto dependencies = read_string_array(feature, "dependencies");
+                auto dependencies = feature.string_array("dependencies");
                 if (!dependencies)
                     return std::unexpected(dependencies.error());
 
                 definition.dependencies = std::move(*dependencies);
 
-                auto members = read_string_array(feature, "members");
+                auto members = feature.string_array("members");
                 if (!members)
                     return std::unexpected(members.error());
 
@@ -423,12 +370,7 @@ namespace kaixa {
                 if (*dependency_features_result) {
                     TableReader dependency_features = std::move(**dependency_features_result);
                     for (const TableEntry& dependency: dependency_features.entries()) {
-                        Value dependency_values = Value::table({{"values", dependency.value}}, dependency.value.location());
-                        auto values_table = TableReader::bind(dependency_values);
-                        if (!values_table)
-                            return std::unexpected(values_table.error());
-
-                        auto values = read_string_array(*values_table, "values");
+                        auto values = read_string_array_value(dependency.value, "dependency features");
                         if (!values)
                             return std::unexpected(values.error());
 
@@ -454,7 +396,7 @@ namespace kaixa {
             const PackageTargetKind kind,
             std::vector<PackageTargetReference>& output
         ) {
-            auto paths = read_string_array(package, key);
+            auto paths = package.string_array(key);
             if (!paths)
                 return std::unexpected(paths.error());
 
@@ -522,7 +464,7 @@ namespace kaixa {
         }
 
         Result<void> read_target_sources(TableReader& table, PackageTarget& target, const bool allow_partial) {
-            auto sources = read_string_array(table, "sources");
+            auto sources = table.string_array("sources");
             if (!sources)
                 return std::unexpected(sources.error());
 
@@ -547,11 +489,11 @@ namespace kaixa {
             target.sources.include = std::move(*sources);
             target.sources.location = table.location_of("sources");
 
-            auto excludes = read_string_array(table, "source-excludes");
+            auto excludes = table.string_array("source-excludes");
             if (!excludes)
                 return std::unexpected(excludes.error());
 
-            auto declarative_excludes = read_string_array(table, "exclude");
+            auto declarative_excludes = table.string_array("exclude");
             if (!declarative_excludes)
                 return std::unexpected(declarative_excludes.error());
 
@@ -598,13 +540,13 @@ namespace kaixa {
         }
 
         Result<void> read_target_product_options(TableReader& table, PackageTarget& target) {
-            auto include_directories = read_string_array(table, "include");
+            auto include_directories = table.string_array("include");
             if (!include_directories)
                 return std::unexpected(include_directories.error());
 
             target.include_directories = std::move(*include_directories);
 
-            auto system_include_directories = read_string_array(table, "system-include");
+            auto system_include_directories = table.string_array("system-include");
             if (!system_include_directories)
                 return std::unexpected(system_include_directories.error());
 
@@ -618,7 +560,7 @@ namespace kaixa {
                 target.definitions = *entries;
             }
 
-            auto system_libraries = read_string_array(table, "system-libraries");
+            auto system_libraries = table.string_array("system-libraries");
             if (!system_libraries)
                 return std::unexpected(system_libraries.error());
 
@@ -633,25 +575,25 @@ namespace kaixa {
 
             target.dependencies = std::move(*dependencies);
 
-            auto arguments = read_string_array(table, "arguments");
+            auto arguments = table.string_array("arguments");
             if (!arguments)
                 return std::unexpected(arguments.error());
 
             target.arguments = std::move(*arguments);
 
-            auto discover = read_boolean(table, "discover");
+            auto discover = table.boolean("discover");
             if (!discover)
                 return std::unexpected(discover.error());
 
             target.discover = *discover;
 
-            auto hidden = read_boolean(table, "hidden");
+            auto hidden = table.boolean("hidden");
             if (!hidden)
                 return std::unexpected(hidden.error());
 
             target.hidden = *hidden;
 
-            auto install = read_boolean(table, "install");
+            auto install = table.boolean("install");
             if (!install)
                 return std::unexpected(install.error());
 
@@ -919,13 +861,13 @@ namespace kaixa {
                 dependency.request.version = std::move(*requirement);
             }
 
-            auto features = read_string_array(table, "features");
+            auto features = table.string_array("features");
             if (!features)
                 return std::unexpected(features.error());
 
             dependency.request.features = std::move(*features);
 
-            auto optional = read_boolean(table, "optional");
+            auto optional = table.boolean("optional");
             if (!optional)
                 return std::unexpected(optional.error());
 
@@ -1022,19 +964,19 @@ namespace kaixa {
                 package_set.name = std::move(**name);
             }
 
-            auto members = read_string_array(table, "members");
+            auto members = table.string_array("members");
             if (!members)
                 return std::unexpected(members.error());
 
             package_set.members = std::move(*members);
 
-            auto exclude = read_string_array(table, "exclude");
+            auto exclude = table.string_array("exclude");
             if (!exclude)
                 return std::unexpected(exclude.error());
 
             package_set.exclude = std::move(*exclude);
 
-            auto defaults = read_string_array(table, "default");
+            auto defaults = table.string_array("default");
             if (!defaults)
                 return std::unexpected(defaults.error());
 
@@ -1214,7 +1156,7 @@ namespace kaixa {
                 return std::unexpected(error_at(value->location(), "imported document cannot declare packages or package sets"));
             }
 
-            auto imports = read_string_array(root, "imports");
+            auto imports = root.string_array("imports");
             if (!imports)
                 return std::unexpected(imports.error());
 
@@ -1603,7 +1545,7 @@ namespace kaixa {
         if (!routing)
             return std::unexpected(routing.error());
 
-        auto imports = read_string_array(root, "imports");
+        auto imports = root.string_array("imports");
         if (!imports)
             return std::unexpected(imports.error());
 

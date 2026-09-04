@@ -2,6 +2,7 @@
 
 #include <kaixa/config/value.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string>
@@ -19,6 +20,11 @@ namespace kaixa {
         [[nodiscard]] std::span<const TableEntry> entries() const noexcept;
         [[nodiscard]] Result<std::string> string(std::string_view key);
         [[nodiscard]] Result<std::optional<std::string>> optional_string(std::string_view key);
+        [[nodiscard]] Result<std::optional<std::vector<std::string>>> optional_string_array(std::string_view key);
+        [[nodiscard]] Result<std::vector<std::string>> string_array(std::string_view key, bool required = false);
+        [[nodiscard]] Result<std::optional<std::int64_t>> optional_integer(std::string_view key);
+        [[nodiscard]] Result<std::optional<bool>> optional_boolean(std::string_view key);
+        [[nodiscard]] Result<bool> boolean(std::string_view key, bool default_value = false);
         [[nodiscard]] Result<TableReader> table(std::string_view key);
         [[nodiscard]] Result<std::optional<TableReader>> optional_table(std::string_view key);
         [[nodiscard]] Result<void> finish() const;

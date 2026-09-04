@@ -123,30 +123,6 @@ namespace kaixa {
             return source.identity;
         }
 
-        Result<std::vector<std::string>> string_array(TableReader& table, const std::string_view key, const bool required = true) {
-            const Value* value = table.take(key);
-            if (!value) {
-                if (required)
-                    return std::unexpected(error_at(table.location_of(key), "missing required key"));
-
-                return std::vector<std::string>{};
-            }
-
-            const std::vector<Value>* array = value->as_array();
-            if (!array)
-                return std::unexpected(error_at(value->location(), "expected an array of strings"));
-
-            std::vector<std::string> result;
-            result.reserve(array->size());
-            for (const Value& item: *array) {
-                if (!item.as_string())
-                    return std::unexpected(error_at(item.location(), "expected a string"));
-
-                result.push_back(*item.as_string());
-            }
-            return result;
-        }
-
         Result<std::vector<LockedVariant>> parse_variants(TableReader& resolution) {
             const Value* value = resolution.take("variants");
             if (!value)
@@ -164,9 +140,9 @@ namespace kaixa {
                     return std::unexpected(variant_result.error());
 
                 TableReader variant = std::move(*variant_result);
-                auto features = string_array(variant, "features");
+                auto features = variant.string_array("features", true);
                 auto policy = variant.string("policy");
-                auto contexts = string_array(variant, "contexts");
+                auto contexts = variant.string_array("contexts", true);
                 if (!features)
                     return std::unexpected(features.error());
 
@@ -202,11 +178,11 @@ namespace kaixa {
                     return std::unexpected(resolution_result.error());
 
                 TableReader resolution = std::move(*resolution_result);
-                auto roots = string_array(resolution, "roots");
+                auto roots = resolution.string_array("roots", true);
                 auto profile = resolution.string("profile");
                 auto target = resolution.string("target");
-                auto features = string_array(resolution, "features");
-                auto dependencies = string_array(resolution, "dependencies");
+                auto features = resolution.string_array("features", true);
+                auto dependencies = resolution.string_array("dependencies", true);
                 auto variants = parse_variants(resolution);
                 if (!roots)
                     return std::unexpected(roots.error());

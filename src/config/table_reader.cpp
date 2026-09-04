@@ -74,6 +74,76 @@ namespace kaixa {
         return **value;
     }
 
+    Result<std::optional<std::vector<std::string>>> TableReader::optional_string_array(const std::string_view key) {
+        const Value* value = take(key);
+        if (!value)
+            return std::nullopt;
+
+        const std::vector<Value>* array = value->as_array();
+        if (!array)
+            return std::unexpected(wrong_kind(location_of(key), "an array of strings", value->kind()));
+
+        std::vector<std::string> result;
+        result.reserve(array->size());
+        for (const Value& item: *array) {
+            const std::string* text = item.as_string();
+            if (!text)
+                return std::unexpected(wrong_kind(item.location(), "a string", item.kind()));
+
+            if (text->empty())
+                return std::unexpected(error_at(item.location(), "array values cannot be empty"));
+
+            result.push_back(*text);
+        }
+        return result;
+    }
+
+    Result<std::vector<std::string>> TableReader::string_array(const std::string_view key, const bool required) {
+        auto value = optional_string_array(key);
+        if (!value)
+            return std::unexpected(value.error());
+
+        if (*value)
+            return std::move(**value);
+
+        if (required)
+            return std::unexpected(error_at(location_of(key), "missing required key"));
+
+        return std::vector<std::string>{};
+    }
+
+    Result<std::optional<std::int64_t>> TableReader::optional_integer(const std::string_view key) {
+        const Value* value = take(key);
+        if (!value)
+            return std::nullopt;
+
+        const std::int64_t* integer = value->as_integer();
+        if (!integer)
+            return std::unexpected(wrong_kind(location_of(key), "an integer", value->kind()));
+
+        return *integer;
+    }
+
+    Result<std::optional<bool>> TableReader::optional_boolean(const std::string_view key) {
+        const Value* value = take(key);
+        if (!value)
+            return std::nullopt;
+
+        const bool* boolean = value->as_boolean();
+        if (!boolean)
+            return std::unexpected(wrong_kind(location_of(key), "a boolean", value->kind()));
+
+        return *boolean;
+    }
+
+    Result<bool> TableReader::boolean(const std::string_view key, const bool default_value) {
+        auto value = optional_boolean(key);
+        if (!value)
+            return std::unexpected(value.error());
+
+        return value->value_or(default_value);
+    }
+
     Result<TableReader> TableReader::table(const std::string_view key) {
         const Value* value = take(key);
         if (!value)

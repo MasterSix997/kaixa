@@ -14,30 +14,6 @@ namespace kaixa {
             return wrong_value_kind(std::move(location), expected, found);
         }
 
-        Result<std::vector<std::string>> optional_string_array(TableReader& table, const std::string_view key) {
-            const Value* value = table.take(key);
-            if (!value)
-                return std::vector<std::string>{};
-
-            const std::vector<Value>* array = value->as_array();
-            if (!array)
-                return std::unexpected(wrong_kind(table.location_of(key), "an array", value->kind()));
-
-            std::vector<std::string> result;
-            result.reserve(array->size());
-            for (const Value& item: *array) {
-                const std::string* text = item.as_string();
-                if (!text)
-                    return std::unexpected(wrong_kind(item.location(), "a string", item.kind()));
-
-                if (text->empty())
-                    return std::unexpected(error_at(item.location(), "configuration name cannot be empty"));
-
-                result.push_back(*text);
-            }
-            return result;
-        }
-
         Result<ConfigurationDefinition> read_definition(TableReader definition, std::optional<std::string> external_name = std::nullopt) {
             ConfigurationDefinition result;
             if (external_name) {
@@ -180,7 +156,7 @@ namespace kaixa {
 
         if (*build_result) {
             TableReader build = std::move(**build_result);
-            auto defaults = optional_string_array(build, "default-configs");
+            auto defaults = build.string_array("default-configs");
             if (!defaults)
                 return std::unexpected(defaults.error());
 

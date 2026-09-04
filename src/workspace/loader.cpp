@@ -414,9 +414,13 @@ namespace kaixa {
                     ));
                 }
 
-                const PackageId id = m_graph.add(
-                    PackageNode{{}, manifest.name, directory, PackageKind::managed, manifest.resolver, std::move(manifest), {}, {}, {}}
-                );
+                PackageNode node;
+                node.name = manifest.name;
+                node.directory = directory;
+                node.kind = PackageKind::managed;
+                node.resolver = manifest.resolver;
+                node.manifest = std::move(manifest);
+                const PackageId id = m_graph.add(std::move(node));
                 m_graph[id].policy_layers = m_packages.policies_for(canonical_manifest);
 
                 const std::vector<DependencyBinding> dependencies = m_graph[id].manifest->dependencies;
@@ -558,6 +562,28 @@ namespace kaixa {
                 return name && *name == "source-only";
             }
 
+            Result<std::optional<PackageId>> existing_provider_candidate(
+                const PackageProvider& provider,
+                const PackageCandidate& candidate,
+                const SourceLocation& location
+            ) const {
+                const auto existing = m_graph.find_by_name(candidate.package);
+                if (!existing)
+                    return std::nullopt;
+
+                const ProviderInfo info = provider.info();
+                const std::optional<PackageSource>& resolved = m_graph[*existing].source;
+                if (!resolved
+                    || resolved->provider != info.name
+                    || resolved->authority != candidate.authority
+                    || resolved->version != candidate.version) {
+                    return std::unexpected(
+                        error_at(location, "package `" + candidate.package + "` was already resolved to a different provider candidate")
+                    );
+                }
+                return existing;
+            }
+
             Result<std::vector<FeatureDefinition>> adopted_source_features(const PackageCandidate& candidate) {
                 if (!candidate.descriptor)
                     return std::vector<FeatureDefinition>{};
@@ -653,19 +679,12 @@ namespace kaixa {
                     return std::unexpected(error_at(dependency.location, "source-only package requires a source"));
 
                 const ProviderInfo info = provider.info();
-                if (const auto existing = m_graph.find_by_name(candidate.package)) {
-                    const std::optional<PackageSource>& resolved = m_graph[*existing].source;
-                    if (!resolved
-                        || resolved->provider != info.name
-                        || resolved->authority != candidate.authority
-                        || resolved->version != candidate.version) {
-                        return std::unexpected(error_at(
-                            dependency.location,
-                            "package `" + candidate.package + "` was already resolved to a different provider candidate"
-                        ));
-                    }
-                    return *existing;
-                }
+                auto existing = existing_provider_candidate(provider, candidate, dependency.location);
+                if (!existing)
+                    return std::unexpected(existing.error());
+
+                if (*existing)
+                    return **existing;
 
                 auto materialized = workspace_detail::materialize_source(
                     materialization_context(),
@@ -678,23 +697,18 @@ namespace kaixa {
                 if (!materialized)
                     return std::unexpected(materialized.error());
 
-                return m_graph.add(
-                    PackageNode{{},
-                        candidate.package,
-                        std::move(materialized->directory),
-                        PackageKind::opaque,
-                        {},
-                        std::nullopt,
-                        {},
-                        {},
-                        PackageSource{info.name,
-                            candidate.authority,
-                            candidate.version,
-                            candidate.source,
-                            std::move(materialized->identity),
-                            std::move(materialized->integrity)},
-                        candidate.descriptor}
-                );
+                PackageNode node;
+                node.name = candidate.package;
+                node.directory = std::move(materialized->directory);
+                node.kind = PackageKind::opaque;
+                node.source = PackageSource{info.name,
+                    candidate.authority,
+                    candidate.version,
+                    candidate.source,
+                    std::move(materialized->identity),
+                    std::move(materialized->integrity)};
+                node.descriptor = candidate.descriptor;
+                return m_graph.add(std::move(node));
             }
 
             Result<std::filesystem::path> adopted_source_directory(
@@ -745,19 +759,12 @@ namespace kaixa {
                     return std::unexpected(error_at(dependency.location, "adopted source package requires a source and resolver"));
 
                 const ProviderInfo info = provider.info();
-                if (const auto existing = m_graph.find_by_name(candidate.package)) {
-                    const std::optional<PackageSource>& resolved = m_graph[*existing].source;
-                    if (!resolved
-                        || resolved->provider != info.name
-                        || resolved->authority != candidate.authority
-                        || resolved->version != candidate.version) {
-                        return std::unexpected(error_at(
-                            dependency.location,
-                            "package `" + candidate.package + "` was already resolved to a different provider candidate"
-                        ));
-                    }
-                    return *existing;
-                }
+                auto existing = existing_provider_candidate(provider, candidate, dependency.location);
+                if (!existing)
+                    return std::unexpected(existing.error());
+
+                if (*existing)
+                    return **existing;
 
                 auto materialized = workspace_detail::materialize_source(
                     materialization_context(),
@@ -787,23 +794,20 @@ namespace kaixa {
                 manifest.features = std::move(*features);
                 manifest.dependencies = std::move(*dependencies);
 
-                return m_graph.add(
-                    PackageNode{{},
-                        candidate.package,
-                        std::move(*directory),
-                        PackageKind::adopted,
-                        *candidate.resolver,
-                        std::move(manifest),
-                        {},
-                        {},
-                        PackageSource{info.name,
-                            candidate.authority,
-                            candidate.version,
-                            candidate.source,
-                            std::move(materialized->identity),
-                            std::move(materialized->integrity)},
-                        candidate.descriptor}
-                );
+                PackageNode node;
+                node.name = candidate.package;
+                node.directory = std::move(*directory);
+                node.kind = PackageKind::adopted;
+                node.resolver = *candidate.resolver;
+                node.manifest = std::move(manifest);
+                node.source = PackageSource{info.name,
+                    candidate.authority,
+                    candidate.version,
+                    candidate.source,
+                    std::move(materialized->identity),
+                    std::move(materialized->integrity)};
+                node.descriptor = candidate.descriptor;
+                return m_graph.add(std::move(node));
             }
 
             Result<PackageId> load_package_from_source(
@@ -908,19 +912,12 @@ namespace kaixa {
                     return load_adopted_source_dependency(provider, *candidate, requester, dependency);
                 }
                 if (!candidate->source) {
-                    if (const auto existing = m_graph.find_by_name(candidate->package)) {
-                        const std::optional<PackageSource>& resolved = m_graph[*existing].source;
-                        if (!resolved
-                            || resolved->provider != info.name
-                            || resolved->authority != candidate->authority
-                            || resolved->version != candidate->version) {
-                            return std::unexpected(error_at(
-                                dependency.location,
-                                "package `" + candidate->package + "` was already resolved to a different provider candidate"
-                            ));
-                        }
-                        return *existing;
-                    }
+                    auto existing = existing_provider_candidate(provider, *candidate, dependency.location);
+                    if (!existing)
+                        return std::unexpected(existing.error());
+
+                    if (*existing)
+                        return **existing;
 
                     std::filesystem::path artifact_directory;
                     std::optional<std::string> artifact_identity;
@@ -942,23 +939,19 @@ namespace kaixa {
                         artifact_integrity = std::move(materialized->integrity);
                     }
 
-                    return m_graph.add(
-                        PackageNode{{},
-                            candidate->package,
-                            std::move(artifact_directory),
-                            PackageKind::opaque,
-                            candidate->resolver.value_or(std::string{}),
-                            std::nullopt,
-                            {},
-                            {},
-                            PackageSource{info.name,
-                                candidate->authority,
-                                candidate->version,
-                                candidate->artifact,
-                                std::move(artifact_identity),
-                                std::move(artifact_integrity)},
-                            candidate->descriptor}
-                    );
+                    PackageNode node;
+                    node.name = candidate->package;
+                    node.directory = std::move(artifact_directory);
+                    node.kind = PackageKind::opaque;
+                    node.resolver = candidate->resolver.value_or(std::string{});
+                    node.source = PackageSource{info.name,
+                        candidate->authority,
+                        candidate->version,
+                        candidate->artifact,
+                        std::move(artifact_identity),
+                        std::move(artifact_integrity)};
+                    node.descriptor = candidate->descriptor;
+                    return m_graph.add(std::move(node));
                 }
                 return load_source_dependency(
                     *candidate->source,
@@ -1102,17 +1095,12 @@ namespace kaixa {
                     ));
                 }
 
-                return m_graph.add(
-                    PackageNode{{},
-                        dependency.request.package,
-                        directory,
-                        PackageKind::opaque,
-                        {},
-                        std::nullopt,
-                        {},
-                        {},
-                        PackageSource{std::nullopt, "direct", std::nullopt, std::move(source), directory.generic_string()}}
-                );
+                PackageNode node;
+                node.name = dependency.request.package;
+                node.directory = directory;
+                node.kind = PackageKind::opaque;
+                node.source = PackageSource{std::nullopt, "direct", std::nullopt, std::move(source), directory.generic_string()};
+                return m_graph.add(std::move(node));
             }
 
             Graph m_graph;

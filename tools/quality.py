@@ -192,11 +192,15 @@ def check_complexity() -> None:
         if line.strip() and not line.lstrip().startswith("#")
     }
     violations: list[str] = []
+    soft_hotspots = 0
     for row in csv.reader(completed.stdout.splitlines()):
         if len(row) != 11:
             raise RuntimeError(f"unexpected Lizard CSV row with {len(row)} columns")
         nloc, ccn, _, parameters, length, _, filename, _, signature, start, _ = row
         identity = (filename.replace("\\", "/"), signature)
+        if int(ccn) >= 15 or int(length) >= 80:
+            soft_hotspots += 1
+
         exceeded = []
         if int(ccn) > 40:
             exceeded.append(f"CCN {ccn} > 40")
@@ -212,7 +216,7 @@ def check_complexity() -> None:
     if violations:
         print("\n".join(violations))
         raise RuntimeError(f"complexity check failed with {len(violations)} violation(s)")
-    print("complexity: passed")
+    print(f"complexity: passed ({soft_hotspots} soft hotspot(s): CCN >= 15 or length >= 80)")
 
 
 def find_compilation_database(explicit: Path | None) -> Path:

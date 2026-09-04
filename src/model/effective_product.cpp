@@ -16,30 +16,6 @@ namespace kaixa {
             return wrong_value_kind(std::move(location), expected, found);
         }
 
-        Result<std::vector<std::string>> string_array(TableReader& table, const std::string_view key) {
-            const Value* value = table.take(key);
-            if (!value)
-                return std::vector<std::string>{};
-
-            const std::vector<Value>* array = value->as_array();
-            if (!array)
-                return std::unexpected(wrong_kind(value->location(), "a string array", value->kind()));
-
-            std::vector<std::string> result;
-            result.reserve(array->size());
-            for (const Value& item: *array) {
-                const std::string* text = item.as_string();
-                if (!text)
-                    return std::unexpected(wrong_kind(item.location(), "a string", item.kind()));
-
-                if (text->empty())
-                    return std::unexpected(error_at(item.location(), "array values cannot be empty"));
-
-                result.push_back(*text);
-            }
-            return result;
-        }
-
         Value merge_product_values(const Value& base, const Value& overlay) {
             return merge_values(base, overlay, ArrayMerge::append);
         }
@@ -282,21 +258,21 @@ namespace kaixa {
                     return std::unexpected(error_at(table.location_of("type"), "unknown product type `" + **type + "`"));
             }
 
-            auto sources = string_array(table, "sources");
+            auto sources = table.string_array("sources");
             if (!sources)
                 return std::unexpected(sources.error());
 
             result.sources.include = std::move(*sources);
             result.sources.location = declaration.location;
 
-            auto headers = string_array(table, "headers");
+            auto headers = table.string_array("headers");
             if (!headers)
                 return std::unexpected(headers.error());
 
             result.headers.include = std::move(*headers);
             result.headers.location = declaration.location;
 
-            auto public_headers = string_array(table, "public-headers");
+            auto public_headers = table.string_array("public-headers");
             if (!public_headers)
                 return std::unexpected(public_headers.error());
 
@@ -309,7 +285,7 @@ namespace kaixa {
                     std::pair{std::string_view{"system-include"}, &result.system_include_directories},
                     std::pair{std::string_view{"public-system-include"}, &result.public_system_include_directories}}
             ) {
-                auto values = string_array(table, key);
+                auto values = table.string_array(key);
                 if (!values)
                     return std::unexpected(values.error());
 
@@ -327,13 +303,13 @@ namespace kaixa {
 
             result.public_definitions = std::move(*public_definitions);
 
-            auto system_libraries = string_array(table, "system-libraries");
+            auto system_libraries = table.string_array("system-libraries");
             if (!system_libraries)
                 return std::unexpected(system_libraries.error());
 
             result.system_libraries = std::move(*system_libraries);
 
-            auto dependency_sources = string_array(table, "dependency-sources");
+            auto dependency_sources = table.string_array("dependency-sources");
             if (!dependency_sources)
                 return std::unexpected(dependency_sources.error());
 
@@ -347,7 +323,7 @@ namespace kaixa {
                 result.modules = *enabled;
             }
 
-            auto runtime_files = string_array(table, "runtime-files");
+            auto runtime_files = table.string_array("runtime-files");
             if (!runtime_files)
                 return std::unexpected(runtime_files.error());
 

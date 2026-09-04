@@ -1,51 +1,15 @@
 #include "portable_project.hpp"
+#include "cmake_syntax.hpp"
 
 #include <algorithm>
-#include <array>
 #include <cctype>
-#include <charconv>
 #include <ranges>
 
 namespace kaixa::plugin::cmake::detail {
     namespace {
-        std::string literal(const std::string_view value) {
-            std::string equals;
-            while (value.contains("]" + equals + "]"))
-                equals += '=';
-
-            return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
-        }
-
-        std::string expanding_literal(const std::string_view value) {
-            std::string result = "\"";
-            for (const char character: value) {
-                if (character == '\\' || character == '"')
-                    result.push_back('\\');
-
-                result.push_back(character);
-            }
-            result.push_back('"');
-            return result;
-        }
-
         const std::string* string_at(const Value* table, const std::string_view key) {
             const Value* value = table ? table->find(key) : nullptr;
             return value ? value->as_string() : nullptr;
-        }
-
-        std::string option_value(const Value& value) {
-            if (const bool* boolean = value.as_boolean())
-                return *boolean ? "ON" : "OFF";
-
-            if (const std::int64_t* integer = value.as_integer())
-                return std::to_string(*integer);
-
-            if (const double* floating = value.as_floating()) {
-                std::array<char, 64> buffer{};
-                const auto converted = std::to_chars(buffer.data(), buffer.data() + buffer.size(), *floating);
-                return std::string(buffer.data(), converted.ptr);
-            }
-            return literal(*value.as_string());
         }
 
         const Value* consumer(const PackageNode& package) {
@@ -81,12 +45,16 @@ namespace kaixa::plugin::cmake::detail {
             const std::string variable = source_variable(package.id);
             if (!package.source || !package.source->locator || package.source->locator->driver == "path") {
                 const std::filesystem::path relative = package.directory.lexically_relative(root);
-                result += "set(" + variable + " " + expanding_literal("${CMAKE_CURRENT_LIST_DIR}/" + relative.generic_string()) + ")\n";
+                result += "set("
+                    + variable
+                    + " "
+                    + syntax::expanding_literal("${CMAKE_CURRENT_LIST_DIR}/" + relative.generic_string())
+                    + ")\n";
                 if (add_project) {
                     result += "add_subdirectory("
-                        + expanding_literal("${" + variable + "}")
+                        + syntax::expanding_literal("${" + variable + "}")
                         + " "
-                        + expanding_literal("${CMAKE_BINARY_DIR}/_kaixa/" + package.name);
+                        + syntax::expanding_literal("${CMAKE_BINARY_DIR}/_kaixa/" + package.name);
                     if (exclude_from_all)
                         result += " EXCLUDE_FROM_ALL";
 
@@ -107,7 +75,7 @@ namespace kaixa::plugin::cmake::detail {
 
             result += "FetchContent_Declare(" + content_name + "\n";
             if (locator.driver == "git") {
-                result += "    GIT_REPOSITORY " + literal(*url) + "\n";
+                result += "    GIT_REPOSITORY " + syntax::literal(*url) + "\n";
                 const std::string* revision = package.source->identity ? &*package.source->identity : nullptr;
                 for (const std::string_view key: {"rev", "tag", "branch"}) {
                     if (!revision)
@@ -118,9 +86,9 @@ namespace kaixa::plugin::cmake::detail {
                         error_at(locator.options.location(), "portable CMake generation requires a pinned Git revision")
                     );
                 }
-                result += "    GIT_TAG " + literal(*revision) + "\n";
+                result += "    GIT_TAG " + syntax::literal(*revision) + "\n";
             } else if (locator.driver == "archive" || locator.driver == "url") {
-                result += "    URL " + literal(*url) + "\n";
+                result += "    URL " + syntax::literal(*url) + "\n";
                 const std::string* integrity = package.source->integrity ? &*package.source->integrity : nullptr;
                 if (!integrity)
                     integrity = string_at(&locator.options, "sha256");
@@ -148,12 +116,12 @@ namespace kaixa::plugin::cmake::detail {
             if (!subdirectory.empty())
                 source += "/" + subdirectory.generic_string();
 
-            result += "set(" + variable + " " + expanding_literal(source) + ")\n";
+            result += "set(" + variable + " " + syntax::expanding_literal(source) + ")\n";
             if (add_project) {
                 result += "add_subdirectory("
-                    + expanding_literal("${" + variable + "}")
+                    + syntax::expanding_literal("${" + variable + "}")
                     + " "
-                    + expanding_literal("${CMAKE_BINARY_DIR}/_kaixa/" + package.name);
+                    + syntax::expanding_literal("${CMAKE_BINARY_DIR}/_kaixa/" + package.name);
                 if (exclude_from_all)
                     result += " EXCLUDE_FROM_ALL";
 
@@ -183,7 +151,7 @@ namespace kaixa::plugin::cmake::detail {
 
                 result += std::string(command) + "(" + patch.key + " " + std::string(scope);
                 for (const Value& value: *declared->as_array())
-                    result += " " + literal(*value.as_string());
+                    result += " " + syntax::literal(*value.as_string());
                 result += ")\n";
             };
             append_values("compile-options", "target_compile_options", "PRIVATE");
@@ -194,7 +162,9 @@ namespace kaixa::plugin::cmake::detail {
                 result += "target_include_directories(" + patch.key + " SYSTEM PUBLIC";
                 for (const Value& include: *includes->as_array()) {
                     result += " "
-                        + expanding_literal(portable_path(package, package.directory / std::filesystem::path(*include.as_string())));
+                        + syntax::expanding_literal(
+                            portable_path(package, package.directory / std::filesystem::path(*include.as_string()))
+                        );
                 }
                 result += ")\n";
             }
@@ -216,7 +186,9 @@ namespace kaixa::plugin::cmake::detail {
                         continue;
 
                     for (const Value& path: *paths->as_array()) {
-                        result += "include(" + expanding_literal(portable_path(package, package.directory / *path.as_string())) + ")\n";
+                        result += "include("
+                            + syntax::expanding_literal(portable_path(package, package.directory / *path.as_string()))
+                            + ")\n";
                     }
                 }
             }
@@ -254,7 +226,7 @@ namespace kaixa::plugin::cmake::detail {
 
                 result += "    target_include_directories(" + *product + (system ? " SYSTEM INTERFACE" : " INTERFACE");
                 for (const Value& path: *paths->as_array()) {
-                    result += " " + expanding_literal(portable_path(package, package.directory / *path.as_string()));
+                    result += " " + syntax::expanding_literal(portable_path(package, package.directory / *path.as_string()));
                 }
                 result += ")\n";
             }
@@ -303,7 +275,11 @@ namespace kaixa::plugin::cmake::detail {
             const Value* declared_options = consumer(dependency) ? consumer(dependency)->find("options") : nullptr;
             if (declared_options) {
                 for (const TableEntry& option: *declared_options->as_table()) {
-                    result += "set(" + option.key + " " + option_value(option.value) + " CACHE INTERNAL \"Set by Kaixa\" FORCE)\n";
+                    auto value = syntax::scalar(option.value);
+                    if (!value)
+                        return std::unexpected(value.error());
+
+                    result += "set(" + option.key + " " + *value + " CACHE INTERNAL \"Set by Kaixa\" FORCE)\n";
                 }
             }
 

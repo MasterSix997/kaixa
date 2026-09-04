@@ -337,15 +337,18 @@ namespace kaixa {
             return match->path.string();
         }
 
-        Result<std::string> interpolate(
-            const Graph& graph,
-            const BuildEnvironment& environment,
-            const std::span<const ConfiguredPackageInstance> instances,
-            const std::span<const BuildOutput> outputs,
-            const std::span<const BuildProduct> products,
-            const TaskDefinition& task,
-            std::string value
-        ) {
+        struct Interpolator {
+            const Graph& graph;
+            const BuildEnvironment& environment;
+            std::span<const ConfiguredPackageInstance> instances;
+            std::span<const BuildOutput> outputs;
+            std::span<const BuildProduct> products;
+            const TaskDefinition& task;
+
+            [[nodiscard]] Result<std::string> expand(std::string value) const;
+        };
+
+        Result<std::string> Interpolator::expand(std::string value) const {
             std::size_t position = 0;
             while ((position = value.find("${", position)) != std::string::npos) {
                 const std::size_t end = value.find('}', position + 2);
@@ -418,20 +421,13 @@ namespace kaixa {
         };
 
         Result<void> append_command_action(BuildPlan& plan, const CommandPlanningContext& context, const TaskDefinition& task) {
+            const Interpolator interpolator{context.graph, context.environment, context.instances, plan.outputs(), context.products, task};
             std::filesystem::path working_directory = task.declaration.source.parent_path();
             if (working_directory.empty())
                 working_directory = context.graph[task.package].directory;
 
             if (task.declaration.working_directory) {
-                auto interpolated = interpolate(
-                    context.graph,
-                    context.environment,
-                    context.instances,
-                    plan.outputs(),
-                    context.products,
-                    task,
-                    task.declaration.working_directory->generic_string()
-                );
+                auto interpolated = interpolator.expand(task.declaration.working_directory->generic_string());
                 if (!interpolated)
                     return std::unexpected(interpolated.error());
 
@@ -443,15 +439,7 @@ namespace kaixa {
             Action action;
             action.description = "task " + task.qualified_name;
             for (const std::string& declared: task.declaration.run) {
-                auto argument = interpolate(
-                    context.graph,
-                    context.environment,
-                    context.instances,
-                    plan.outputs(),
-                    context.products,
-                    task,
-                    declared
-                );
+                auto argument = interpolator.expand(declared);
                 if (!argument)
                     return std::unexpected(argument.error());
 
@@ -475,15 +463,7 @@ namespace kaixa {
 
             action.working_directory = working_directory;
             for (const auto& [name, declared]: task.declaration.environment) {
-                auto value = interpolate(
-                    context.graph,
-                    context.environment,
-                    context.instances,
-                    plan.outputs(),
-                    context.products,
-                    task,
-                    declared
-                );
+                auto value = interpolator.expand(declared);
                 if (!value)
                     return std::unexpected(value.error());
 
@@ -493,15 +473,7 @@ namespace kaixa {
             std::vector<std::string> inputs;
             inputs.reserve(task.declaration.inputs.size());
             for (const std::filesystem::path& declared: task.declaration.inputs) {
-                auto input = interpolate(
-                    context.graph,
-                    context.environment,
-                    context.instances,
-                    plan.outputs(),
-                    context.products,
-                    task,
-                    declared.generic_string()
-                );
+                auto input = interpolator.expand(declared.generic_string());
                 if (!input)
                     return std::unexpected(input.error());
 
@@ -513,15 +485,7 @@ namespace kaixa {
 
             action.inputs = std::move(*expanded_inputs);
             for (const std::filesystem::path& declared: task.declaration.outputs) {
-                auto output = interpolate(
-                    context.graph,
-                    context.environment,
-                    context.instances,
-                    plan.outputs(),
-                    context.products,
-                    task,
-                    declared.generic_string()
-                );
+                auto output = interpolator.expand(declared.generic_string());
                 if (!output)
                     return std::unexpected(output.error());
 

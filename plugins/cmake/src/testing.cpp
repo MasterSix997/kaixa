@@ -1,4 +1,5 @@
 #include "testing.hpp"
+#include "cmake_syntax.hpp"
 
 #include <algorithm>
 #include <ranges>
@@ -6,14 +7,6 @@
 
 namespace kaixa::plugin::cmake::detail {
     namespace {
-        std::string quote(const std::string_view value) {
-            std::string equals;
-            while (value.contains("]" + equals + "]"))
-                equals += '=';
-
-            return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
-        }
-
         std::string regex_escape(const std::string_view value) {
             constexpr std::string_view special = R"(\.^$|()[]*+?{})";
             std::string escaped;
@@ -37,13 +30,13 @@ namespace kaixa::plugin::cmake::detail {
         std::string discovery_script(const TestOptions& test) {
             const std::string label = test_labels(test);
             std::string output;
-            output += "set(_kaixa_test_executable " + quote("$<TARGET_FILE:" + test.target + ">") + ")\n";
-            output += "set(_kaixa_test_prefix " + quote(test.name) + ")\n";
-            output += "set(_kaixa_test_label " + quote(label) + ")\n";
+            output += "set(_kaixa_test_executable " + syntax::literal("$<TARGET_FILE:" + test.target + ">") + ")\n";
+            output += "set(_kaixa_test_prefix " + syntax::literal(test.name) + ")\n";
+            output += "set(_kaixa_test_label " + syntax::literal(label) + ")\n";
             output += "if(NOT EXISTS \"${_kaixa_test_executable}\")\n  return()\nendif()\n";
             output += "execute_process(\n  COMMAND \"${_kaixa_test_executable}\"";
             for (const std::string& argument: test.adapter.discovery_arguments)
-                output += " " + quote(argument);
+                output += " " + syntax::literal(argument);
 
             output += R"cmake(
   RESULT_VARIABLE _kaixa_result
@@ -64,12 +57,12 @@ foreach(_kaixa_case IN LISTS _kaixa_cases)
   set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
   add_test("${_kaixa_name}" "${_kaixa_test_executable}")cmake";
             if (test.adapter.separate_filter_argument) {
-                output += " " + quote(test.adapter.case_filter_prefix) + " \"${_kaixa_case}\"";
+                output += " " + syntax::literal(test.adapter.case_filter_prefix) + " \"${_kaixa_case}\"";
             } else if (!test.adapter.case_filter_prefix.empty()) {
-                output += " " + quote(test.adapter.case_filter_prefix + "${_kaixa_case}" + test.adapter.case_filter_suffix);
+                output += " " + syntax::literal(test.adapter.case_filter_prefix + "${_kaixa_case}" + test.adapter.case_filter_suffix);
             }
             for (const std::string& argument: test.arguments)
-                output += " " + quote(argument);
+                output += " " + syntax::literal(argument);
 
             output += R"cmake()
   set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
@@ -85,7 +78,7 @@ endforeach()
 
             output += "set(" + variable + " \"${CMAKE_CURRENT_BINARY_DIR}/" + filename + "\")\n";
             output += "if(CMAKE_CONFIGURATION_TYPES)\n";
-            output += "  file(GENERATE OUTPUT \"${" + variable + "}-$<CONFIG>.cmake\" CONTENT " + quote(script) + ")\n";
+            output += "  file(GENERATE OUTPUT \"${" + variable + "}-$<CONFIG>.cmake\" CONTENT " + syntax::literal(script) + ")\n";
             output += "  file(WRITE \"${"
                 + variable
                 + "}.cmake\""
@@ -93,7 +86,7 @@ endforeach()
                 + variable
                 + "}-\\${CTEST_CONFIGURATION_TYPE}.cmake\\\")\\n\")\n";
             output += "else()\n";
-            output += "  file(GENERATE OUTPUT \"${" + variable + "}.cmake\" CONTENT " + quote(script) + ")\n";
+            output += "  file(GENERATE OUTPUT \"${" + variable + "}.cmake\" CONTENT " + syntax::literal(script) + ")\n";
             output += "endif()\n";
             output += "set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES";
             output += " \"${" + variable + "}.cmake\")\n";
@@ -101,11 +94,15 @@ endforeach()
 
         void generate_googletest(std::string& output, const TestOptions& test) {
             output += "include(GoogleTest)\n";
-            output += "gtest_discover_tests(" + test.target + " TEST_PREFIX " + quote(test.name + "::") + " DISCOVERY_MODE PRE_TEST";
+            output += "gtest_discover_tests("
+                + test.target
+                + " TEST_PREFIX "
+                + syntax::literal(test.name + "::")
+                + " DISCOVERY_MODE PRE_TEST";
             if (!test.arguments.empty()) {
                 output += " EXTRA_ARGS";
                 for (const std::string& argument: test.arguments)
-                    output += " " + quote(argument);
+                    output += " " + syntax::literal(argument);
             }
             std::string labels = test_labels(test);
             labels.replace(labels.find(';'), 1, "\\;");
@@ -142,12 +139,16 @@ endforeach()
                 continue;
             }
 
-            output += "add_test(NAME " + quote(test.name) + " COMMAND " + test.target;
+            output += "add_test(NAME " + syntax::literal(test.name) + " COMMAND " + test.target;
             for (const std::string& argument: test.arguments)
-                output += " " + quote(argument);
+                output += " " + syntax::literal(argument);
 
             output += ")\n";
-            output += "set_tests_properties(" + quote(test.name) + " PROPERTIES LABELS " + quote(test_labels(test)) + ")\n";
+            output += "set_tests_properties("
+                + syntax::literal(test.name)
+                + " PROPERTIES LABELS "
+                + syntax::literal(test_labels(test))
+                + ")\n";
         }
     }
 

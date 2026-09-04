@@ -293,6 +293,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(kaixa_plugins STATIC
     [[plugins/bundle/src/plugins.cpp]]
+    [[plugins/cmake/src/cmake_syntax.cpp]]
     [[plugins/cmake/src/configuration.cpp]]
     [[plugins/cmake/src/file_api.cpp]]
     [[plugins/cmake/src/portable_project.cpp]]
@@ -336,4 +337,3 @@ install(EXPORT kaixa_pluginsTargets FILE kaixa_pluginsTargets.cmake NAMESPACE ka
 include(CMakePackageConfigHelpers)
 write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfigVersion.cmake" VERSION 0.2.0 COMPATIBILITY SameMajorVersion)
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfigVersion.cmake" DESTINATION lib/cmake/kaixa_plugins)
-

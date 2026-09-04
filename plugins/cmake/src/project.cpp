@@ -1,3 +1,4 @@
+#include "cmake_syntax.hpp"
 #include "configuration.hpp"
 #include "testing.hpp"
 
@@ -9,30 +10,6 @@
 
 namespace kaixa::plugin::cmake::detail {
     namespace {
-        std::string quote(const std::string_view value) {
-            std::string equals;
-            while (value.contains("]" + equals + "]"))
-                equals += '=';
-
-            return "[" + equals + "[" + std::string(value) + "]" + equals + "]";
-        }
-
-        std::string quoted_string(const std::string_view value) {
-            std::string result = "\"";
-            for (const char character: value) {
-                if (character == '\\' || character == '"')
-                    result.push_back('\\');
-
-                result.push_back(character);
-            }
-            result.push_back('"');
-            return result;
-        }
-
-        std::string cmake_argument(const std::string_view value) {
-            return value.contains("${") ? quoted_string(value) : quote(value);
-        }
-
         std::string project_path(const Options& options, const std::string_view value) {
             if (value.starts_with("$<") || value.starts_with('<'))
                 return std::string(value);
@@ -88,7 +65,8 @@ namespace kaixa::plugin::cmake::detail {
 
         std::string output_directory(const std::filesystem::path& path) {
             const std::string value = path.generic_string();
-            return path.is_absolute() ? quoted_string(value) : quoted_string("${_kaixa_output_root}/" + value + "/$<0:>");
+            return path.is_absolute() ? syntax::expanding_literal(value)
+                                      : syntax::expanding_literal("${_kaixa_output_root}/" + value + "/$<0:>");
         }
 
         std::string project_version(const PackageNode& package) {
@@ -123,7 +101,7 @@ namespace kaixa::plugin::cmake::detail {
 
             output += std::string(command) + "(" + target + " " + std::string(scope) + "\n";
             for (const std::string& value: values)
-                output += "    " + cmake_argument(value) + "\n";
+                output += "    " + syntax::argument(value) + "\n";
 
             output += ")\n\n";
         }
@@ -161,13 +139,13 @@ namespace kaixa::plugin::cmake::detail {
                 const std::filesystem::path parent = runtime_file.destination.parent_path();
                 output += "add_custom_command(TARGET " + target.name + " POST_BUILD\n";
                 output += "    COMMAND ${CMAKE_COMMAND} -E make_directory "
-                    + quote("$<TARGET_FILE_DIR:" + target.name + ">/" + parent.generic_string())
+                    + syntax::literal("$<TARGET_FILE_DIR:" + target.name + ">/" + parent.generic_string())
                     + "\n";
                 output += "    COMMAND ${CMAKE_COMMAND} -E "
                     + std::string(runtime_file.directory ? "copy_directory " : "copy_if_different ")
-                    + cmake_argument(project_source_path(options, runtime_file.source))
+                    + syntax::argument(project_source_path(options, runtime_file.source))
                     + " "
-                    + quote(destination)
+                    + syntax::literal(destination)
                     + "\n"
                       ")\n\n";
             }
@@ -235,11 +213,11 @@ namespace kaixa::plugin::cmake::detail {
                   ")\n\n";
             for (const TargetOptions::InstallHeader& header: target.install_headers) {
                 output += "install(FILES "
-                    + cmake_argument(project_source_path(options, header.source))
+                    + syntax::argument(project_source_path(options, header.source))
                     + " DESTINATION "
-                    + quote((std::filesystem::path("include") / header.destination.parent_path()).generic_string());
+                    + syntax::literal((std::filesystem::path("include") / header.destination.parent_path()).generic_string());
                 if (header.source.filename() != header.destination.filename())
-                    output += " RENAME " + quote(header.destination.filename().generic_string());
+                    output += " RENAME " + syntax::literal(header.destination.filename().generic_string());
 
                 output += ")\n";
             }
@@ -250,17 +228,17 @@ namespace kaixa::plugin::cmake::detail {
                 const std::filesystem::path destination = std::filesystem::path("bin") / runtime_file.destination.parent_path();
                 if (runtime_file.directory) {
                     output += "install(DIRECTORY "
-                        + cmake_argument(project_source_path(options, runtime_file.source) + "/")
+                        + syntax::argument(project_source_path(options, runtime_file.source) + "/")
                         + " DESTINATION "
-                        + quote((destination / runtime_file.destination.filename()).generic_string())
+                        + syntax::literal((destination / runtime_file.destination.filename()).generic_string())
                         + ")\n";
                 } else {
                     output += "install(FILES "
-                        + cmake_argument(project_source_path(options, runtime_file.source))
+                        + syntax::argument(project_source_path(options, runtime_file.source))
                         + " DESTINATION "
-                        + quote(destination.generic_string());
+                        + syntax::literal(destination.generic_string());
                     if (runtime_file.source.filename() != runtime_file.destination.filename())
-                        output += " RENAME " + quote(runtime_file.destination.filename().generic_string());
+                        output += " RENAME " + syntax::literal(runtime_file.destination.filename().generic_string());
 
                     output += ")\n";
                 }
@@ -393,7 +371,7 @@ namespace kaixa::plugin::cmake::detail {
 
             output += "\n";
             for (const std::string& source: sources)
-                output += "    " + cmake_argument(source) + "\n";
+                output += "    " + syntax::argument(source) + "\n";
 
             output += ")\n\n";
         }
