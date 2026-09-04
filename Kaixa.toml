@@ -23,7 +23,6 @@ sources = ["apps/kaixa/*.cpp", "apps/kaixa/command_line.cpp"]
 
 [cmake]
 languages = ["CXX"]
-generation = "state"
 msvc-runtime = "static"
 output = { runtime = "bin", library = "lib", archive = "lib" }
 
@@ -66,9 +65,6 @@ public-include = ["include"]
 system-include = ["third_party"]
 defines = { TOML_EXCEPTIONS = 0 }
 
-[members.kaixa_core.cmake]
-generation = "state"
-
 [members.kaixa_plugins]
 version = "0.2.0-dev"
 resolver = "cmake"
@@ -86,6 +82,3 @@ public-include = [
     "plugins/remote/include",
     "plugins/registry/include",
 ]
-
-[members.kaixa_plugins.cmake]
-generation = "state"

@@ -872,14 +872,14 @@ namespace kaixa::plugin::cmake::detail {
                 return std::unexpected(generation.error());
 
             if (*generation) {
-                if (**generation == "source") {
-                    result.generation = GenerationMode::source;
+                if (**generation == "export") {
+                    result.generation = GenerationMode::export_project;
                 } else if (**generation == "state") {
                     result.generation = GenerationMode::state;
                 } else {
                     return std::unexpected(error_at(
                         options.location_of("generation"),
-                        "unknown CMake generation location `" + **generation + "`; expected `source` or `state`"
+                        "unknown CMake generation mode `" + **generation + "`; expected `export` or `state`"
                     ));
                 }
             }
@@ -1239,6 +1239,11 @@ namespace kaixa::plugin::cmake::detail {
                         if (std::ranges::find(result.find_packages, **find_package) == result.find_packages.end())
                             result.find_packages.push_back(**find_package);
 
+                        if (visibility == DependencyVisibility::public_dependency
+                            && std::ranges::find(result.export_dependencies, **find_package) == result.export_dependencies.end()) {
+                            result.export_dependencies.push_back(**find_package);
+                        }
+
                         auto linked_product = dependency_product_name(
                             target,
                             binding != package.manifest->dependencies.end() ? &*binding : nullptr
@@ -1261,10 +1266,18 @@ namespace kaixa::plugin::cmake::detail {
                 if (!linked_product)
                     return std::unexpected(linked_product.error());
 
-                if (visibility == DependencyVisibility::public_dependency)
-                    product->public_link_libraries.push_back(std::move(*linked_product));
-                else
+                if (visibility == DependencyVisibility::public_dependency) {
+                    if (target.kind == PackageKind::managed) {
+                        product->public_link_libraries.push_back("$<BUILD_INTERFACE:" + *linked_product + ">");
+                        product->public_link_libraries.push_back("$<INSTALL_INTERFACE:" + target.name + "::" + *linked_product + ">");
+                        if (std::ranges::find(result.export_dependencies, target.name) == result.export_dependencies.end())
+                            result.export_dependencies.push_back(target.name);
+                    } else {
+                        product->public_link_libraries.push_back(std::move(*linked_product));
+                    }
+                } else {
                     product->link_libraries.push_back(std::move(*linked_product));
+                }
             }
             result.targets.push_back(std::move(*product));
             return {};
@@ -1443,6 +1456,10 @@ namespace kaixa::plugin::cmake::detail {
         Options result;
         result.source = package.directory;
         result.languages = {"CXX"};
+        for (const PackageNode& candidate: graph.nodes()) {
+            if (candidate.source && !candidate.directory.empty())
+                result.portable_source_roots.push_back({candidate.directory, source_variable(candidate.id)});
+        }
         if (!package.manifest)
             return &cache.options.emplace(std::move(cache_key), std::move(result)).first->second;
 
@@ -1519,6 +1536,10 @@ namespace kaixa::plugin::cmake::detail {
             return std::unexpected(finished.error());
 
         return &cache.options.emplace(std::move(cache_key), std::move(result)).first->second;
+    }
+
+    std::string source_variable(const PackageId package) {
+        return "_kaixa_package_" + std::to_string(package.index) + "_source";
     }
 
     Result<BuildOptions> read_build_options(const Value* settings) {

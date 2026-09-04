@@ -137,7 +137,7 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
         context.check_contains(project->content, "tests/support", "target include is relative to its manifest");
         context.check_contains(project->content, "tests/vendor/include", "target system include is relative to its manifest");
         context.check_contains(project->content, "CASE_ROOT=", "target definition is generated");
-        context.check_contains(project->content, "app/tests/fixtures", "definition path is relative to its manifest");
+        context.check_contains(project->content, "CASE_ROOT=tests/fixtures", "definition path is relative to its project");
         context.check_contains(project->content, "threads", "target system library is linked");
         context.check_contains(project->content, "install(TARGETS app.tests", "installable associated target is exported");
     }
@@ -207,11 +207,20 @@ KAIXA_TEST(prebuilt_descriptors_reach_cmake_consumers) {
     if (project == plan->generated_files().end())
         return;
 
-    context.check_contains(project->content, "toolkit/include", "prebuilt public include reaches the consumer");
-    context.check_contains(project->content, "toolkit/system", "prebuilt system include reaches the consumer");
-    context.check_contains(project->content, "toolkit/lib/toolkit.lib", "prebuilt library reaches the linker");
+    context.check_contains(project->content, "${_kaixa_package_1_source}/include", "prebuilt public include reaches the consumer");
+    context.check_contains(project->content, "${_kaixa_package_1_source}/system", "prebuilt system include reaches the consumer");
+    context.check_contains(project->content, "${_kaixa_package_1_source}/lib/toolkit.lib", "prebuilt library reaches the linker");
     context.check_contains(project->content, "user32", "prebuilt system library reaches the linker");
     context.check_contains(project->content, "toolkit.dll", "prebuilt runtime file is staged");
+
+    const auto dependencies = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "KaixaDependencies.cmake";
+    });
+    context.check(dependencies != plan->generated_files().end(), "portable dependency bootstrap is generated");
+    if (dependencies != plan->generated_files().end()) {
+        context.check_contains(dependencies->content, "set(_kaixa_package_1_source", "prebuilt source is defined outside the project");
+        context.check(!dependencies->content.contains(workspace.path().generic_string()), "portable bootstrap omits the workspace path");
+    }
 }
 
 KAIXA_TEST(find_package_recipes_generate_discovery_and_link_the_declared_product) {

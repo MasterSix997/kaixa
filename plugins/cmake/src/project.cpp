@@ -44,14 +44,44 @@ namespace kaixa::plugin::cmake::detail {
             if (path.is_relative())
                 return path.lexically_normal().generic_string();
 
+            for (const PortableSourceRoot& root: options.portable_source_roots) {
+                const std::filesystem::path relative = path.lexically_relative(root.directory);
+                if (!relative.empty() && *relative.begin() != "..")
+                    return "${" + root.variable + "}/" + relative.generic_string();
+            }
+
             const std::filesystem::path relative = path.lexically_relative(options.source);
             return relative.empty() ? path.generic_string() : relative.generic_string();
         }
 
+        std::string project_definition(const Options& options, const std::string& definition) {
+            const std::size_t separator = definition.find('=');
+            if (separator == std::string::npos)
+                return definition;
+
+            const std::string value = definition.substr(separator + 1);
+            if (value.empty() || std::filesystem::path(value).is_relative())
+                return definition;
+
+            return definition.substr(0, separator + 1) + project_path(options, value);
+        }
+
+        std::vector<std::string> project_definitions(const Options& options, const std::vector<std::string>& values) {
+            std::vector<std::string> result;
+            result.reserve(values.size());
+            for (const std::string& value: values)
+                result.push_back(project_definition(options, value));
+
+            return result;
+        }
+
         std::string project_source_path(const Options& options, const std::filesystem::path& path) {
             std::string value = project_path(options, path.generic_string());
-            if (options.generation == GenerationMode::source && std::filesystem::path(value).is_relative())
+            if (options.generation == GenerationMode::export_project
+                && !value.contains("${")
+                && std::filesystem::path(value).is_relative()) {
                 return "${CMAKE_CURRENT_LIST_DIR}/" + value;
+            }
 
             return value;
         }
@@ -99,14 +129,29 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         std::vector<std::string> project_paths(const Options& options, const std::vector<std::string>& values) {
-            if (options.generation == GenerationMode::source)
-                return values;
-
             std::vector<std::string> result;
             result.reserve(values.size());
             for (const std::string& value: values)
                 result.push_back(project_path(options, value));
 
+            return result;
+        }
+
+        std::vector<std::string> project_link_values(const Options& options, const std::vector<std::string>& values) {
+            std::vector<std::string> result;
+            result.reserve(values.size());
+            for (const std::string& value: values) {
+                const std::filesystem::path path(value);
+                const std::filesystem::path relative = path.lexically_relative(options.source);
+                if (path.is_absolute()
+                    && std::ranges::distance(relative) == 1
+                    && !relative.has_extension()
+                    && !std::filesystem::exists(path)) {
+                    result.push_back(relative.generic_string());
+                } else {
+                    result.push_back(path.is_absolute() ? project_path(options, value) : value);
+                }
+            }
             return result;
         }
 
@@ -135,13 +180,37 @@ namespace kaixa::plugin::cmake::detail {
 
             for (std::string& include: result) {
                 const std::filesystem::path path = include;
-                if (options.generation == GenerationMode::source && !include.starts_with("$<") && path.is_relative())
+                if (options.generation == GenerationMode::export_project
+                    && !include.contains("${")
+                    && !include.starts_with("$<")
+                    && path.is_relative()) {
                     include.insert(0, "${CMAKE_CURRENT_LIST_DIR}/");
+                }
 
                 include.insert(0, "$<BUILD_INTERFACE:");
                 include += '>';
             }
             result.push_back("$<INSTALL_INTERFACE:include>");
+            return result;
+        }
+
+        std::vector<std::string> generated_public_system_includes(const Options& options, const TargetOptions& target) {
+            std::vector<std::string> result = project_paths(options, target.public_system_include_directories);
+            if (!target.install)
+                return result;
+
+            for (std::string& include: result) {
+                const std::filesystem::path path = include;
+                if (options.generation == GenerationMode::export_project
+                    && !include.contains("${")
+                    && !include.starts_with("$<")
+                    && path.is_relative()) {
+                    include.insert(0, "${CMAKE_CURRENT_LIST_DIR}/");
+                }
+
+                include.insert(0, "$<BUILD_INTERFACE:");
+                include += '>';
+            }
             return result;
         }
 
@@ -204,18 +273,22 @@ namespace kaixa::plugin::cmake::detail {
             std::string& output,
             const std::string_view package,
             const std::string_view version,
-            const std::span<const TargetOptions> targets
+            const std::span<const TargetOptions> targets,
+            const std::span<const std::string> dependencies
         ) {
             if (std::ranges::none_of(targets, &TargetOptions::install))
                 return;
 
             const std::string name(package);
             const std::string config = name + "Config.cmake";
-            output += "file(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/"
-                + config
-                + "\" \"include(\\\"\\${CMAKE_CURRENT_LIST_DIR}/"
-                + name
-                + "Targets.cmake\\\")\\n\")\n";
+            std::string config_content;
+            if (!dependencies.empty()) {
+                config_content += "include(CMakeFindDependencyMacro)\\n";
+                for (const std::string& dependency: dependencies)
+                    config_content += "find_dependency(" + dependency + " REQUIRED)\\n";
+            }
+            config_content += "include(\\\"\\${CMAKE_CURRENT_LIST_DIR}/" + name + "Targets.cmake\\\")\\n";
+            output += "file(WRITE \"${CMAKE_CURRENT_BINARY_DIR}/" + config + "\" \"" + config_content + "\")\n";
             output += "install(EXPORT "
                 + name
                 + "Targets FILE "
@@ -239,50 +312,73 @@ namespace kaixa::plugin::cmake::detail {
 
             output += " DESTINATION lib/cmake/" + name + ")\n\n";
         }
-    }
 
-    std::string generate_project(const PackageNode& package, const Options& options) {
-        const std::string version = project_version(package);
-        std::string output = std::string(generated_marker) + "\n" + "cmake_minimum_required(VERSION 3.20)\n" + "project(" + package.name;
-        if (!version.empty())
-            output += " VERSION " + version;
+        std::vector<std::string> project_languages(const std::span<const ProjectPackage> packages) {
+            std::vector<std::string> result;
+            for (const ProjectPackage& package: packages) {
+                for (const std::string& language: package.options->languages) {
+                    if (std::ranges::find(result, language) == result.end())
+                        result.push_back(language);
+                }
+            }
+            return result;
+        }
 
-        output += " LANGUAGES";
-        for (const std::string& language: options.languages)
-            output += " " + language;
+        void generate_project_header(std::string& output, const std::span<const ProjectPackage> packages) {
+            const PackageNode& owner = *packages.front().package;
+            const std::string version = project_version(owner);
+            output = std::string(generated_marker) + "\ncmake_minimum_required(VERSION 3.20)\nproject(" + owner.name;
+            if (!version.empty())
+                output += " VERSION " + version;
 
-        output += ")\n\n";
+            output += " LANGUAGES";
+            for (const std::string& language: project_languages(packages))
+                output += " " + language;
 
-        if (options.runtime_output || options.library_output || options.archive_output) {
-            output += "if(PROJECT_IS_TOP_LEVEL)\n";
-            output += "    if(KAIXA_OUTPUT_ROOT)\n";
-            output += "        set(_kaixa_output_root \"${KAIXA_OUTPUT_ROOT}\")\n";
-            output += "    else()\n";
-            output += "        set(_kaixa_output_root \"${CMAKE_BINARY_DIR}\")\n";
-            output += "    endif()\n";
+            output += ")\n\n";
+        }
+
+        void generate_export_bootstrap(std::string& output, const Options& options) {
+            if (options.generation != GenerationMode::export_project)
+                return;
+
+            if (options.msvc_runtime != MsvcRuntime::default_runtime) {
+                const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
+                output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n";
+            }
+            if (options.cxx_standard) {
+                output += "set(CMAKE_CXX_STANDARD " + std::to_string(*options.cxx_standard) + ")\n";
+                output += "set(CMAKE_CXX_EXTENSIONS OFF)\n";
+            }
+            if (options.msvc_runtime != MsvcRuntime::default_runtime || options.cxx_standard)
+                output += '\n';
+
+            output += "if(PROJECT_IS_TOP_LEVEL AND NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
+                      "    include(\"${CMAKE_CURRENT_LIST_DIR}/KaixaDependencies.cmake\")\n"
+                      "endif()\n\n";
+        }
+
+        void generate_output_policy(std::string& output, const Options& options) {
+            if (!options.runtime_output && !options.library_output && !options.archive_output)
+                return;
+
+            output += "if(PROJECT_IS_TOP_LEVEL)\n"
+                      "    if(KAIXA_OUTPUT_ROOT)\n"
+                      "        set(_kaixa_output_root \"${KAIXA_OUTPUT_ROOT}\")\n"
+                      "    else()\n"
+                      "        set(_kaixa_output_root \"${CMAKE_BINARY_DIR}\")\n"
+                      "    endif()\n";
             if (options.runtime_output)
                 output += "    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY " + output_directory(*options.runtime_output) + ")\n";
-
             if (options.library_output)
                 output += "    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY " + output_directory(*options.library_output) + ")\n";
-
             if (options.archive_output)
                 output += "    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY " + output_directory(*options.archive_output) + ")\n";
 
             output += "endif()\n\n";
         }
 
-        if (options.msvc_runtime != MsvcRuntime::default_runtime) {
-            const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
-            output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n\n";
-        }
-
-        for (const std::string& package_name: options.find_packages)
-            output += "find_package(" + package_name + " REQUIRED)\n";
-        if (!options.find_packages.empty())
-            output += "\n";
-
-        for (const TargetOptions& target: options.targets) {
+        void generate_target_declaration(std::string& output, const Options& options, const TargetOptions& target) {
             switch (target.type) {
             case TargetType::executable: output += "add_executable(" + target.name; break;
             case TargetType::static_library: output += "add_library(" + target.name + " STATIC"; break;
@@ -292,30 +388,28 @@ namespace kaixa::plugin::cmake::detail {
             const std::vector<std::string> sources = project_paths(options, target.sources);
             if (sources.empty()) {
                 output += ")\n\n";
-            } else {
-                output += "\n";
-                for (const std::string& source: sources)
-                    output += "    " + quote(source) + "\n";
-
-                output += ")\n\n";
+                return;
             }
 
+            output += "\n";
+            for (const std::string& source: sources)
+                output += "    " + cmake_argument(source) + "\n";
+
+            output += ")\n\n";
+        }
+
+        void generate_target_usage(std::string& output, const Options& options, const TargetOptions& target) {
             const bool interface_target = target.type == TargetType::interface_library;
-            const bool executable = target.type == TargetType::executable;
+            const std::string_view private_scope = interface_target ? "INTERFACE" : "PRIVATE";
+            const std::string_view public_scope = interface_target ? "INTERFACE" : "PUBLIC";
             emit_values(
                 output,
                 "target_include_directories",
                 target.name,
-                interface_target ? "INTERFACE" : "PRIVATE",
+                private_scope,
                 project_paths(options, target.include_directories)
             );
-            emit_values(
-                output,
-                "target_include_directories",
-                target.name,
-                interface_target ? "INTERFACE" : "PUBLIC",
-                generated_public_includes(options, target)
-            );
+            emit_values(output, "target_include_directories", target.name, public_scope, generated_public_includes(options, target));
             emit_values(
                 output,
                 "target_include_directories",
@@ -328,47 +422,44 @@ namespace kaixa::plugin::cmake::detail {
                 "target_include_directories",
                 target.name,
                 interface_target ? "SYSTEM INTERFACE" : "SYSTEM PUBLIC",
-                project_paths(options, target.public_system_include_directories)
+                generated_public_system_includes(options, target)
             );
-            emit_values(output, "target_link_libraries", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.link_libraries);
+            emit_values(output, "target_link_libraries", target.name, private_scope, project_link_values(options, target.link_libraries));
             emit_values(
                 output,
                 "target_link_libraries",
                 target.name,
-                interface_target ? "INTERFACE" : "PUBLIC",
-                target.public_link_libraries
+                public_scope,
+                project_link_values(options, target.public_link_libraries)
             );
             emit_values(
                 output,
                 "target_compile_definitions",
                 target.name,
-                interface_target ? "INTERFACE" : "PRIVATE",
-                target.compile_definitions
+                private_scope,
+                project_definitions(options, target.compile_definitions)
             );
             emit_values(
                 output,
                 "target_compile_definitions",
                 target.name,
-                interface_target ? "INTERFACE" : "PUBLIC",
-                target.public_compile_definitions
+                public_scope,
+                project_definitions(options, target.public_compile_definitions)
             );
-            emit_values(output, "target_compile_options", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.compile_options);
-            emit_values(
-                output,
-                "target_compile_options",
-                target.name,
-                interface_target ? "INTERFACE" : "PUBLIC",
-                target.public_compile_options
-            );
-            emit_values(output, "target_link_options", target.name, interface_target ? "INTERFACE" : "PRIVATE", target.link_options);
+            emit_values(output, "target_compile_options", target.name, private_scope, target.compile_options);
+            emit_values(output, "target_compile_options", target.name, public_scope, target.public_compile_options);
+            emit_values(output, "target_link_options", target.name, private_scope, target.link_options);
             emit_values(
                 output,
                 "target_precompile_headers",
                 target.name,
-                interface_target ? "INTERFACE" : "PRIVATE",
+                private_scope,
                 project_paths(options, target.precompiled_headers)
             );
+        }
 
+        void generate_target_policy(std::string& output, const TargetOptions& target) {
+            const bool interface_target = target.type == TargetType::interface_library;
             if (target.msvc_runtime != MsvcRuntime::default_runtime) {
                 const std::string runtime = target.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
                 output += "set_property(TARGET "
@@ -377,9 +468,8 @@ namespace kaixa::plugin::cmake::detail {
                     + runtime
                     + "$<$<CONFIG:Debug>:Debug>\")\n\n";
             }
-
             if (target.cxx_standard) {
-                const std::string scope = interface_target ? "INTERFACE" : (executable ? "PRIVATE" : "PUBLIC");
+                const std::string scope = interface_target ? "INTERFACE" : (target.type == TargetType::executable ? "PRIVATE" : "PUBLIC");
                 output += "target_compile_features("
                     + target.name
                     + " "
@@ -391,13 +481,43 @@ namespace kaixa::plugin::cmake::detail {
             }
             if (!target.default_build)
                 output += "set_target_properties(" + target.name + " PROPERTIES EXCLUDE_FROM_ALL TRUE)\n\n";
-
-            generate_runtime_materialization(output, options, target);
-            generate_target_install(output, options, package.name, target);
         }
 
-        generate_package_export(output, package.name, version, options.targets);
-        generate_tests(output, options.tests);
+        void generate_package(std::string& output, const ProjectPackage& project_package) {
+            const PackageNode& package = *project_package.package;
+            const Options& options = *project_package.options;
+            generate_output_policy(output, options);
+            if (options.msvc_runtime != MsvcRuntime::default_runtime) {
+                const std::string runtime = options.msvc_runtime == MsvcRuntime::static_runtime ? "MultiThreaded" : "MultiThreadedDLL";
+                output += "set(CMAKE_MSVC_RUNTIME_LIBRARY \"" + runtime + "$<$<CONFIG:Debug>:Debug>\")\n\n";
+            }
+            for (const std::string& package_name: options.find_packages)
+                output += "find_package(" + package_name + " REQUIRED)\n";
+            if (!options.find_packages.empty())
+                output += "\n";
+
+            for (const TargetOptions& target: options.targets) {
+                generate_target_declaration(output, options, target);
+                generate_target_usage(output, options, target);
+                generate_target_policy(output, target);
+                generate_runtime_materialization(output, options, target);
+                generate_target_install(output, options, package.name, target);
+            }
+            generate_package_export(output, package.name, project_version(package), options.targets, options.export_dependencies);
+            generate_tests(output, options.tests);
+        }
+    }
+
+    std::string generate_project(const std::span<const ProjectPackage> packages) {
+        if (packages.empty())
+            return {};
+
+        std::string output;
+        generate_project_header(output, packages);
+        generate_export_bootstrap(output, *packages.front().options);
+        for (const ProjectPackage& package: packages)
+            generate_package(output, package);
+
         return output;
     }
 }

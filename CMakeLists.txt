@@ -2,6 +2,14 @@
 cmake_minimum_required(VERSION 3.20)
 project(kaixa VERSION 0.2.0 LANGUAGES CXX)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(PROJECT_IS_TOP_LEVEL AND NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)
+    include("${CMAKE_CURRENT_LIST_DIR}/KaixaDependencies.cmake")
+endif()
+
 if(PROJECT_IS_TOP_LEVEL)
     if(KAIXA_OUTPUT_ROOT)
         set(_kaixa_output_root "${KAIXA_OUTPUT_ROOT}")
@@ -13,6 +21,200 @@ if(PROJECT_IS_TOP_LEVEL)
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY "${_kaixa_output_root}/lib/$<0:>")
 endif()
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+add_executable(kaixa
+    [[apps/kaixa/application.cpp]]
+    [[apps/kaixa/application_build.cpp]]
+    [[apps/kaixa/application_catalog.cpp]]
+    [[apps/kaixa/application_output.cpp]]
+    [[apps/kaixa/application_workspace.cpp]]
+    [[apps/kaixa/command_line.cpp]]
+    [[apps/kaixa/configuration_output.cpp]]
+    [[apps/kaixa/main.cpp]]
+)
+
+target_link_libraries(kaixa PRIVATE
+    [[kaixa_core]]
+    [[kaixa_plugins]]
+)
+
+set_property(TARGET kaixa PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_features(kaixa PRIVATE cxx_std_23)
+
+set_target_properties(kaixa PROPERTIES CXX_EXTENSIONS OFF)
+
+install(TARGETS kaixa EXPORT kaixaTargets
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    INCLUDES DESTINATION include
+)
+
+add_executable(kaixa_tests
+    [[apps/kaixa/command_line.cpp]]
+    [[tests/build_operations.cpp]]
+    [[tests/command_line.cpp]]
+    [[tests/configurations.cpp]]
+    [[tests/delivery.cpp]]
+    [[tests/manifest.cpp]]
+    [[tests/package_sets.cpp]]
+    [[tests/package_sources.cpp]]
+    [[tests/policies.cpp]]
+    [[tests/remote_packages.cpp]]
+    [[tests/resolution_lock.cpp]]
+    [[tests/run_and_clean.cpp]]
+    [[tests/smoke.cpp]]
+    [[tests/support/test_main.cpp]]
+    [[tests/support/test_support.cpp]]
+    [[tests/tasks.cpp]]
+    [[tests/workspace_conformance.cpp]]
+    [[tests/workspace_errors.cpp]]
+    [[tests/workspace_fixtures.cpp]]
+)
+
+target_include_directories(kaixa_tests PRIVATE
+    [[tests/support]]
+    [[apps/kaixa]]
+)
+
+target_link_libraries(kaixa_tests PRIVATE
+    [[kaixa_core]]
+    [[kaixa_plugins]]
+)
+
+set_property(TARGET kaixa_tests PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_features(kaixa_tests PRIVATE cxx_std_23)
+
+set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(kaixa_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+add_executable(manifest_writer
+    [[examples/manifest_writer.cpp]]
+)
+
+target_link_libraries(manifest_writer PRIVATE
+    [[kaixa_core]]
+)
+
+set_property(TARGET manifest_writer PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_features(manifest_writer PRIVATE cxx_std_23)
+
+set_target_properties(manifest_writer PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(manifest_writer PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+add_executable(manifest_format
+    [[benchmarks/manifest_format.cpp]]
+)
+
+target_link_libraries(manifest_format PRIVATE
+    [[kaixa_core]]
+)
+
+set_property(TARGET manifest_format PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_features(manifest_format PRIVATE cxx_std_23)
+
+set_target_properties(manifest_format PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(manifest_format PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+add_executable(workspace_planning
+    [[benchmarks/workspace_planning.cpp]]
+)
+
+target_link_libraries(workspace_planning PRIVATE
+    [[kaixa_core]]
+    [[kaixa_plugins]]
+)
+
+set_property(TARGET workspace_planning PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
+target_compile_features(workspace_planning PRIVATE cxx_std_23)
+
+set_target_properties(workspace_planning PROPERTIES CXX_EXTENSIONS OFF)
+
+set_target_properties(workspace_planning PROPERTIES EXCLUDE_FROM_ALL TRUE)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/kaixaConfig.cmake" "include(\"\${CMAKE_CURRENT_LIST_DIR}/kaixaTargets.cmake\")\n")
+install(EXPORT kaixaTargets FILE kaixaTargets.cmake NAMESPACE kaixa:: DESTINATION lib/cmake/kaixa)
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/kaixaConfigVersion.cmake" VERSION 0.2.0 COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/kaixaConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/kaixaConfigVersion.cmake" DESTINATION lib/cmake/kaixa)
+
+enable_testing()
+
+set(_kaixa_discovery_0 "${CMAKE_CURRENT_BINARY_DIR}/kaixa-discovery-0")
+if(CMAKE_CONFIGURATION_TYPES)
+  file(GENERATE OUTPUT "${_kaixa_discovery_0}-$<CONFIG>.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
+set(_kaixa_test_prefix [[kaixa]])
+set(_kaixa_test_label [[kaixa.target:kaixa_tests;kaixa.purpose:test]])
+if(NOT EXISTS "${_kaixa_test_executable}")
+  return()
+endif()
+execute_process(
+  COMMAND "${_kaixa_test_executable}" [[--kaixa-test-list]]
+  RESULT_VARIABLE _kaixa_result
+  OUTPUT_VARIABLE _kaixa_output
+  ERROR_VARIABLE _kaixa_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _kaixa_result EQUAL 0)
+  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
+
+endif()
+string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
+foreach(_kaixa_case IN LISTS _kaixa_cases)
+  if(_kaixa_case STREQUAL "")
+    continue()
+
+  endif()
+  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
+  add_test("${_kaixa_name}" "${_kaixa_test_executable}" [[--kaixa-test-run]] "${_kaixa_case}")
+  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
+endforeach()
+]=])
+  file(WRITE "${_kaixa_discovery_0}.cmake" "include(\"${_kaixa_discovery_0}-\${CTEST_CONFIGURATION_TYPE}.cmake\")\n")
+else()
+  file(GENERATE OUTPUT "${_kaixa_discovery_0}.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
+set(_kaixa_test_prefix [[kaixa]])
+set(_kaixa_test_label [[kaixa.target:kaixa_tests;kaixa.purpose:test]])
+if(NOT EXISTS "${_kaixa_test_executable}")
+  return()
+endif()
+execute_process(
+  COMMAND "${_kaixa_test_executable}" [[--kaixa-test-list]]
+  RESULT_VARIABLE _kaixa_result
+  OUTPUT_VARIABLE _kaixa_output
+  ERROR_VARIABLE _kaixa_error
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT _kaixa_result EQUAL 0)
+  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
+
+endif()
+string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
+foreach(_kaixa_case IN LISTS _kaixa_cases)
+  if(_kaixa_case STREQUAL "")
+    continue()
+
+  endif()
+  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
+  add_test("${_kaixa_name}" "${_kaixa_test_executable}" [[--kaixa-test-run]] "${_kaixa_case}")
+  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
+endforeach()
+]=])
+endif()
+set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_kaixa_discovery_0}.cmake")
+add_test(NAME [[manifest_format]] COMMAND manifest_format)
+set_tests_properties([[manifest_format]] PROPERTIES LABELS [[kaixa.target:manifest_format;kaixa.purpose:benchmark]])
+add_test(NAME [[workspace_planning]] COMMAND workspace_planning)
+set_tests_properties([[workspace_planning]] PROPERTIES LABELS [[kaixa.target:workspace_planning;kaixa.purpose:benchmark]])
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(kaixa_core STATIC
@@ -56,7 +258,8 @@ add_library(kaixa_core STATIC
 )
 
 target_include_directories(kaixa_core PUBLIC
-    [[include]]
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>"
+    [[$<INSTALL_INTERFACE:include>]]
 )
 
 target_include_directories(kaixa_core SYSTEM PRIVATE
@@ -67,14 +270,32 @@ target_compile_definitions(kaixa_core PRIVATE
     [[TOML_EXCEPTIONS=0]]
 )
 
+set_property(TARGET kaixa_core PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 target_compile_features(kaixa_core PUBLIC cxx_std_23)
 
 set_target_properties(kaixa_core PROPERTIES CXX_EXTENSIONS OFF)
+
+install(TARGETS kaixa_core EXPORT kaixa_coreTargets
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    INCLUDES DESTINATION include
+)
+
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/kaixa_coreConfig.cmake" "include(\"\${CMAKE_CURRENT_LIST_DIR}/kaixa_coreTargets.cmake\")\n")
+install(EXPORT kaixa_coreTargets FILE kaixa_coreTargets.cmake NAMESPACE kaixa_core:: DESTINATION lib/cmake/kaixa_core)
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/kaixa_coreConfigVersion.cmake" VERSION 0.2.0 COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/kaixa_coreConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/kaixa_coreConfigVersion.cmake" DESTINATION lib/cmake/kaixa_core)
+
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 add_library(kaixa_plugins STATIC
     [[plugins/bundle/src/plugins.cpp]]
     [[plugins/cmake/src/configuration.cpp]]
     [[plugins/cmake/src/file_api.cpp]]
+    [[plugins/cmake/src/portable_project.cpp]]
     [[plugins/cmake/src/project.cpp]]
     [[plugins/cmake/src/resolver.cpp]]
     [[plugins/cmake/src/testing.cpp]]
@@ -85,158 +306,34 @@ add_library(kaixa_plugins STATIC
 )
 
 target_include_directories(kaixa_plugins PUBLIC
-    [[plugins/bundle/include]]
-    [[plugins/cmake/include]]
-    [[plugins/path/include]]
-    [[plugins/registry/include]]
-    [[plugins/remote/include]]
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/plugins/bundle/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/plugins/cmake/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/plugins/path/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/plugins/remote/include>"
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/plugins/registry/include>"
+    [[$<INSTALL_INTERFACE:include>]]
 )
 
-target_link_libraries(kaixa_plugins PUBLIC
+target_link_libraries(kaixa_plugins PRIVATE
     [[kaixa_core]]
 )
+
+set_property(TARGET kaixa_plugins PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 target_compile_features(kaixa_plugins PUBLIC cxx_std_23)
 
 set_target_properties(kaixa_plugins PROPERTIES CXX_EXTENSIONS OFF)
 
-add_executable(kaixa
-    [[apps/kaixa/application.cpp]]
-    [[apps/kaixa/application_build.cpp]]
-    [[apps/kaixa/application_catalog.cpp]]
-    [[apps/kaixa/application_output.cpp]]
-    [[apps/kaixa/application_workspace.cpp]]
-    [[apps/kaixa/command_line.cpp]]
-    [[apps/kaixa/configuration_output.cpp]]
-    [[apps/kaixa/main.cpp]]
+install(TARGETS kaixa_plugins EXPORT kaixa_pluginsTargets
+    RUNTIME DESTINATION bin
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
+    INCLUDES DESTINATION include
 )
 
-target_link_libraries(kaixa PRIVATE
-    [[kaixa_core]]
-    [[kaixa_plugins]]
-)
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfig.cmake" "include(\"\${CMAKE_CURRENT_LIST_DIR}/kaixa_pluginsTargets.cmake\")\n")
+install(EXPORT kaixa_pluginsTargets FILE kaixa_pluginsTargets.cmake NAMESPACE kaixa_plugins:: DESTINATION lib/cmake/kaixa_plugins)
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file("${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfigVersion.cmake" VERSION 0.2.0 COMPATIBILITY SameMajorVersion)
+install(FILES "${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfig.cmake" "${CMAKE_CURRENT_BINARY_DIR}/kaixa_pluginsConfigVersion.cmake" DESTINATION lib/cmake/kaixa_plugins)
 
-target_compile_features(kaixa PRIVATE cxx_std_23)
-
-set_target_properties(kaixa PROPERTIES CXX_EXTENSIONS OFF)
-
-add_executable(kaixa_tests
-    [[apps/kaixa/command_line.cpp]]
-    [[tests/build_operations.cpp]]
-    [[tests/command_line.cpp]]
-    [[tests/configurations.cpp]]
-    [[tests/delivery.cpp]]
-    [[tests/manifest.cpp]]
-    [[tests/package_sets.cpp]]
-    [[tests/package_sources.cpp]]
-    [[tests/policies.cpp]]
-    [[tests/remote_packages.cpp]]
-    [[tests/resolution_lock.cpp]]
-    [[tests/run_and_clean.cpp]]
-    [[tests/smoke.cpp]]
-    [[tests/support/test_main.cpp]]
-    [[tests/support/test_support.cpp]]
-    [[tests/tasks.cpp]]
-    [[tests/workspace_conformance.cpp]]
-    [[tests/workspace_errors.cpp]]
-    [[tests/workspace_fixtures.cpp]]
-)
-
-target_include_directories(kaixa_tests PRIVATE
-    [[tests/support]]
-    [[apps/kaixa]]
-)
-
-target_link_libraries(kaixa_tests PRIVATE
-    [[kaixa_core]]
-    [[kaixa_plugins]]
-)
-
-target_compile_features(kaixa_tests PRIVATE cxx_std_23)
-
-set_target_properties(kaixa_tests PROPERTIES CXX_EXTENSIONS OFF)
-
-set_target_properties(kaixa_tests PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-add_executable(manifest_writer
-    [[examples/manifest_writer.cpp]]
-)
-
-target_link_libraries(manifest_writer PRIVATE
-    [[kaixa_core]]
-)
-
-target_compile_features(manifest_writer PRIVATE cxx_std_23)
-
-set_target_properties(manifest_writer PROPERTIES CXX_EXTENSIONS OFF)
-
-set_target_properties(manifest_writer PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-add_executable(manifest_format
-    [[benchmarks/manifest_format.cpp]]
-)
-
-target_link_libraries(manifest_format PRIVATE
-    [[kaixa_core]]
-)
-
-target_compile_features(manifest_format PRIVATE cxx_std_23)
-
-set_target_properties(manifest_format PROPERTIES CXX_EXTENSIONS OFF)
-
-set_target_properties(manifest_format PROPERTIES EXCLUDE_FROM_ALL TRUE)
-
-enable_testing()
-
-set(_kaixa_discovery_0 "${CMAKE_CURRENT_BINARY_DIR}/kaixa-discovery-0")
-if(CMAKE_CONFIGURATION_TYPES)
-  file(GENERATE OUTPUT "${_kaixa_discovery_0}-$<CONFIG>.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
-set(_kaixa_test_prefix [[kaixa]])
-set(_kaixa_test_label [[kaixa.target:kaixa_tests]])
-execute_process(
-  COMMAND "${_kaixa_test_executable}" --kaixa-test-list
-  RESULT_VARIABLE _kaixa_result
-  OUTPUT_VARIABLE _kaixa_output
-  ERROR_VARIABLE _kaixa_error
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(NOT _kaixa_result EQUAL 0)
-  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
-endif()
-string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
-foreach(_kaixa_case IN LISTS _kaixa_cases)
-  if(_kaixa_case STREQUAL "")
-    continue()
-  endif()
-  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
-  add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")
-  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
-endforeach()
-]=])
-  file(WRITE "${_kaixa_discovery_0}.cmake" "include(\"${_kaixa_discovery_0}-\${CTEST_CONFIGURATION_TYPE}.cmake\")\n")
-else()
-  file(GENERATE OUTPUT "${_kaixa_discovery_0}.cmake" CONTENT [=[set(_kaixa_test_executable [[$<TARGET_FILE:kaixa_tests>]])
-set(_kaixa_test_prefix [[kaixa]])
-set(_kaixa_test_label [[kaixa.target:kaixa_tests]])
-execute_process(
-  COMMAND "${_kaixa_test_executable}" --kaixa-test-list
-  RESULT_VARIABLE _kaixa_result
-  OUTPUT_VARIABLE _kaixa_output
-  ERROR_VARIABLE _kaixa_error
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-if(NOT _kaixa_result EQUAL 0)
-  message(FATAL_ERROR "test discovery failed: ${_kaixa_error}")
-endif()
-string(REPLACE "\n" ";" _kaixa_cases "${_kaixa_output}")
-foreach(_kaixa_case IN LISTS _kaixa_cases)
-  if(_kaixa_case STREQUAL "")
-    continue()
-  endif()
-  set(_kaixa_name "${_kaixa_test_prefix}::${_kaixa_case}")
-  add_test("${_kaixa_name}" "${_kaixa_test_executable}" --kaixa-test-run "${_kaixa_case}")
-  set_tests_properties("${_kaixa_name}" PROPERTIES LABELS "${_kaixa_test_label}")
-endforeach()
-]=])
-endif()
-set_property(DIRECTORY APPEND PROPERTY TEST_INCLUDE_FILES "${_kaixa_discovery_0}.cmake")

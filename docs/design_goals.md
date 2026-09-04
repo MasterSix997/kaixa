@@ -7,19 +7,21 @@
 - **Core agnostic:** The core resolves dependency graphs and orchestrates passes.
   Don't know about c++, cmake, lua, or asset pipeline. The entire specification lives in resolvers/plugins.
 - **Hierarchical:** The dependency tree is declared statically in the manifests and known before any pass runs.
-- **Partial adoption:** Folders without manifest (opaque), git submodules without manifest, and managed packages share the same tree.
+- **Partial adoption:** Authored packages, provider-adopted sources and opaque directories share the same tree.
 - **Resolver authority:** Adopting an existing project does not require reproducing its build graph in the manifest. The resolver remains authoritative for its internal units and maps observable products back to packages.
 
 ## Nodes
 
 ```
 Node
-    - Managed:     They have a kaixa manifest, declared resolve, participate in the build
-    - Opaque:      Exists in the filesystem, without manifest
-    - Submodule:   git submodule; Opaque by default, or managed if it has a manifest inside
+    - Managed:     Has an authored Kaixa.toml and participates in the build
+    - Adopted:     Has no Kaixa.toml; a provider descriptor supplies resolver and consumption semantics
+    - Opaque:      Has no build description and remains visible in the dependency graph
+    - Submodule:   Opaque by default, managed with Kaixa.toml, or adopted by a provider descriptor
 ```
 
 > To make an opaque node managed, simply add a Kaixa.toml inside the folder
+> To leave an upstream tree untouched but build it, describe its source and consumer in a provider.
 
 ## CLI
 
@@ -30,6 +32,9 @@ Node
 ## Reference manifests
 
 One package per `Kaixa.toml` is the primary layout. Inline members remain available when multiple small packages genuinely benefit from sharing one manifest, but they are not the default organization.
+
+`Kaixa.toml` is reserved for packages and package sets. Associated-target fragments use
+`Kaixa.test.toml`, `Kaixa.example.toml` or `Kaixa.benchmark.toml` and inherit their owning package through an explicit target reference.
 
 ### Leaf minimum
 ```toml

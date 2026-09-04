@@ -1,5 +1,6 @@
 #include <test_support.hpp>
 
+#include <kaixa/foundation/process.hpp>
 #include <kaixa/kaixa.hpp>
 #include <kaixa/model/effective_product.hpp>
 #include <kaixa/plugin/bundle.hpp>
@@ -277,7 +278,7 @@ KAIXA_TEST(cmake_plans_each_selected_package_root) {
     }
 }
 
-KAIXA_TEST(inline_packages_generate_distinct_cmake_projects) {
+KAIXA_TEST(inline_packages_share_one_cmake_project) {
     const kaixa::testing::TempDirectory workspace("inline-cmake-projects");
     workspace.write(
         "Kaixa.toml",
@@ -325,19 +326,119 @@ KAIXA_TEST(inline_packages_generate_distinct_cmake_projects) {
     const auto projects = std::ranges::count_if(plan->generated_files(), [](const kaixa::GeneratedFile& generated) {
         return generated.path.filename() == "CMakeLists.txt";
     });
-    context.check_equal(projects, std::ptrdiff_t{2}, "each inline package receives a generated project");
+    context.check_equal(projects, std::ptrdiff_t{1}, "inline packages share one generated project");
     context.check(
-        std::ranges::none_of(
+        std::ranges::any_of(
             plan->generated_files(),
             [&](const kaixa::GeneratedFile& generated) { return generated.path == workspace.path() / "CMakeLists.txt"; }
         ),
-        "shared source directories are not overwritten"
+        "the shared source directory receives the generated project"
     );
 
     const auto built = kaixa::execute(*plan);
     context.check(built.has_value(), "inline CMake projects build together");
     if (!built)
         context.fail(kaixa::format_diagnostic(built.error()));
+}
+
+KAIXA_TEST(export_project_builds_installs_and_is_consumed_without_kaixa_state) {
+    const kaixa::testing::TempDirectory workspace("portable-cmake-project");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"portable_app\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[public-dependencies]\n"
+        "portable_support = { path = \"support\" }\n"
+        "\n"
+        "[lib]\n"
+        "sources = [\"src/app.cpp\"]\n"
+        "public-headers = [\"include/portable_app/app.hpp\"]\n"
+        "public-include = [\"include\"]\n"
+    );
+    workspace.write("src/app.cpp", "#include <portable_support/support.hpp>\nint portable_app() { return portable_support(); }\n");
+    workspace.write("include/portable_app/app.hpp", "#pragma once\nint portable_app();\n");
+    workspace.write(
+        "support/Kaixa.toml",
+        "[package]\n"
+        "name = \"portable_support\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[lib]\n"
+        "sources = [\"src/support.cpp\"]\n"
+        "public-headers = [\"include/portable_support/support.hpp\"]\n"
+        "public-include = [\"include\"]\n"
+    );
+    workspace.write("support/src/support.cpp", "#include <portable_support/support.hpp>\nint portable_support() { return 7; }\n");
+    workspace.write("support/include/portable_support/support.hpp", "#pragma once\nint portable_support();\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "portable workspace loads");
+    if (!graph)
+        return;
+
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "portable workspace plans");
+    if (!plan)
+        return;
+
+    const auto generated = kaixa::generate(*plan);
+    context.check(generated.has_value(), "portable workspace generates");
+    if (!generated)
+        return;
+
+    const auto run = [&](std::vector<std::string> arguments, const std::string_view description) {
+        kaixa::ProcessRequest request;
+        request.argv = std::move(arguments);
+        request.working_directory = workspace.path();
+        request.capture_output = true;
+        const auto result = kaixa::run_process(request);
+        context.check(result.has_value() && result->succeeded(), description);
+        if (!result)
+            context.fail(kaixa::format_diagnostic(result.error()));
+        else if (!result->succeeded())
+            context.fail(result->output);
+
+        return result.has_value() && result->succeeded();
+    };
+
+    const std::filesystem::path build = workspace.path() / "standalone-build";
+    const std::filesystem::path prefix = workspace.path() / "standalone-prefix";
+    if (!run({"cmake", "-S", workspace.path().string(), "-B", build.string()}, "standalone project configures"))
+        return;
+    if (!run({"cmake", "--build", build.string(), "--config", "Debug", "--parallel"}, "standalone project builds"))
+        return;
+    if (!run({"cmake", "--install", build.string(), "--config", "Debug", "--prefix", prefix.string()}, "standalone project installs")) {
+        return;
+    }
+
+    workspace.write(
+        "consumer/CMakeLists.txt",
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(portable_consumer LANGUAGES CXX)\n"
+        "find_package(portable_app CONFIG REQUIRED)\n"
+        "add_executable(portable_consumer main.cpp)\n"
+        "target_link_libraries(portable_consumer PRIVATE portable_app::portable_app)\n"
+    );
+    workspace.write("consumer/main.cpp", "#include <portable_app/app.hpp>\nint main() { return portable_app() == 7 ? 0 : 1; }\n");
+    const std::filesystem::path consumer_build = workspace.path() / "consumer-build";
+    if (!run(
+            {"cmake",
+                "-S",
+                (workspace.path() / "consumer").string(),
+                "-B",
+                consumer_build.string(),
+                "-DCMAKE_PREFIX_PATH=" + prefix.string()},
+            "installed package is found"
+        )) {
+        return;
+    }
+    run({"cmake", "--build", consumer_build.string(), "--config", "Debug", "--parallel"}, "installed package consumer builds");
 }
 
 KAIXA_TEST(adopted_cmake_project_exposes_products_and_run_targets) {
@@ -432,7 +533,11 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     context.check(plan.has_value(), "workspace example plans");
     if (plan) {
         context.check_equal(plan->actions().size(), std::size_t{2}, "one composed CMake build");
-        context.check_equal(plan->generated_files().size(), std::size_t{3}, "variant metadata, integration and File API query");
+        context.check_equal(
+            plan->generated_files().size(),
+            std::size_t{4},
+            "variant metadata, state integration, portable integration and File API query"
+        );
         if (plan->actions().size() == 2 && !plan->generated_files().empty()) {
             context.check_equal(plan->actions()[0].description, std::string("configure test_source_app"), "root is configured once");
             const auto integration = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& generated) {
@@ -796,7 +901,7 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
     const kaixa::testing::TempDirectory workspace("source-generated-clean");
     kaixa::Manifest manifest{"source_generated", "cmake"};
     manifest.resolver_options = kaixa::Value::table(
-        {{"generation", "source"},
+        {{"generation", "export"},
             {"target", kaixa::Value::table({{"type", "executable"}, {"sources", kaixa::Value::array({"main.cpp"})}})}}
     );
     workspace.write_manifest("Kaixa.toml", manifest);
@@ -810,7 +915,7 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
     const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
     const auto plan = kaixa::plan_clean(*graph, registry, environment, kaixa::CleanRequest{true});
-    context.check(plan.has_value(), "source generation clean plans");
+    context.check(plan.has_value(), "export generation clean plans");
     if (plan) {
         const std::filesystem::path cmakelists = (*graph)[graph->roots().front()].directory / "CMakeLists.txt";
         context.check(
@@ -819,6 +924,15 @@ KAIXA_TEST(source_generated_project_declares_its_cmakelists_for_cleaning) {
                 [&](const kaixa::GeneratedCleanFile& generated) { return generated.path == cmakelists; }
             ),
             "source CMakeLists is explicitly generated"
+        );
+        context.check(
+            std::ranges::any_of(
+                plan->generated_files(),
+                [&](const kaixa::GeneratedCleanFile& generated) {
+                    return generated.path == (*graph)[graph->roots().front()].directory / "KaixaDependencies.cmake";
+                }
+            ),
+            "portable dependency file is explicitly generated"
         );
     }
 }

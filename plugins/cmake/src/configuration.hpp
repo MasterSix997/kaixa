@@ -31,7 +31,7 @@ namespace kaixa::plugin::cmake::detail {
     };
 
     enum class GenerationMode {
-        source,
+        export_project,
         state
     };
 
@@ -88,10 +88,15 @@ namespace kaixa::plugin::cmake::detail {
         TestAdapterInfo adapter;
     };
 
+    struct PortableSourceRoot {
+        std::filesystem::path directory;
+        std::string variable;
+    };
+
     struct Options {
         std::filesystem::path source;
         std::vector<std::string> languages;
-        GenerationMode generation = GenerationMode::source;
+        GenerationMode generation = GenerationMode::export_project;
         MsvcRuntime msvc_runtime = MsvcRuntime::default_runtime;
         std::optional<std::int64_t> cxx_standard;
         std::optional<std::filesystem::path> runtime_output;
@@ -101,6 +106,8 @@ namespace kaixa::plugin::cmake::detail {
         std::vector<TestOptions> tests;
         std::vector<DependencyOption> dependencies;
         std::vector<std::string> find_packages;
+        std::vector<std::string> export_dependencies;
+        std::vector<PortableSourceRoot> portable_source_roots;
         std::string policy_fingerprint;
     };
 
@@ -146,5 +153,11 @@ namespace kaixa::plugin::cmake::detail {
     );
     [[nodiscard]] Result<BuildOptions> read_build_options(const Value* settings);
     [[nodiscard]] DependencyMode dependency_mode(const Options& options, PackageId dependency);
-    [[nodiscard]] std::string generate_project(const PackageNode& package, const Options& options);
+    [[nodiscard]] std::string source_variable(PackageId package);
+    struct ProjectPackage {
+        const PackageNode* package = nullptr;
+        const Options* options = nullptr;
+    };
+
+    [[nodiscard]] std::string generate_project(std::span<const ProjectPackage> packages);
 }
