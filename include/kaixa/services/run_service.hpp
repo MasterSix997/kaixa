@@ -33,7 +33,7 @@ namespace kaixa {
         std::string_view package_name
     );
 
-    [[nodiscard]] Result<BuildPlan> plan_run(
+    [[nodiscard]] Result<ExecutionPlan> plan_run(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,

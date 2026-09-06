@@ -155,7 +155,7 @@ int main() {
             return 1;
         }
 
-        actions = plan->actions().size();
+        actions = plan->action_count();
         generated_files = plan->generated_files().size();
     }
 

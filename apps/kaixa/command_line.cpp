@@ -6,7 +6,9 @@
 #include <array>
 #include <charconv>
 #include <concepts>
+#include <optional>
 #include <ostream>
+#include <span>
 #include <utility>
 
 namespace kaixa::cli {
@@ -968,87 +970,119 @@ namespace kaixa::cli {
 
         using CommandParser = std::expected<Command, ParseError> (*)(Parser&);
 
+        // A command is one row: the name dispatch matches, its parser, and the usage lines shown
+        // for it. Usage cannot drift from dispatch because there is no second list.
         struct NamedCommandParser {
             std::string_view name;
             CommandParser parse;
+            std::span<const std::string_view> usage;
+            int group = 0;
         };
 
+        constexpr std::array version_usage{std::string_view{"kaixa --version"}};
+        constexpr std::array inspect_usage{std::string_view{"kaixa inspect [packages|targets|outputs|actions|config] [--path path]"},
+            std::string_view{"      [--verbose] [--profile name] [--config name]..."}};
+        constexpr std::array check_usage{std::string_view{"kaixa check [--path path] [--profile name] [--config name]..."},
+            std::string_view{"      [--for resolver <arguments...>]... [--format human|short]"}};
+        constexpr std::array generate_usage{std::string_view{"kaixa generate [--path path] [--profile name] [--config name]..."},
+            std::string_view{"      [--for resolver <arguments...>]..."}};
+        constexpr std::array build_usage{std::string_view{"kaixa build [--path path] [--list] [--target name]... [--jobs count]"},
+            std::string_view{"      [--example name]... [--examples] [--test name]... [--tests]"},
+            std::string_view{"      [--bench name]... [--benchmarks] [--all-targets]"},
+            std::string_view{"      [--profile name] [--config name]... [--for resolver <arguments...>]..."}};
+        constexpr std::array install_usage{
+            std::string_view{"kaixa install [--prefix path] [--path path] [--profile name] [--config name]..."}
+        };
+        constexpr std::array test_usage{std::string_view{"kaixa test [filter] [--list] [--target name] [--path path] [--profile name]"},
+            std::string_view{"      [--config name]..."},
+            std::string_view{"      [--for resolver <arguments...>]..."}};
+        constexpr std::array bench_usage{std::string_view{"kaixa bench [--list] [--target name] [--path path] [--profile name]"},
+            std::string_view{"      [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]"}};
+        constexpr std::array run_usage{std::string_view{"kaixa run [--list] [--target name] [--example name] [--examples] [--path path]"},
+            std::string_view{"      [--profile name]"},
+            std::string_view{"      [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]"}};
+        constexpr std::array task_usage{std::string_view{"kaixa task [name|--list] [--path path] [--package name]... [--profile name]"},
+            std::string_view{"      [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]"}};
+        constexpr std::array workflow_usage{
+            std::string_view{"kaixa workflow [name|--list] [--path path] [--package name]... [--profile name]"},
+            std::string_view{"      [--config name]... [--for resolver <arguments...>]..."}
+        };
+        constexpr std::array clean_usage{std::string_view{"kaixa clean [--path path] [--profile name] [--config name]..."},
+            std::string_view{"      [--for resolver <arguments...>]... [--generated-files] [--dry-run]"},
+            std::string_view{"kaixa clean [--path path] --all [--generated-files] [--dry-run]"}};
+        constexpr std::array search_usage{std::string_view{"kaixa search [query] [--provider name] [--resolver name] [--capability name]"},
+            std::string_view{"      [--tag name] [--limit count] [--path path]"}};
+        constexpr std::array info_usage{std::string_view{"kaixa info package [--provider name] [--path path]"}};
+        constexpr std::array add_usage{
+            std::string_view{"kaixa add package [--version requirement] [--provider name] [--dry-run] [--path path]"}
+        };
+        constexpr std::array remove_usage{std::string_view{"kaixa remove package [--dry-run] [--path path]"}};
+        constexpr std::array update_usage{std::string_view{"kaixa update [package...] [--dry-run] [--path path]"}};
+        constexpr std::array publish_usage{
+            std::string_view{"kaixa publish --registry directory-or-url [--prebuilt directory] [--token-env name]"},
+            std::string_view{"      [--dry-run] [--path path]"}
+        };
+        constexpr std::array config_usage{std::string_view{"kaixa config list [--path path]"},
+            std::string_view{"kaixa config show [name] [--path path] [--verbose] [--profile name]"},
+            std::string_view{"      [--config name]... [--for resolver[.scope] <arguments...>]..."},
+            std::string_view{"kaixa config path [--path path]"}};
+        constexpr std::array<std::string_view, 0> no_usage{};
+
+        // Ordered as the usage prints; dispatch matches by name, so the order is free to follow
+        // the documentation.
         constexpr std::array command_parsers{
-            NamedCommandParser{"--help", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }},
-            NamedCommandParser{"-h", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }},
-            NamedCommandParser{"--version", [](Parser&) -> std::expected<Command, ParseError> { return VersionCommand{}; }},
-            NamedCommandParser{"inspect", [](Parser& parser) { return into_command(parse_inspect(parser)); }},
-            NamedCommandParser{"test", [](Parser& parser) { return into_command(parse_test(parser)); }},
-            NamedCommandParser{"bench", [](Parser& parser) { return into_command(parse_bench(parser)); }},
-            NamedCommandParser{"run", [](Parser& parser) { return into_command(parse_run(parser)); }},
-            NamedCommandParser{"task", [](Parser& parser) { return into_command(parse_task(parser)); }},
-            NamedCommandParser{"workflow", [](Parser& parser) { return into_command(parse_workflow(parser)); }},
-            NamedCommandParser{"clean", [](Parser& parser) { return into_command(parse_clean(parser)); }},
-            NamedCommandParser{"search", [](Parser& parser) { return into_command(parse_catalog_command<SearchCommand>(parser, false)); }},
-            NamedCommandParser{"info", [](Parser& parser) { return into_command(parse_catalog_command<InfoCommand>(parser, true)); }},
-            NamedCommandParser{"add", [](Parser& parser) { return into_command(parse_add(parser)); }},
-            NamedCommandParser{"remove", [](Parser& parser) { return into_command(parse_remove(parser)); }},
-            NamedCommandParser{"update", [](Parser& parser) { return into_command(parse_update(parser)); }},
-            NamedCommandParser{"publish", [](Parser& parser) { return into_command(parse_publish(parser)); }},
-            NamedCommandParser{"config", parse_config},
-            NamedCommandParser{"build", [](Parser& parser) { return into_command(parse_build(parser)); }},
-            NamedCommandParser{"install", [](Parser& parser) { return into_command(parse_install(parser)); }},
-            NamedCommandParser{"check", [](Parser& parser) { return into_command(parse_check(parser)); }},
-            NamedCommandParser{"generate", parse_generate},
+            NamedCommandParser{"--help", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }, no_usage, 0},
+            NamedCommandParser{"-h", [](Parser&) -> std::expected<Command, ParseError> { return HelpCommand{}; }, no_usage, 0},
+            NamedCommandParser{"--version",
+                [](Parser&) -> std::expected<Command, ParseError> { return VersionCommand{}; },
+                version_usage,
+                0},
+            NamedCommandParser{"inspect", [](Parser& parser) { return into_command(parse_inspect(parser)); }, inspect_usage, 0},
+            NamedCommandParser{"check", [](Parser& parser) { return into_command(parse_check(parser)); }, check_usage, 1},
+            NamedCommandParser{"generate", parse_generate, generate_usage, 1},
+            NamedCommandParser{"build", [](Parser& parser) { return into_command(parse_build(parser)); }, build_usage, 1},
+            NamedCommandParser{"install", [](Parser& parser) { return into_command(parse_install(parser)); }, install_usage, 1},
+            NamedCommandParser{"test", [](Parser& parser) { return into_command(parse_test(parser)); }, test_usage, 2},
+            NamedCommandParser{"bench", [](Parser& parser) { return into_command(parse_bench(parser)); }, bench_usage, 2},
+            NamedCommandParser{"run", [](Parser& parser) { return into_command(parse_run(parser)); }, run_usage, 2},
+            NamedCommandParser{"task", [](Parser& parser) { return into_command(parse_task(parser)); }, task_usage, 2},
+            NamedCommandParser{"workflow", [](Parser& parser) { return into_command(parse_workflow(parser)); }, workflow_usage, 3},
+            NamedCommandParser{"clean", [](Parser& parser) { return into_command(parse_clean(parser)); }, clean_usage, 4},
+            NamedCommandParser{"search",
+                [](Parser& parser) { return into_command(parse_catalog_command<SearchCommand>(parser, false)); },
+                search_usage,
+                5},
+            NamedCommandParser{"info",
+                [](Parser& parser) { return into_command(parse_catalog_command<InfoCommand>(parser, true)); },
+                info_usage,
+                5},
+            NamedCommandParser{"add", [](Parser& parser) { return into_command(parse_add(parser)); }, add_usage, 5},
+            NamedCommandParser{"remove", [](Parser& parser) { return into_command(parse_remove(parser)); }, remove_usage, 5},
+            NamedCommandParser{"update", [](Parser& parser) { return into_command(parse_update(parser)); }, update_usage, 5},
+            NamedCommandParser{"publish", [](Parser& parser) { return into_command(parse_publish(parser)); }, publish_usage, 5},
+            NamedCommandParser{"config", parse_config, config_usage, 6},
         };
     }
 
     void print_usage(std::ostream& out) {
+        out << "Kaixa " << version() << "\n\nUsage:\n";
+
+        std::optional<int> previous_group;
+        for (const NamedCommandParser& command: command_parsers) {
+            if (command.usage.empty())
+                continue;
+
+            if (previous_group && *previous_group != command.group)
+                out << '\n';
+
+            for (const std::string_view line: command.usage)
+                out << "  " << line << '\n';
+
+            previous_group = command.group;
+        }
+
         out
-            << "Kaixa "
-            << version()
-            << "\n\n"
-            << "Usage:\n"
-            << "  kaixa --version\n"
-            << "  kaixa inspect [packages|targets|outputs|actions|config] [--path path]\n"
-            << "        [--verbose] [--profile name] [--config name]...\n\n"
-
-            << "  kaixa <check|generate> [--path path] [--profile name] [--config name]...\n"
-            << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa check [--format human|short]\n"
-            << "  kaixa build [--path path] [--list] [--target name]... [--jobs count]\n"
-            << "        [--example name]... [--examples] [--test name]... [--tests]\n"
-            << "        [--bench name]... [--benchmarks] [--all-targets]\n"
-            << "        [--profile name] [--config name]... [--for resolver <arguments...>]...\n"
-            << "  kaixa install [--prefix path] [--path path] [--profile name] [--config name]...\n\n"
-
-            << "  kaixa test [filter] [--list] [--target name] [--path path] [--profile name]\n"
-            << "        [--config name]...\n"
-            << "        [--for resolver <arguments...>]...\n"
-            << "  kaixa bench [--list] [--target name] [--path path] [--profile name]\n"
-            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
-            << "  kaixa run [--list] [--target name] [--example name] [--examples] [--path path]\n"
-            << "        [--profile name]\n"
-            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n"
-            << "  kaixa task [name|--list] [--path path] [--package name]... [--profile name]\n"
-            << "        [--config name]... [--for resolver <arguments...>]... [-- <arguments...>]\n\n"
-            << "  kaixa workflow [name|--list] [--path path] [--package name]... [--profile name]\n"
-            << "        [--config name]... [--for resolver <arguments...>]...\n\n"
-
-            << "  kaixa clean [--path path] [--profile name] [--config name]...\n"
-            << "        [--for resolver <arguments...>]... [--generated-files] [--dry-run]\n"
-            << "  kaixa clean [--path path] --all [--generated-files] [--dry-run]\n\n"
-
-            << "  kaixa search [query] [--provider name] [--resolver name] [--capability name]\n"
-            << "        [--tag name] [--limit count] [--path path]\n"
-            << "  kaixa info package [--provider name] [--path path]\n"
-            << "  kaixa add package [--version requirement] [--provider name] [--dry-run] [--path path]\n"
-            << "  kaixa remove package [--dry-run] [--path path]\n"
-            << "  kaixa update [package...] [--dry-run] [--path path]\n"
-            << "  kaixa publish --registry directory-or-url [--prebuilt directory] [--token-env name]\n"
-            << "        [--dry-run] [--path path]\n\n"
-
-            << "  kaixa config list [--path path]\n"
-            << "  kaixa config show [name] [--path path] [--verbose] [--profile name]\n"
-            << "        [--config name]... [--for resolver[.scope] <arguments...>]...\n"
-            << "  kaixa config path [--path path]\n\n"
-
-            << "  Build commands accept --no-default-configs to replace configured defaults.\n"
+            << "\n  Build commands accept --no-default-configs to replace configured defaults.\n"
             << "  Package-resolving commands accept --package name more than once.\n"
             << "  Use --locked to require Kaixa.lock or --frozen to also forbid source synchronization.";
     }

@@ -32,7 +32,7 @@ namespace kaixa {
         std::string_view requested,
         std::optional<PackageId> relative_package = std::nullopt
     );
-    [[nodiscard]] Result<BuildPlan> plan_task(
+    [[nodiscard]] Result<ExecutionPlan> plan_task(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,

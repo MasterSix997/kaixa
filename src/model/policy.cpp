@@ -88,67 +88,21 @@ namespace kaixa {
             return true;
         }
 
-        Result<void> validate_string_array(const PolicySetting& setting) {
-            const std::vector<Value>* values = setting.value.as_array();
-            if (!values)
-                return std::unexpected(wrong_kind(setting.location, "a string array", setting.value.kind()));
-
-            for (const Value& value: *values) {
-                if (!value.as_string())
-                    return std::unexpected(wrong_kind(value.location(), "a string", value.kind()));
+        Result<void> assign_setting(EffectivePolicy& policy, const TableEntry& entry, const PolicySchema& schema) {
+            const PolicyDefinition* definition = schema.find(entry.key);
+            if (!definition) {
+                return std::unexpected(error_at(entry.value.location(), "unknown policy `" + entry.key + "`")
+                        .add_note("policies are registered by the extension that owns them"));
             }
-            return {};
-        }
-
-        Result<void> validate_setting(const PolicySetting& setting) {
-            if (setting.key == "cxx") {
-                const std::int64_t* value = setting.value.as_integer();
-                if (!value)
-                    return std::unexpected(wrong_kind(setting.location, "an integer C++ language floor", setting.value.kind()));
-
-                if (*value <= 0)
-                    return std::unexpected(error_at(setting.location, "C++ language floor must be positive"));
-
-            } else if (
-                setting.key == "exceptions"
-                || setting.key == "rtti"
-                || setting.key == "warnings-as-errors"
-                || setting.key == "iwyu"
-                || setting.key == "compiler-cache"
-            ) {
-                if (!setting.value.as_boolean())
-                    return std::unexpected(wrong_kind(setting.location, "a boolean policy value", setting.value.kind()));
-
-            } else if (setting.key == "msvc-runtime") {
-                const std::string* value = setting.value.as_string();
-                if (!value)
-                    return std::unexpected(wrong_kind(setting.location, "an MSVC runtime name", setting.value.kind()));
-
-                if (*value != "static" && *value != "dynamic") {
-                    return std::unexpected(
-                        error_at(setting.location, "unknown MSVC runtime `" + *value + "`; expected `static` or `dynamic`")
-                    );
-                }
-            } else if (setting.key == "warnings") {
-                if (!setting.value.as_string())
-                    return std::unexpected(wrong_kind(setting.location, "a warning level", setting.value.kind()));
-
-            } else if (setting.key == "precompiled-headers" || setting.key == "sanitizers") {
-                return validate_string_array(setting);
-
-            } else if (setting.key == "defines") {
-                if (!setting.value.is_table())
-                    return std::unexpected(wrong_kind(setting.location, "a definitions table", setting.value.kind()));
+            PolicySetting incoming{entry.key, definition->classification, entry.value, entry.value.location()};
+            if (definition->classification == PolicyClass::floor && !incoming.value.as_integer()) {
+                return std::unexpected(wrong_kind(incoming.location, "an integer policy floor", incoming.value.kind()));
             }
-            return {};
-        }
-
-        Result<void> assign_setting(EffectivePolicy& policy, const TableEntry& entry) {
-            PolicySetting incoming{entry.key, policy_class(entry.key), entry.value, entry.value.location()};
-            auto valid = validate_setting(incoming);
-            if (!valid)
-                return std::unexpected(valid.error());
-
+            if (definition->validate) {
+                auto valid = definition->validate(incoming.value);
+                if (!valid)
+                    return std::unexpected(std::move(valid).error());
+            }
             const auto existing = std::ranges::find(policy.settings, entry.key, &PolicySetting::key);
             if (existing == policy.settings.end())
                 policy.settings.push_back(std::move(incoming));
@@ -158,7 +112,12 @@ namespace kaixa {
             return {};
         }
 
-        Result<void> apply_entries(EffectivePolicy& policy, const std::vector<TableEntry>& entries, const bool accept_conditions) {
+        Result<void> apply_entries(
+            EffectivePolicy& policy,
+            const std::vector<TableEntry>& entries,
+            const bool accept_conditions,
+            const PolicySchema& schema
+        ) {
             for (const TableEntry& entry: entries) {
                 if (entry.key == "when") {
                     if (!accept_conditions)
@@ -170,7 +129,7 @@ namespace kaixa {
                 if (entry.key == "if")
                     continue;
 
-                auto assigned = assign_setting(policy, entry);
+                auto assigned = assign_setting(policy, entry, schema);
                 if (!assigned)
                     return std::unexpected(assigned.error());
             }
@@ -264,10 +223,10 @@ namespace kaixa {
         }
 
         std::optional<Value> descriptor_abi(const PackageNode& package) {
-            if (!package.descriptor)
+            if (!package.descriptor())
                 return std::nullopt;
 
-            const Value* abi = package.descriptor->find("abi");
+            const Value* abi = package.descriptor()->find("abi");
             if (!abi)
                 return std::nullopt;
 
@@ -314,14 +273,14 @@ namespace kaixa {
         }
 
         bool is_public_dependency(const Graph& graph, const PackageNode& package, const PackageId dependency) {
-            if (!package.manifest)
+            if (!package.manifest())
                 return false;
 
             const std::string& dependency_name = graph[dependency].name;
-            const auto binding = std::ranges::find_if(package.manifest->dependencies, [&](const DependencyBinding& candidate) {
+            const auto binding = std::ranges::find_if(package.manifest()->dependencies, [&](const DependencyBinding& candidate) {
                 return candidate.request.package == dependency_name;
             });
-            return binding != package.manifest->dependencies.end() && binding->visibility == DependencyVisibility::public_dependency;
+            return binding != package.manifest()->dependencies.end() && binding->visibility == DependencyVisibility::public_dependency;
         }
 
         Result<std::vector<ContextInstance>> configure_context(
@@ -329,6 +288,7 @@ namespace kaixa {
             const PackageId owner,
             const PackageTarget* target,
             const PolicyContext& context,
+            const PolicySchema& schema,
             const std::string_view label
         ) {
             const PackageNode& owner_node = graph[owner];
@@ -336,7 +296,7 @@ namespace kaixa {
             if (target && target->policy)
                 owner_layers.push_back(*target->policy);
 
-            auto owner_policy = resolve_policy_layers(owner_layers, owner_node.active_features, context);
+            auto owner_policy = resolve_policy_layers(owner_layers, owner_node.active_features, context, schema);
             if (!owner_policy)
                 return std::unexpected(owner_policy.error());
 
@@ -349,13 +309,13 @@ namespace kaixa {
                 if (package == owner && target && target->policy)
                     layers.push_back(*target->policy);
 
-                auto effective = resolve_policy_layers(layers, node.active_features, context);
+                auto effective = resolve_policy_layers(layers, node.active_features, context, schema);
                 if (!effective)
                     return std::unexpected(effective.error());
 
                 const std::optional<Value> declared_abi = descriptor_abi(node);
                 if (declared_abi) {
-                    auto prebuilt = resolve_policy_layers(std::span<const Value>(&*declared_abi, 1), node.active_features, context);
+                    auto prebuilt = resolve_policy_layers(std::span<const Value>(&*declared_abi, 1), node.active_features, context, schema);
                     if (!prebuilt)
                         return std::unexpected(prebuilt.error());
 
@@ -387,7 +347,7 @@ namespace kaixa {
                     }
                 } else if (package != owner && has_propagated) {
                     layers.push_back(propagated);
-                    effective = resolve_policy_layers(layers, node.active_features, context);
+                    effective = resolve_policy_layers(layers, node.active_features, context, schema);
                     if (!effective)
                         return std::unexpected(effective.error());
                 }
@@ -407,11 +367,15 @@ namespace kaixa {
                         if (configured_dependency == instances.end())
                             continue;
 
-                        const PolicySetting* dependency_floor = configured_dependency->policy.find("cxx");
-                        const PolicySetting* current_floor = instance.policy.find("cxx");
-                        if (dependency_floor
-                            && (!current_floor || *current_floor->value.as_integer() < *dependency_floor->value.as_integer())) {
-                            replace_setting(instance.policy, *dependency_floor);
+                        for (const PolicySetting& dependency_floor: configured_dependency->policy.settings) {
+                            if (dependency_floor.classification != PolicyClass::floor)
+                                continue;
+
+                            const PolicySetting* current = instance.policy.find(dependency_floor.key);
+                            if (current && *current->value.as_integer() >= *dependency_floor.value.as_integer())
+                                continue;
+
+                            replace_setting(instance.policy, dependency_floor);
                             floor_changed = true;
                         }
                     }
@@ -453,8 +417,8 @@ namespace kaixa {
             identity += '\n';
             identity += package.resolver;
             identity += '\n';
-            if (package.manifest && package.manifest->version)
-                identity += package.manifest->version->text;
+            if (package.manifest() && package.manifest()->version)
+                identity += package.manifest()->version->text;
 
             identity += '\n';
             if (package.source && package.source->identity)
@@ -511,25 +475,93 @@ namespace kaixa {
         return setting == settings.end() ? nullptr : &*setting;
     }
 
-    PolicyClass policy_class(const std::string_view key) noexcept {
-        constexpr std::array abi{std::string_view{"exceptions"},
-            std::string_view{"msvc-runtime"},
-            std::string_view{"profile"},
-            std::string_view{"rtti"},
-            std::string_view{"sanitizers"}};
-        if (std::ranges::find(abi, key) != abi.end())
-            return PolicyClass::abi;
+    Result<void> PolicySchema::add(PolicyDefinition definition) {
+        if (definition.name.empty())
+            return std::unexpected(error("a policy definition requires a name"));
 
-        if (key == "cxx")
-            return PolicyClass::floor;
+        const auto existing = std::ranges::find(m_definitions, definition.name, &PolicyDefinition::name);
+        if (existing != m_definitions.end())
+            return std::unexpected(error("policy `" + definition.name + "` is already registered"));
 
-        return PolicyClass::local;
+        m_definitions.push_back(std::move(definition));
+        return {};
+    }
+
+    Result<void> PolicySchema::add(const std::span<const PolicyDefinition> definitions) {
+        for (const PolicyDefinition& definition: definitions) {
+            auto added = add(definition);
+            if (!added)
+                return added;
+        }
+        return {};
+    }
+
+    const PolicyDefinition* PolicySchema::find(const std::string_view key) const noexcept {
+        const auto found = std::ranges::find(m_definitions, key, &PolicyDefinition::name);
+        return found == m_definitions.end() ? nullptr : &*found;
+    }
+
+    Result<void> expect_policy_boolean(const Value& value) {
+        if (!value.as_boolean())
+            return std::unexpected(wrong_kind(value.location(), "a boolean policy value", value.kind()));
+
+        return {};
+    }
+
+    Result<void> expect_policy_string(const Value& value, const std::string_view description) {
+        if (!value.as_string())
+            return std::unexpected(wrong_kind(value.location(), description, value.kind()));
+
+        return {};
+    }
+
+    Result<void> expect_policy_string_array(const Value& value) {
+        const std::vector<Value>* values = value.as_array();
+        if (!values)
+            return std::unexpected(wrong_kind(value.location(), "a string array", value.kind()));
+
+        for (const Value& item: *values) {
+            if (!item.as_string())
+                return std::unexpected(wrong_kind(item.location(), "a string", item.kind()));
+        }
+        return {};
+    }
+
+    Result<void> expect_policy_table(const Value& value, const std::string_view description) {
+        if (!value.is_table())
+            return std::unexpected(wrong_kind(value.location(), description, value.kind()));
+
+        return {};
+    }
+
+    Result<void> expect_policy_positive_integer(const Value& value, const std::string_view description) {
+        const std::int64_t* integer = value.as_integer();
+        if (!integer)
+            return std::unexpected(wrong_kind(value.location(), description, value.kind()));
+
+        if (*integer <= 0)
+            return std::unexpected(error_at(value.location(), std::string(description) + " must be positive"));
+
+        return {};
+    }
+
+    const PolicySchema& core_policy_schema() {
+        static const PolicySchema schema = [] {
+            PolicySchema built;
+            auto added = built.add(PolicyDefinition{"profile", PolicyClass::abi, [](const Value& value) {
+                                                        return expect_policy_string(value, "a build profile name");
+                                                    }});
+            static_cast<void>(added);
+            return built;
+        }();
+        return schema;
     }
 
     Result<EffectivePolicy> resolve_policy_layers(
         const std::span<const Value> layers,
         const std::span<const std::string> active_features,
-        const PolicyContext& context
+        const PolicyContext& context,
+        const PolicySchema& schema
     ) {
         EffectivePolicy result;
         for (const Value& layer: layers) {
@@ -537,7 +569,7 @@ namespace kaixa {
             if (!entries)
                 return std::unexpected(wrong_kind(layer.location(), "a policy table", layer.kind()));
 
-            auto applied = apply_entries(result, *entries, true);
+            auto applied = apply_entries(result, *entries, true, schema);
             if (!applied)
                 return std::unexpected(applied.error());
 
@@ -565,7 +597,7 @@ namespace kaixa {
                 if (!*matches)
                     continue;
 
-                auto branch_applied = apply_entries(result, *branch_entries, false);
+                auto branch_applied = apply_entries(result, *branch_entries, false, schema);
                 if (!branch_applied)
                     return std::unexpected(branch_applied.error());
             }
@@ -574,7 +606,7 @@ namespace kaixa {
         if (!result.find("profile")) {
             const SourceLocation profile_location{"build configuration", 0, 0, "profile"};
             const TableEntry profile{"profile", Value::string(context.profile, profile_location)};
-            auto assigned = assign_setting(result, profile);
+            auto assigned = assign_setting(result, profile, schema);
             if (!assigned)
                 return std::unexpected(assigned.error());
         }
@@ -611,23 +643,27 @@ namespace kaixa {
         return fingerprint(canonical_policy(policy));
     }
 
-    Result<std::vector<ConfiguredPackageInstance>> configure_package_instances(const Graph& graph, const PolicyContext& context) {
+    Result<std::vector<ConfiguredPackageInstance>> configure_package_instances(
+        const Graph& graph,
+        const PolicyContext& context,
+        const PolicySchema& schema
+    ) {
         std::vector<ConfiguredPackageInstance> result;
         for (const PackageNode& package: graph.nodes()) {
-            auto configured = configure_context(graph, package.id, nullptr, context, package.name + ":default");
+            auto configured = configure_context(graph, package.id, nullptr, context, schema, package.name + ":default");
             if (!configured)
                 return std::unexpected(configured.error());
 
             append_instances(result, graph, std::move(*configured), package.name + ":default");
 
-            if (!package.manifest)
+            if (!package.manifest())
                 continue;
 
             for (const PackageTarget& target: package.targets) {
                 if (!target.policy || !target.name)
                     continue;
 
-                auto target_instances = configure_context(graph, package.id, &target, context, *target.name);
+                auto target_instances = configure_context(graph, package.id, &target, context, schema, *target.name);
                 if (!target_instances)
                     return std::unexpected(target_instances.error());
 

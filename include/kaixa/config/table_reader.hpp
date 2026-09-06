@@ -16,6 +16,8 @@ namespace kaixa {
 
         const Value* take(std::string_view key);
         void take_all() noexcept;
+        // Hands every still unconsumed entry to the table's owner as one opaque value.
+        [[nodiscard]] Value take_remaining();
 
         [[nodiscard]] std::span<const TableEntry> entries() const noexcept;
         [[nodiscard]] Result<std::string> string(std::string_view key);

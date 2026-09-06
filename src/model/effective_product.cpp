@@ -126,98 +126,6 @@ namespace kaixa {
             return *entries;
         }
 
-        Result<const PackageNode*> dependency_by_local_name(
-            const Graph& graph,
-            const PackageNode& package,
-            const std::string_view local_name,
-            const SourceLocation& location
-        ) {
-            const auto binding = std::ranges::find_if(package.manifest->dependencies, [&](const DependencyBinding& item) {
-                return item.local_name() == local_name;
-            });
-            if (binding == package.manifest->dependencies.end()) {
-                return std::unexpected(error_at(location, "unknown dependency `" + std::string(local_name) + "` in product path"));
-            }
-            const auto dependency = std::ranges::find_if(package.dependencies, [&](const PackageId id) {
-                return graph[id].name == binding->request.package;
-            });
-            if (dependency == package.dependencies.end()) {
-                return std::unexpected(error_at(location, "dependency `" + std::string(local_name) + "` is not active for this product"));
-            }
-            return &graph[*dependency];
-        }
-
-        Result<std::filesystem::path> dependency_directory(const PackageNode& dependency, const SourceLocation& location) {
-            if (!dependency.directory.empty())
-                return dependency.directory;
-
-            if (dependency.descriptor) {
-                const Value* source = dependency.descriptor->find("source");
-                const Value* driver = source ? source->find("driver") : nullptr;
-                const Value* path = source ? source->find("path") : nullptr;
-                const std::string* driver_name = driver ? driver->as_string() : nullptr;
-                const std::string* declared_path = path ? path->as_string() : nullptr;
-                if (driver_name && *driver_name == "path" && declared_path) {
-                    std::filesystem::path resolved = *declared_path;
-                    if (resolved.is_relative() && !path->location().source.empty()) {
-                        resolved = std::filesystem::path(path->location().source).parent_path() / resolved;
-                    }
-                    return std::filesystem::absolute(resolved).lexically_normal();
-                }
-            }
-            return std::unexpected(error_at(location, "dependency `" + dependency.name + "` has no materialized source directory"));
-        }
-
-        Result<void> resolve_dependency_paths(const Graph& graph, const PackageNode& package, EffectiveProduct& product) {
-            for (const std::string& declared: product.dependency_sources) {
-                const std::size_t separator = declared.find(':');
-                if (separator == std::string::npos || separator == 0 || separator + 1 == declared.size()) {
-                    return std::unexpected(error_at(product.location, "dependency source `" + declared + "` must use `dependency:path`"));
-                }
-                auto dependency = dependency_by_local_name(
-                    graph,
-                    package,
-                    std::string_view(declared).substr(0, separator),
-                    product.location
-                );
-                if (!dependency)
-                    return std::unexpected(dependency.error());
-
-                auto directory = dependency_directory(**dependency, product.location);
-                if (!directory)
-                    return std::unexpected(directory.error());
-
-                product.dependency_source_files.push_back(
-                    (*directory / std::filesystem::path(declared.substr(separator + 1))).lexically_normal()
-                );
-            }
-
-            for (
-                std::vector<std::string>* directories: {&product.include_directories,
-                    &product.public_include_directories,
-                    &product.system_include_directories,
-                    &product.public_system_include_directories}
-            ) {
-                for (std::string& directory: *directories) {
-                    constexpr std::string_view prefix = "${dependency:";
-                    if (!directory.starts_with(prefix) || !directory.ends_with('}'))
-                        continue;
-
-                    const std::string_view local_name(directory.data() + prefix.size(), directory.size() - prefix.size() - 1);
-                    auto dependency = dependency_by_local_name(graph, package, local_name, product.location);
-                    if (!dependency)
-                        return std::unexpected(dependency.error());
-
-                    auto source_directory = dependency_directory(**dependency, product.location);
-                    if (!source_directory)
-                        return std::unexpected(source_directory.error());
-
-                    directory = source_directory->generic_string();
-                }
-            }
-            return {};
-        }
-
         Result<EffectiveProduct> realize_product(
             const Graph& graph,
             const ProductDeclaration& declaration,
@@ -265,64 +173,6 @@ namespace kaixa {
             result.sources.include = std::move(*sources);
             result.sources.location = declaration.location;
 
-            auto headers = table.string_array("headers");
-            if (!headers)
-                return std::unexpected(headers.error());
-
-            result.headers.include = std::move(*headers);
-            result.headers.location = declaration.location;
-
-            auto public_headers = table.string_array("public-headers");
-            if (!public_headers)
-                return std::unexpected(public_headers.error());
-
-            result.public_headers.include = std::move(*public_headers);
-            result.public_headers.location = declaration.location;
-
-            for (
-                const auto& [key, output]: {std::pair{std::string_view{"include"}, &result.include_directories},
-                    std::pair{std::string_view{"public-include"}, &result.public_include_directories},
-                    std::pair{std::string_view{"system-include"}, &result.system_include_directories},
-                    std::pair{std::string_view{"public-system-include"}, &result.public_system_include_directories}}
-            ) {
-                auto values = table.string_array(key);
-                if (!values)
-                    return std::unexpected(values.error());
-
-                *output = std::move(*values);
-            }
-
-            auto private_definitions = definitions(table, "defines");
-            if (!private_definitions)
-                return std::unexpected(private_definitions.error());
-
-            result.definitions = std::move(*private_definitions);
-            auto public_definitions = definitions(table, "public-defines");
-            if (!public_definitions)
-                return std::unexpected(public_definitions.error());
-
-            result.public_definitions = std::move(*public_definitions);
-
-            auto system_libraries = table.string_array("system-libraries");
-            if (!system_libraries)
-                return std::unexpected(system_libraries.error());
-
-            result.system_libraries = std::move(*system_libraries);
-
-            auto dependency_sources = table.string_array("dependency-sources");
-            if (!dependency_sources)
-                return std::unexpected(dependency_sources.error());
-
-            result.dependency_sources = std::move(*dependency_sources);
-
-            if (const Value* modules = table.take("modules")) {
-                const bool* enabled = modules->as_boolean();
-                if (!enabled)
-                    return std::unexpected(wrong_kind(modules->location(), "a boolean", modules->kind()));
-
-                result.modules = *enabled;
-            }
-
             auto runtime_files = table.string_array("runtime-files");
             if (!runtime_files)
                 return std::unexpected(runtime_files.error());
@@ -330,33 +180,13 @@ namespace kaixa {
             result.runtime_files.include = std::move(*runtime_files);
             result.runtime_files.location = declaration.location;
             result.policy_layers = package.policy_layers;
+            result.resolver_options = table.take_remaining();
 
-            auto finished = table.finish();
-            if (!finished)
-                return std::unexpected(finished.error());
-
-            auto header_files = expand_file_set(result.headers, package.directory, package.directory, true, files);
-            if (!header_files)
-                return std::unexpected(header_files.error());
-
-            result.headers.files = std::move(*header_files);
-            auto public_header_files = expand_file_set(result.public_headers, package.directory, package.directory, true, files);
-            if (!public_header_files)
-                return std::unexpected(public_header_files.error());
-
-            result.public_headers.files = std::move(*public_header_files);
-            std::erase_if(result.headers.files, [&](const std::filesystem::path& header) {
-                return std::ranges::find(result.public_headers.files, header) != result.public_headers.files.end();
-            });
             auto runtime_file_paths = expand_file_set(result.runtime_files, package.directory, package.directory, true, files);
             if (!runtime_file_paths)
                 return std::unexpected(runtime_file_paths.error());
 
             result.runtime_files.files = std::move(*runtime_file_paths);
-            auto dependency_paths = resolve_dependency_paths(graph, package, result);
-            if (!dependency_paths)
-                return std::unexpected(dependency_paths.error());
-
             return result;
         }
 
@@ -543,10 +373,10 @@ namespace kaixa {
         const PackageNode& package = graph[package_id];
         EffectivePackage result;
         result.package = package_id;
-        if (!package.manifest)
+        if (!package.manifest())
             return result;
 
-        for (const ProductDeclaration& declaration: package.manifest->products) {
+        for (const ProductDeclaration& declaration: package.manifest()->products) {
             auto product = realize_product(graph, declaration, package, context, files);
             if (!product)
                 return std::unexpected(product.error());

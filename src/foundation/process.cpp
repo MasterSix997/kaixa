@@ -266,10 +266,11 @@ namespace kaixa {
 
             std::size_t offset = 0;
             std::string pending;
+            const bool streaming = request.output == ProcessOutputMode::stream;
             DWORD wait_result = WAIT_TIMEOUT;
             while (wait_result == WAIT_TIMEOUT) {
-                wait_result = WaitForSingleObject(process.hProcess, request.stream_output ? 100 : INFINITE);
-                if (request.stream_output)
+                wait_result = WaitForSingleObject(process.hProcess, streaming ? 100 : INFINITE);
+                if (streaming)
                     forward_capture(capture, offset, pending, wait_result != WAIT_TIMEOUT);
             }
             DWORD exit_code = 0;
@@ -315,7 +316,7 @@ namespace kaixa {
             }
 
             int status = 0;
-            if (request.stream_output) {
+            if (request.output == ProcessOutputMode::stream) {
                 std::size_t offset = 0;
                 std::string pending;
                 for (;;) {
@@ -379,8 +380,9 @@ namespace kaixa {
         if (request.argv.empty())
             return std::unexpected(error("cannot run an empty command"));
 
-        std::FILE* capture = request.capture_output ? create_capture() : nullptr;
-        if (request.capture_output && !capture)
+        const bool retains_output = request.output != ProcessOutputMode::inherit;
+        std::FILE* capture = retains_output ? create_capture() : nullptr;
+        if (retains_output && !capture)
             return std::unexpected(error("cannot create a temporary process output file"));
         auto result = run_process_platform(request, capture);
         if (capture)

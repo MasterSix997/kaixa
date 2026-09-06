@@ -409,7 +409,7 @@ KAIXA_TEST(default_provider_selects_the_highest_compatible_candidate) {
         return;
 
     const kaixa::PackageNode& package = resolved->graph[*component];
-    context.check_equal(package.manifest->version->text, std::string("1.4.0"), "highest compatible version");
+    context.check_equal(package.manifest()->version->text, std::string("1.4.0"), "highest compatible version");
     context.check(package.source.has_value(), "provider source metadata is retained");
     if (package.source) {
         context.check_equal(package.source->provider.value_or(""), std::string("official"), "provider instance");

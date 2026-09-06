@@ -39,6 +39,19 @@ namespace kaixa {
         m_consumed.assign(m_consumed.size(), true);
     }
 
+    Value TableReader::take_remaining() {
+        const std::span<const TableEntry> table = entries();
+        std::vector<TableEntry> remaining;
+        for (std::size_t index = 0; index < table.size(); ++index) {
+            if (m_consumed[index])
+                continue;
+
+            remaining.push_back(table[index]);
+        }
+        take_all();
+        return Value::table(std::move(remaining), m_value->location());
+    }
+
     std::span<const TableEntry> TableReader::entries() const noexcept {
         const std::vector<TableEntry>* table = m_value->as_table();
         return table ? std::span<const TableEntry>(*table) : std::span<const TableEntry>{};

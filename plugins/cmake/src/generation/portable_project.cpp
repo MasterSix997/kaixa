@@ -1,5 +1,5 @@
 #include "portable_project.hpp"
-#include "cmake_syntax.hpp"
+#include <generation/cmake_syntax.hpp>
 
 #include <algorithm>
 #include <cctype>
@@ -13,7 +13,7 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         const Value* consumer(const PackageNode& package) {
-            return package.descriptor ? package.descriptor->find("consumer") : nullptr;
+            return package.descriptor() ? package.descriptor()->find("consumer") : nullptr;
         }
 
         std::filesystem::path consumer_path(const PackageNode& package) {
@@ -22,7 +22,7 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         bool source_only(const PackageNode& package) {
-            const std::string* kind = string_at(package.descriptor ? &*package.descriptor : nullptr, "kind");
+            const std::string* kind = string_at(package.descriptor() ? package.descriptor() : nullptr, "kind");
             return kind && *kind == "source-only";
         }
 
@@ -212,7 +212,7 @@ namespace kaixa::plugin::cmake::detail {
             if (!source_only(package))
                 return;
 
-            const Value* products = package.descriptor->find("products");
+            const Value* products = package.descriptor()->find("products");
             const std::string* product = string_at(products, "default");
             if (!product)
                 return;
@@ -220,7 +220,7 @@ namespace kaixa::plugin::cmake::detail {
             result += "if(NOT TARGET " + *product + ")\n";
             result += "    add_library(" + *product + " INTERFACE IMPORTED GLOBAL)\n";
             for (const auto& [key, system]: {std::pair{"include", false}, std::pair{"system-include", true}}) {
-                const Value* paths = package.descriptor->find(key);
+                const Value* paths = package.descriptor()->find(key);
                 if (!paths)
                     continue;
 
@@ -251,7 +251,7 @@ namespace kaixa::plugin::cmake::detail {
                              "endif()\n\n";
 
         for (const PackageNode& candidate: graph.nodes()) {
-            if (candidate.id == package.id || !candidate.source || candidate.kind != PackageKind::opaque)
+            if (candidate.id == package.id || !candidate.source || candidate.has_build_semantics())
                 continue;
 
             auto appended = append_source(result, candidate, options.source, false, true);

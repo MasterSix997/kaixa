@@ -9,7 +9,8 @@
 namespace kaixa::plugin {
     ExtensionRegistry default_registry() {
         ExtensionRegistry registry;
-        registry.add(cmake::make_resolver());
+        // the bundled extension set is fixed, so this registration cannot collide on a policy key
+        [[maybe_unused]] const auto registered = registry.add(cmake::make_resolver());
         registry.add(path::make_source_driver());
         registry.add(remote::make_git_source_driver());
         registry.add(remote::make_url_source_driver());

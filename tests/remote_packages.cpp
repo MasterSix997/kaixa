@@ -13,16 +13,9 @@ using kaixa::testing::TempDirectory;
 namespace {
     class RecordingPublicationBackend final : public kaixa::PublicationBackend {
     public:
-        [[nodiscard]] kaixa::Result<void> create_archive(
-            const std::filesystem::path& contents,
-            const std::filesystem::path& destination
-        ) const override {
-            archived = std::filesystem::is_directory(contents);
-            return kaixa::write_file(destination, "test archive");
-        }
-
-        [[nodiscard]] kaixa::Result<void> upload(const kaixa::PackageUpload&) const override {
+        [[nodiscard]] kaixa::Result<void> upload(const kaixa::PackageUpload& request) const override {
             uploaded = true;
+            archived = std::filesystem::is_regular_file(request.archive);
             return {};
         }
 
@@ -31,7 +24,7 @@ namespace {
     };
 
     kaixa::Result<void> run(std::vector<std::string> arguments, const std::filesystem::path& directory) {
-        auto result = kaixa::run_process({std::move(arguments), directory, {}, true});
+        auto result = kaixa::run_process({std::move(arguments), directory, {}, kaixa::ProcessOutputMode::capture});
         if (!result)
             return std::unexpected(result.error());
 
@@ -52,10 +45,21 @@ KAIXA_TEST(publication_transport_is_replaceable) {
         "resolver = \"cmake\"\n"
     );
     const RecordingPublicationBackend backend;
-    const auto published = kaixa::publish_package({root.path() / "library", root.path() / "registry"}, backend);
-    context.check(published.has_value(), "publication accepts an injected transport backend");
-    context.check(backend.archived, "injected backend creates the package archive");
+    const auto local = kaixa::publish_package({root.path() / "library", root.path() / "registry"}, &backend);
+    context.check(local.has_value(), "local publication needs no transport backend");
     context.check(!backend.uploaded, "local registries do not invoke remote upload");
+
+    kaixa::PublishRequest remote{root.path() / "library", root.path() / "registry"};
+    remote.endpoint = "https://registry.invalid";
+    const auto published = kaixa::publish_package(remote, &backend);
+    context.check(published.has_value(), "publication accepts an injected transport backend");
+    context.check(backend.uploaded, "endpoint publication uses the injected transport");
+    context.check(backend.archived, "the core builds the archive handed to the transport");
+
+    const auto missing = kaixa::publish_package(remote);
+    context.check(!missing.has_value(), "endpoint publication without a transport backend is rejected");
+    if (!missing)
+        context.check_contains(missing.error().message, "requires a publication backend", "missing transport diagnostic");
 }
 
 KAIXA_TEST(sha256_matches_the_standard_test_vector) {
@@ -287,7 +291,7 @@ KAIXA_TEST(prebuilt_publication_materializes_an_opaque_package) {
     const auto package = resolved->graph.find_by_name("binary_library");
     context.check(package.has_value(), "prebuilt package enters the graph");
     if (package) {
-        context.check(resolved->graph[*package].kind == kaixa::PackageKind::opaque, "prebuilt package stays opaque");
+        context.check(resolved->graph[*package].is_opaque(), "prebuilt package stays opaque");
         context.check(
             std::filesystem::is_regular_file(resolved->graph[*package].directory / "include/library.hpp"),
             "artifact is extracted"

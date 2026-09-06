@@ -187,7 +187,7 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
         return;
     }
     const kaixa::PackageNode& package = (*graph)[graph->roots().front()];
-    const std::vector<kaixa::ConfigurationSet> layers{package.manifest->configurations};
+    const std::vector<kaixa::ConfigurationSet> layers{package.manifest()->configurations};
     const std::vector<std::string> requested;
     const std::vector<kaixa::ResolverArgumentOverride> overrides;
     auto configuration = kaixa::resolve_configurations(layers, requested, std::nullopt, overrides);
@@ -200,10 +200,10 @@ KAIXA_TEST(cmake_consumes_a_named_configuration) {
     const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake project plans");
-    if (!plan || plan->actions().empty())
+    if (!plan || plan->synchronization().empty())
         return;
 
-    const std::vector<std::string> command = plan->actions().front().argv;
+    const std::vector<std::string> command = plan->synchronization().front().argv;
     for (
         const std::string& expected: {std::string("Ninja"), std::string("-DCMAKE_CXX_COMPILER=clang++"), std::string("-DBUILD_TESTING=OFF")}
     ) {

@@ -5,8 +5,11 @@
 
 #include <algorithm>
 #include <optional>
+#include <span>
 #include <string_view>
 #include <system_error>
+#include <tuple>
+#include <vector>
 
 namespace kaixa {
     namespace {
@@ -95,9 +98,25 @@ namespace kaixa {
             return ActionState::current;
         }
 
+        std::string indented_tool_output(const std::string& captured) {
+            std::string output = "tool output:";
+            std::size_t start = 0;
+            while (start < captured.size()) {
+                const std::size_t end = captured.find('\n', start);
+                const std::string_view line = end == std::string::npos ? std::string_view(captured).substr(start)
+                                                                       : std::string_view(captured).substr(start, end - start);
+                output += "\n    ";
+                if (!line.empty() && line.back() == '\r')
+                    output.append(line.substr(0, line.size() - 1));
+                else
+                    output += line;
+                start = end == std::string::npos ? captured.size() : end + 1;
+            }
+            return output;
+        }
+
         Result<void> execute_action(const Action& action) {
-            const bool capture_output = !action.argv.empty() && action.argv.front() == "cmake";
-            const ProcessRequest request{action.argv, action.working_directory, action.environment, capture_output, capture_output};
+            const ProcessRequest request{action.argv, action.working_directory, action.environment, action.output};
             auto result = run_process(request);
             if (!result) {
                 return std::unexpected(std::move(result).error().add_note("while running `" + format_command(action.argv) + "`"));
@@ -106,23 +125,9 @@ namespace kaixa {
                 Diagnostic diagnostic = error(
                     "action `" + action.description + "` failed (exit code " + std::to_string(result->exit_code) + ")"
                 );
-                if (!capture_output && !result->output.empty()) {
-                    std::string output = "tool output:";
-                    std::size_t start = 0;
-                    while (start < result->output.size()) {
-                        const std::size_t end = result->output.find('\n', start);
-                        const std::string_view line = end == std::string::npos
-                            ? std::string_view(result->output).substr(start)
-                            : std::string_view(result->output).substr(start, end - start);
-                        output += "\n    ";
-                        if (!line.empty() && line.back() == '\r')
-                            output.append(line.substr(0, line.size() - 1));
-                        else
-                            output += line;
-                        start = end == std::string::npos ? result->output.size() : end + 1;
-                    }
-                    diagnostic.notes.push_back(std::move(output));
-                }
+                if (action.output == ProcessOutputMode::capture && !result->output.empty())
+                    diagnostic.notes.push_back(indented_tool_output(result->output));
+
                 return std::unexpected(std::move(diagnostic));
             }
             return {};
@@ -132,12 +137,20 @@ namespace kaixa {
     bool CheckReport::requires_synchronization() const noexcept {
         return std::ranges::any_of(generated_files, [](const GeneratedFileCheck& file) {
             return file.state != GeneratedFileState::current;
-        }) || std::ranges::any_of(actions, [](const ActionCheck& action) {
-            return action.stage == ActionStage::synchronize && action.state == ActionState::required;
-        });
+        }) || std::ranges::any_of(synchronization, [](const ActionCheck& action) { return action.state == ActionState::required; });
     }
 
-    Result<CheckReport> check(const BuildPlan& plan) {
+    std::span<const ActionCheck> CheckReport::phase(const ExecutionPhase phase) const noexcept {
+        switch (phase) {
+        case ExecutionPhase::synchronize: return synchronization;
+        case ExecutionPhase::build: return build;
+        case ExecutionPhase::task: return tasks;
+        case ExecutionPhase::test: return tests;
+        }
+        return {};
+    }
+
+    Result<CheckReport> check(const ExecutionPlan& plan) {
         CheckReport report;
         std::vector<std::filesystem::path> changed;
         report.generated_files.reserve(plan.generated_files().size());
@@ -151,23 +164,38 @@ namespace kaixa {
                 changed.push_back(generated.path);
         }
 
-        report.actions.reserve(plan.actions().size());
-        for (const Action& action: plan.actions()) {
-            auto state = action_state(action);
-            if (!state)
-                return std::unexpected(state.error());
+        const auto check_phase =
+            [&](const std::span<const Action> actions, std::vector<ActionCheck>& checks, const bool propagates) -> Result<void> {
+            checks.reserve(actions.size());
+            for (const Action& action: actions) {
+                auto state = action_state(action);
+                if (!state)
+                    return std::unexpected(state.error());
 
-            if (*state == ActionState::current && consumes_changed_path(action, changed))
-                *state = ActionState::required;
+                if (*state == ActionState::current && consumes_changed_path(action, changed))
+                    *state = ActionState::required;
 
-            report.actions.push_back({action.description, *state, action.stage});
-            if (action.stage == ActionStage::synchronize && *state != ActionState::current)
-                append_changed_outputs(changed, action);
+                checks.push_back({action.description, *state});
+                if (propagates && *state != ActionState::current)
+                    append_changed_outputs(changed, action);
+            }
+            return {};
+        };
+
+        for (
+            const auto& [actions, checks, propagates]: {std::tuple{plan.synchronization(), &report.synchronization, true},
+                std::tuple{plan.builds(), &report.build, false},
+                std::tuple{plan.tasks(), &report.tasks, false},
+                std::tuple{plan.tests(), &report.tests, false}}
+        ) {
+            auto checked = check_phase(actions, *checks, propagates);
+            if (!checked)
+                return std::unexpected(checked.error());
         }
         return report;
     }
 
-    Result<GenerationReport> generate(const BuildPlan& plan) {
+    Result<GenerationReport> generate(const ExecutionPlan& plan) {
         GenerationReport report;
         auto state = check(plan);
         if (!state)
@@ -187,13 +215,11 @@ namespace kaixa {
             ++report.written;
         }
 
-        for (std::size_t index = 0; index < plan.actions().size(); ++index) {
-            const Action& action = plan.actions()[index];
-            if (action.stage != ActionStage::synchronize || state->actions[index].state == ActionState::current) {
+        for (std::size_t index = 0; index < plan.synchronization().size(); ++index) {
+            if (state->synchronization[index].state == ActionState::current)
                 continue;
-            }
 
-            auto executed = execute_action(action);
+            auto executed = execute_action(plan.synchronization()[index]);
             if (!executed)
                 return std::unexpected(executed.error());
 
@@ -202,14 +228,18 @@ namespace kaixa {
         return report;
     }
 
-    Result<ExecutionReport> execute_actions(const BuildPlan& plan, const ActionStage stage) {
+    Result<ExecutionReport> execute_actions(const ExecutionPlan& plan, const ExecutionPhase phase) {
         ExecutionReport report;
+        std::span<const Action> actions;
+        switch (phase) {
+        case ExecutionPhase::synchronize: actions = plan.synchronization(); break;
+        case ExecutionPhase::build: actions = plan.builds(); break;
+        case ExecutionPhase::task: actions = plan.tasks(); break;
+        case ExecutionPhase::test: actions = plan.tests(); break;
+        }
 
-        for (const Action& action: plan.actions()) {
-            if (action.stage != stage)
-                continue;
-
-            if (stage == ActionStage::task) {
+        for (const Action& action: actions) {
+            if (phase == ExecutionPhase::task) {
                 auto state = action_state(action);
                 if (!state)
                     return std::unexpected(state.error());
@@ -227,16 +257,16 @@ namespace kaixa {
         return report;
     }
 
-    Result<ExecutionReport> execute(const BuildPlan& plan) {
+    Result<ExecutionReport> execute(const ExecutionPlan& plan) {
         auto generated = generate(plan);
         if (!generated)
             return std::unexpected(generated.error());
 
-        auto built = execute_actions(plan, ActionStage::build);
+        auto built = execute_actions(plan, ExecutionPhase::build);
         if (!built)
             return std::unexpected(built.error());
 
-        auto tasks = execute_actions(plan, ActionStage::task);
+        auto tasks = execute_actions(plan, ExecutionPhase::task);
         if (!tasks)
             return std::unexpected(tasks.error());
 
@@ -245,12 +275,12 @@ namespace kaixa {
         return built;
     }
 
-    Result<ExecutionReport> test(const BuildPlan& plan) {
+    Result<ExecutionReport> test(const ExecutionPlan& plan) {
         auto executed = execute(plan);
         if (!executed)
             return std::unexpected(executed.error());
 
-        auto tested = execute_actions(plan, ActionStage::test);
+        auto tested = execute_actions(plan, ExecutionPhase::test);
         if (!tested)
             return std::unexpected(tested.error());
 

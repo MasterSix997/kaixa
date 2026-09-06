@@ -43,6 +43,5 @@ namespace kaixa {
         bool prebuilt = false;
     };
 
-    [[nodiscard]] Result<PublishResult> publish_package(const PublishRequest& request);
-    [[nodiscard]] Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend& backend);
+    [[nodiscard]] Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend* upload = nullptr);
 }

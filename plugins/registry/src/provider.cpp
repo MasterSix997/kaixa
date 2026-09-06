@@ -164,7 +164,7 @@ namespace kaixa::plugin::registry {
                         arguments.emplace_back(credential_file->string());
                     }
                     arguments.push_back(configured);
-                    auto downloaded = run_process({std::move(arguments), context.directory, {}, true});
+                    auto downloaded = run_process({std::move(arguments), context.directory, {}, ProcessOutputMode::capture});
                     if (credential_file) {
                         std::error_code ignored;
                         std::filesystem::remove(*credential_file, ignored);

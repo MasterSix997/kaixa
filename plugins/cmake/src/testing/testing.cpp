@@ -1,5 +1,5 @@
 #include "testing.hpp"
-#include "cmake_syntax.hpp"
+#include <generation/cmake_syntax.hpp>
 
 #include <algorithm>
 #include <ranges>
@@ -109,13 +109,12 @@ endforeach()
             output += " PROPERTIES LABELS \"" + labels + "\")\n";
         }
 
-        Result<Action*> find_build_action(BuildPlan& plan, const PackageNode& package, const std::string_view configured_artifact) {
-            const auto action = std::ranges::find_if(plan.actions(), [&](const Action& candidate) {
-                return candidate.package == package.id
-                    && candidate.configured_artifact == configured_artifact
-                    && candidate.stage == ActionStage::build;
+        Result<Action*> find_build_action(ExecutionPlan& plan, const PackageNode& package, const std::string_view configured_artifact) {
+            const std::span<Action> builds = plan.builds();
+            const auto action = std::ranges::find_if(builds, [&](const Action& candidate) {
+                return candidate.package == package.id && candidate.configured_artifact == configured_artifact;
             });
-            if (action == plan.actions().end()) {
+            if (action == builds.end()) {
                 return std::unexpected(error("CMake test plan has no build action for package `" + package.name + "`"));
             }
 
@@ -157,7 +156,7 @@ endforeach()
         const PackageNode& package,
         const TestPlanRoute& route,
         const TestRequest& request,
-        BuildPlan& plan
+        ExecutionPlan& plan
     ) {
         std::vector<std::string> build_targets;
         if (!route.selected_targets.empty()) {
@@ -237,8 +236,7 @@ endforeach()
         action.working_directory = package.directory;
         action.package = package.id;
         action.configured_artifact = std::string(route.configured_artifact);
-        action.stage = ActionStage::test;
-        plan.add(std::move(action));
+        plan.test(std::move(action));
         return {};
     }
 }

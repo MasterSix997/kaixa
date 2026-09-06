@@ -8,6 +8,11 @@
 #include <vector>
 
 namespace {
+    const kaixa::PolicySchema& native_schema() {
+        static const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+        return registry.policy_schema();
+    }
+
     kaixa::Value policy(std::initializer_list<kaixa::TableEntry> entries) {
         return kaixa::Value::table(std::vector<kaixa::TableEntry>(entries));
     }
@@ -16,9 +21,8 @@ namespace {
         kaixa::PackageNode node;
         node.name = std::move(name);
         node.directory = node.name;
-        node.kind = kaixa::PackageKind::managed;
         node.resolver = "cmake";
-        node.manifest.emplace(node.name, node.resolver);
+        node.semantics = kaixa::ManagedPackage{kaixa::Manifest{node.name, node.resolver}};
         node.policy_layers.push_back(std::move(package_policy));
         return graph.add(std::move(node));
     }
@@ -50,7 +54,7 @@ KAIXA_TEST(policy_conditions_use_the_build_context_and_keep_classes) {
     );
 
     const std::vector<kaixa::Value> layers{conditional};
-    const auto effective = kaixa::resolve_policy_layers(layers, {}, {"release", "windows"});
+    const auto effective = kaixa::resolve_policy_layers(layers, {}, {"release", "windows"}, native_schema());
     context.check(effective.has_value(), "conditional policy resolves");
     if (!effective) {
         context.fail(kaixa::format_diagnostic(effective.error()));
@@ -72,7 +76,7 @@ KAIXA_TEST(abi_policy_conflicts_are_reported_per_final_artifact) {
     graph[root].dependencies = {left, right};
     graph.add_root(root);
 
-    const auto instances = kaixa::configure_package_instances(graph);
+    const auto instances = kaixa::configure_package_instances(graph, {}, native_schema());
     context.check(!instances.has_value(), "incompatible ABI requirements fail");
     if (instances)
         return;
@@ -91,10 +95,10 @@ KAIXA_TEST(floor_policy_is_raised_across_an_artifact_closure) {
     kaixa::DependencyBinding binding;
     binding.request.package = "dependency";
     binding.visibility = kaixa::DependencyVisibility::public_dependency;
-    graph[root].manifest->dependencies.push_back(std::move(binding));
+    graph[root].manifest()->dependencies.push_back(std::move(binding));
     graph.add_root(root);
 
-    const auto instances = kaixa::configure_package_instances(graph);
+    const auto instances = kaixa::configure_package_instances(graph, {}, native_schema());
     context.check(instances.has_value(), "compatible floor policies configure");
     if (!instances) {
         context.fail(kaixa::format_diagnostic(instances.error()));
@@ -118,8 +122,8 @@ KAIXA_TEST(target_abi_policy_creates_dependency_variants_and_stable_identities) 
     graph[root].targets.push_back(std::move(target));
     graph.add_root(root);
 
-    const auto first = kaixa::configure_package_instances(graph);
-    const auto second = kaixa::configure_package_instances(graph);
+    const auto first = kaixa::configure_package_instances(graph, {}, native_schema());
+    const auto second = kaixa::configure_package_instances(graph, {}, native_schema());
     context.check(first.has_value() && second.has_value(), "target variants configure repeatedly");
     if (!first || !second)
         return;
@@ -159,13 +163,12 @@ KAIXA_TEST(prebuilt_descriptor_abi_is_validated_against_the_artifact) {
     const kaixa::PackageId root = add_managed(graph, "root", policy({{"exceptions", false}}));
     kaixa::PackageNode prebuilt;
     prebuilt.name = "prebuilt";
-    prebuilt.kind = kaixa::PackageKind::opaque;
-    prebuilt.descriptor = policy({{"abi", policy({{"exceptions", true}})}});
+    prebuilt.semantics = kaixa::OpaquePackage{policy({{"abi", policy({{"exceptions", true}})}})};
     const kaixa::PackageId dependency = graph.add(std::move(prebuilt));
     graph[root].dependencies.push_back(dependency);
     graph.add_root(root);
 
-    const auto instances = kaixa::configure_package_instances(graph);
+    const auto instances = kaixa::configure_package_instances(graph, {}, native_schema());
     context.check(!instances.has_value(), "prebuilt ABI mismatch fails");
     if (instances)
         return;
@@ -184,7 +187,6 @@ KAIXA_TEST(cmake_translates_effective_policy_to_target_configuration) {
         "resolver = \"cmake\"\n"
         "\n"
         "[package-set]\n"
-        "default = [\"policy_app\"]\n"
         "\n"
         "[package-set.policy]\n"
         "cxx = 23\n"
@@ -204,7 +206,8 @@ KAIXA_TEST(cmake_translates_effective_policy_to_target_configuration) {
     workspace.write("app.cpp", "int answer() { return 42; }\n");
     workspace.write("pch.hpp", "#pragma once\n");
 
-    const auto graph = kaixa::load_workspace(workspace.path());
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const auto graph = kaixa::load_workspace(workspace.path(), &extensions);
     context.check(graph.has_value(), "policy workspace loads");
     if (!graph) {
         context.fail(kaixa::format_diagnostic(graph.error()));
@@ -291,7 +294,8 @@ KAIXA_TEST(cmake_plans_default_and_target_abi_instances_in_separate_projects) {
     );
     workspace.write("dependency/dependency.cpp", "int dependency() { return 1; }\n");
 
-    const auto graph = kaixa::load_workspace(workspace.path());
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const auto graph = kaixa::load_workspace(workspace.path(), &extensions);
     context.check(graph.has_value(), "configured-route workspace loads");
     if (!graph) {
         context.fail(kaixa::format_diagnostic(graph.error()));
@@ -311,8 +315,8 @@ KAIXA_TEST(cmake_plans_default_and_target_abi_instances_in_separate_projects) {
     }
 
     std::vector<const kaixa::Action*> configure_actions;
-    for (const kaixa::Action& action: plan->actions()) {
-        if (action.package == root && action.stage == kaixa::ActionStage::synchronize && action.description == "configure app")
+    for (const kaixa::Action& action: plan->synchronization()) {
+        if (action.package == root && action.description == "configure app")
             configure_actions.push_back(&action);
     }
     context.check_equal(configure_actions.size(), std::size_t{2}, "each root ABI instance has a configure action");
@@ -349,11 +353,10 @@ KAIXA_TEST(cmake_plans_default_and_target_abi_instances_in_separate_projects) {
         return;
     }
 
-    const auto test_action = std::ranges::find_if(test_plan->actions(), [](const kaixa::Action& action) {
-        return action.stage == kaixa::ActionStage::test;
-    });
-    context.check(test_action != test_plan->actions().end(), "policy-specific CTest action exists");
-    if (test_action != test_plan->actions().end()) {
+    const std::span<const kaixa::Action> test_actions = test_plan->tests();
+    const auto test_action = test_actions.begin();
+    context.check(!test_actions.empty(), "policy-specific CTest action exists");
+    if (!test_actions.empty()) {
         context.check(test_action->configured_artifact.has_value(), "CTest action retains its configured artifact");
         context.check(
             std::ranges::find(test_action->argv, "^kaixa\\.target:app\\.tests\\.noexcept$") != test_action->argv.end(),
@@ -377,7 +380,6 @@ KAIXA_TEST(package_policy_reaches_adopted_dependency_projects) {
         "resolver = \"cmake\"\n"
         "\n"
         "[package-set]\n"
-        "default = [\"policy_consumer\"]\n"
         "\n"
         "[package-set.policy]\n"
         "cxx = 23\n"
@@ -412,7 +414,8 @@ KAIXA_TEST(package_policy_reaches_adopted_dependency_projects) {
         "install(TARGETS vendor EXPORT policy_consumerTargets)\n"
     );
 
-    const auto graph = kaixa::load_workspace(workspace.path());
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const auto graph = kaixa::load_workspace(workspace.path(), &extensions);
     context.check(graph.has_value(), "dependency policy workspace loads");
     if (!graph) {
         context.fail(kaixa::format_diagnostic(graph.error()));

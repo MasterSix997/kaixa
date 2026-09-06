@@ -15,8 +15,8 @@ KAIXA_TEST(package_inspection_expands_shared_dependencies_once) {
         kaixa::PackageNode package;
         package.name = std::move(name);
         package.directory = package.name;
-        package.kind = kaixa::PackageKind::managed;
         package.resolver = "cmake";
+        package.semantics = kaixa::ManagedPackage{kaixa::Manifest{package.name, "cmake"}};
         return graph.add(std::move(package));
     };
 

@@ -47,14 +47,14 @@ namespace kaixa::cli::detail {
     void print_providers(const ExtensionRegistry& registry);
     std::string_view state_name(GeneratedFileState state);
     std::string_view state_name(ActionState state);
-    std::string_view stage_name(ActionStage stage);
+    std::string_view phase_name(ExecutionPhase phase);
     bool is_inside(const std::filesystem::path& path, const std::filesystem::path& directory);
     std::string display_path(const std::filesystem::path& path, const std::filesystem::path& workspace);
     void print_configuration_path(std::string_view name, const std::filesystem::path& path, const std::filesystem::path& workspace);
-    Result<void> print_actions(const BuildPlan& plan, bool synchronization_only = false);
-    void print_outputs(const BuildPlan& plan, const std::filesystem::path& workspace);
-    void inspect_outputs(const Graph& graph, const BuildPlan& plan, const std::filesystem::path& workspace);
-    Result<void> inspect_actions(const Graph& graph, const BuildPlan& plan, const std::filesystem::path& workspace, bool verbose);
+    Result<void> print_actions(const ExecutionPlan& plan, bool synchronization_only = false);
+    void print_outputs(const ExecutionPlan& plan, const std::filesystem::path& workspace);
+    void inspect_outputs(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace);
+    Result<void> inspect_actions(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace, bool verbose);
     std::string_view product_purpose_name(ProductPurpose purpose);
     void print_products(
         std::span<const BuildProduct> products,

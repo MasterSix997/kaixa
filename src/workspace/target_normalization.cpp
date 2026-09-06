@@ -81,10 +81,6 @@ namespace kaixa::workspace_detail {
                 append_unique(target.required_dependency_features[package], features);
 
             target.dependencies.insert(target.dependencies.end(), layer.dependencies.begin(), layer.dependencies.end());
-            append_unique(target.include_directories, layer.include_directories);
-            append_unique(target.system_include_directories, layer.system_include_directories);
-            merge_entries(target.definitions, layer.definitions);
-            append_unique(target.system_libraries, layer.system_libraries);
             if (!layer.arguments.empty())
                 target.arguments = layer.arguments;
 
@@ -168,18 +164,6 @@ namespace kaixa::workspace_detail {
 
             for (std::string& argument: target.arguments)
                 replace_capture(argument, capture, replacement);
-
-            for (std::string& include: target.include_directories)
-                replace_capture(include, capture, replacement);
-
-            for (std::string& include: target.system_include_directories)
-                replace_capture(include, capture, replacement);
-
-            for (TableEntry& definition: target.definitions)
-                definition.value = interpolate_value(definition.value, capture, replacement);
-
-            for (std::string& library: target.system_libraries)
-                replace_capture(library, capture, replacement);
 
             for (std::string& include: target.sources.include)
                 replace_capture(include, capture, replacement);

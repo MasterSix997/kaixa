@@ -32,7 +32,7 @@ namespace kaixa {
             const BuildRequest& request,
             const std::span<const ConfiguredPackageInstance> instances,
             std::vector<ActiveResolverSession>& sessions,
-            BuildPlan& plan
+            ExecutionPlan& plan
         ) {
             if (!request.targets.empty() && !request.packages.empty()) {
                 return std::unexpected(error("a build request cannot mix global and package-specific targets"));
@@ -64,14 +64,14 @@ namespace kaixa {
 
             for (const PackageId id: *order) {
                 const PackageNode& package = graph[id];
-                if (package.kind == PackageKind::opaque)
+                if (package.is_opaque())
                     continue;
 
                 Resolver* resolver = registry.find_resolver(package.resolver);
                 if (!resolver) {
                     SourceLocation location;
-                    if (package.manifest)
-                        location = package.manifest->location;
+                    if (package.manifest())
+                        location = package.manifest()->location;
 
                     return std::unexpected(error_at(std::move(location), "resolver `" + package.resolver + "` is not installed"));
                 }
@@ -112,7 +112,11 @@ namespace kaixa {
     ) {
         std::vector<ConfiguredPackageInstance> configured_instances;
         if (instances.empty()) {
-            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            auto configured = configure_package_instances(
+                graph,
+                {environment.configuration.profile, host_target_os()},
+                registry.policy_schema()
+            );
             if (!configured)
                 return std::unexpected(configured.error());
 
@@ -139,7 +143,7 @@ namespace kaixa {
         return products;
     }
 
-    Result<BuildPlan> plan_build(
+    Result<ExecutionPlan> plan_build(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
@@ -148,7 +152,11 @@ namespace kaixa {
     ) {
         std::vector<ConfiguredPackageInstance> configured_instances;
         if (instances.empty()) {
-            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            auto configured = configure_package_instances(
+                graph,
+                {environment.configuration.profile, host_target_os()},
+                registry.policy_schema()
+            );
             if (!configured)
                 return std::unexpected(configured.error());
 
@@ -157,7 +165,7 @@ namespace kaixa {
         }
 
         std::vector<ActiveResolverSession> sessions;
-        BuildPlan plan;
+        ExecutionPlan plan;
         auto planned = append_build_plan(graph, registry, environment, request, instances, sessions, plan);
         if (!planned)
             return std::unexpected(planned.error());
@@ -165,7 +173,7 @@ namespace kaixa {
         return plan;
     }
 
-    Result<BuildPlan> plan_tests(
+    Result<ExecutionPlan> plan_tests(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
@@ -174,7 +182,11 @@ namespace kaixa {
     ) {
         std::vector<ConfiguredPackageInstance> configured_instances;
         if (instances.empty()) {
-            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            auto configured = configure_package_instances(
+                graph,
+                {environment.configuration.profile, host_target_os()},
+                registry.policy_schema()
+            );
             if (!configured)
                 return std::unexpected(configured.error());
 
@@ -183,7 +195,7 @@ namespace kaixa {
         }
 
         std::vector<ActiveResolverSession> sessions;
-        BuildPlan plan;
+        ExecutionPlan plan;
         auto build = append_build_plan(graph, registry, environment, {}, instances, sessions, plan);
         if (!build)
             return std::unexpected(build.error());

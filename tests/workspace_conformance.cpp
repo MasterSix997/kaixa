@@ -237,7 +237,7 @@ KAIXA_TEST(workspace_conformance_runs_a_reproducible_vertical_slice) {
 #endif
     context.check(std::filesystem::is_regular_file(executable), "installed executable exists");
     context.check(std::filesystem::is_regular_file(prefix / "bin/data.txt"), "runtime file follows the installed executable");
-    const auto ran = kaixa::run_process({{executable.string()}, prefix, {}, true});
+    const auto ran = kaixa::run_process({{executable.string()}, prefix, {}, kaixa::ProcessOutputMode::capture});
     context.check(ran.has_value() && ran->succeeded(), "installed executable runs outside the build tree");
 
     kaixa::TestRequest tests;

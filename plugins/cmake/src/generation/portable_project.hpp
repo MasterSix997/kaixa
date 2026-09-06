@@ -1,6 +1,7 @@
 #pragma once
 
-#include "configuration.hpp"
+#include <generation/project.hpp>
+#include <model/project_model.hpp>
 
 #include <filesystem>
 #include <span>

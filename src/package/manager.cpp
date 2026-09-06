@@ -4,6 +4,7 @@
 #include <kaixa/config/value_operations.hpp>
 #include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/foundation/hash.hpp>
+#include <kaixa/package/archive_backend.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -286,7 +287,7 @@ namespace kaixa {
 
     Result<PublishResult> publish_remote_package(
         const PublishRequest& request,
-        const PublicationBackend& backend,
+        const PublicationBackend& upload,
         const Manifest& manifest,
         const std::filesystem::path& staging,
         const std::filesystem::path& archive,
@@ -314,17 +315,16 @@ namespace kaixa {
             return std::unexpected(metadata_written.error());
 
         const std::string publish_url = endpoint + "/api/v1/packages";
-        auto uploaded = backend.upload({publish_url, request.token_environment, staging / "metadata.toml", archive, request.package});
+        auto uploaded = upload.upload({publish_url, request.token_environment, staging / "metadata.toml", archive, request.package});
         if (!uploaded)
             return std::unexpected(uploaded.error());
         return PublishResult{manifest.name, *manifest.version, publish_url, integrity, request.prebuilt.has_value()};
     }
 
-    Result<PublishResult> publish_package(const PublishRequest& request) {
-        return publish_package(request, command_publication_backend());
-    }
+    Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend* upload) {
+        if (request.endpoint && !request.dry_run && upload == nullptr)
+            return std::unexpected(error("publishing to a registry endpoint requires a publication backend"));
 
-    Result<PublishResult> publish_package(const PublishRequest& request, const PublicationBackend& backend) {
         auto manifest = parse_manifest_file(request.package / "Kaixa.toml");
         if (!manifest)
             return std::unexpected(manifest.error());
@@ -381,7 +381,7 @@ namespace kaixa {
 
         std::filesystem::create_directories(staging, failure);
         const std::filesystem::path temporary_archive = staging / "package.tar.gz";
-        auto archived = backend.create_archive(staging / "contents", temporary_archive);
+        auto archived = default_archive_backend().create_archive(staging / "contents", temporary_archive);
         if (!archived)
             return std::unexpected(archived.error());
 
@@ -390,7 +390,7 @@ namespace kaixa {
             return std::unexpected(integrity.error());
 
         if (request.endpoint)
-            return publish_remote_package(request, backend, *manifest, staging, temporary_archive, *integrity);
+            return publish_remote_package(request, *upload, *manifest, staging, temporary_archive, *integrity);
 
         const std::filesystem::path archive = request.registry / relative / (*integrity + ".tar.gz");
         std::filesystem::create_directories(archive.parent_path(), failure);

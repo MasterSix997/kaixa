@@ -15,7 +15,16 @@
 namespace kaixa {
     class ExtensionRegistry {
     public:
-        void add(std::unique_ptr<Resolver> resolver) { m_resolvers.push_back(std::move(resolver)); }
+        [[nodiscard]] Result<void> add(std::unique_ptr<Resolver> resolver) {
+            auto registered = m_policy_schema.add(resolver->policies());
+            if (!registered)
+                return std::unexpected(std::move(registered).error().add_note("registered by resolver `" + resolver->info().name + "`"));
+
+            m_resolvers.push_back(std::move(resolver));
+            return {};
+        }
+
+        [[nodiscard]] const PolicySchema& policy_schema() const noexcept { return m_policy_schema; }
 
         void add(std::unique_ptr<SourceDriver> driver) { m_source_drivers.push_back(std::move(driver)); }
 
@@ -105,6 +114,7 @@ namespace kaixa {
         [[nodiscard]] std::span<const TestAdapterInfo> test_adapters() const noexcept { return m_test_adapters; }
 
     private:
+        PolicySchema m_policy_schema = core_policy_schema();
         std::vector<std::unique_ptr<Resolver>> m_resolvers;
         std::vector<std::unique_ptr<SourceDriver>> m_source_drivers;
         std::vector<std::unique_ptr<PackageProvider>> m_providers;

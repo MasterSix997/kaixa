@@ -1,4 +1,5 @@
 #include "application_internal.hpp"
+#include "publication_backend.hpp"
 
 #include <kaixa/foundation/filesystem.hpp>
 
@@ -304,7 +305,8 @@ namespace kaixa::cli::detail {
                 std::move(endpoint),
                 command.token_environment,
                 std::move(prebuilt),
-                command.dry_run}
+                command.dry_run},
+            &command_publication_backend()
         );
         if (!published)
             return fail(published.error());

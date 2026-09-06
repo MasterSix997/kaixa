@@ -14,24 +14,16 @@ namespace kaixa {
         interface_library
     };
 
+    // Kaixa owns the artifact: its identity, kind, sources, runtime files and policy. Everything
+    // that only a toolchain can interpret - headers, include paths, definitions, system libraries -
+    // stays in `resolver_options` and is converted once by the resolver that implements it.
     struct EffectiveProduct {
         std::string name;
         EffectiveProductType type = EffectiveProductType::static_library;
         FileSet sources;
-        FileSet headers;
-        FileSet public_headers;
-        std::vector<std::string> include_directories;
-        std::vector<std::string> public_include_directories;
-        std::vector<std::string> system_include_directories;
-        std::vector<std::string> public_system_include_directories;
-        std::vector<TableEntry> definitions;
-        std::vector<TableEntry> public_definitions;
-        std::vector<std::string> system_libraries;
-        std::vector<std::string> dependency_sources;
-        std::vector<std::filesystem::path> dependency_source_files;
         FileSet runtime_files;
         std::vector<Value> policy_layers;
-        bool modules = false;
+        Value resolver_options;
         SourceLocation location;
     };
 

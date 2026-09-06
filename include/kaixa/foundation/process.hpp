@@ -15,12 +15,17 @@ namespace kaixa {
         std::string value;
     };
 
+    enum class ProcessOutputMode {
+        inherit,
+        stream,
+        capture
+    };
+
     struct ProcessRequest {
         std::vector<std::string> argv;
         std::filesystem::path working_directory;
         std::vector<EnvironmentVariable> environment;
-        bool capture_output = false;
-        bool stream_output = false;
+        ProcessOutputMode output = ProcessOutputMode::inherit;
     };
 
     struct ProcessResult {

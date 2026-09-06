@@ -1,6 +1,8 @@
-#include "cmake_syntax.hpp"
-#include "configuration.hpp"
-#include "testing.hpp"
+#include "project.hpp"
+#include <generation/cmake_syntax.hpp>
+
+#include <configuration.hpp>
+#include <testing/testing.hpp>
 
 #include <algorithm>
 #include <filesystem>
@@ -70,10 +72,10 @@ namespace kaixa::plugin::cmake::detail {
         }
 
         std::string project_version(const PackageNode& package) {
-            if (!package.manifest || !package.manifest->version)
+            if (!package.manifest() || !package.manifest()->version)
                 return {};
 
-            std::string value = package.manifest->version->text;
+            std::string value = package.manifest()->version->text;
             const std::size_t suffix = value.find_first_of("-+");
             if (suffix != std::string::npos)
                 value.resize(suffix);

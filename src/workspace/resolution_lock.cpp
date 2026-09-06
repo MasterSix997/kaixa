@@ -533,8 +533,8 @@ namespace kaixa {
             LockedPackage locked;
             locked.name = package.name;
             locked.resolver = package.resolver;
-            if (package.manifest && package.manifest->version)
-                locked.version = package.manifest->version->text;
+            if (package.manifest() && package.manifest()->version)
+                locked.version = package.manifest()->version->text;
 
             if (package.source) {
                 locked.provider = package.source->provider;

@@ -235,7 +235,7 @@ namespace kaixa::cli::detail {
     }
 
     int execute_and_run_target(
-        const BuildPlan& plan,
+        const ExecutionPlan& plan,
         RunTarget selected,
         const std::span<const std::string> arguments,
         const std::string_view operation

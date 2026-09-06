@@ -8,9 +8,51 @@
 #include <ranges>
 #include <stdexcept>
 #include <system_error>
+#include <vector>
 
 namespace kaixa::testing {
+    std::vector<Action> all_actions(const ExecutionPlan& plan) {
+        std::vector<Action> actions;
+        actions.reserve(plan.action_count());
+        for (const std::span<const Action> phase: {plan.synchronization(), plan.builds(), plan.tasks(), plan.tests()})
+            actions.insert(actions.end(), phase.begin(), phase.end());
+
+        return actions;
+    }
+
+    const Action* find_action(const std::span<const Action> actions, const std::string_view description) {
+        const auto found = std::ranges::find(actions, description, &Action::description);
+        return found == actions.end() ? nullptr : &*found;
+    }
+
     namespace {
+        // `std::filesystem::remove_all(path, error_code)` retries forever when an entry cannot be
+        // deleted, which hangs the test process on build trees that leave read-only files behind.
+        // Remove the tree once, bottom up, and accept residue instead of looping.
+        void remove_tree_once(const std::filesystem::path& path) {
+            std::error_code failure;
+            const std::filesystem::file_status status = std::filesystem::symlink_status(path, failure);
+            if (failure)
+                return;
+
+            if (std::filesystem::is_directory(status)) {
+                std::vector<std::filesystem::path> children;
+                for (
+                    std::filesystem::directory_iterator iterator(path, failure), end; !failure && iterator != end;
+                    iterator.increment(failure)
+                ) {
+                    children.push_back(iterator->path());
+                }
+                for (const std::filesystem::path& child: children)
+                    remove_tree_once(child);
+            } else {
+                failure.clear();
+                std::filesystem::permissions(path, std::filesystem::perms::owner_write, std::filesystem::perm_options::add, failure);
+            }
+            failure.clear();
+            std::filesystem::remove(path, failure);
+        }
+
         std::string unique_name(const std::string_view label) {
             static std::atomic<unsigned> counter{0};
             const auto ticks = std::chrono::steady_clock::now().time_since_epoch().count();
@@ -136,8 +178,7 @@ namespace kaixa::testing {
     }
 
     TempDirectory::~TempDirectory() {
-        std::error_code ignored;
-        std::filesystem::remove_all(m_path, ignored);
+        remove_tree_once(m_path);
     }
 
     void TempDirectory::copy_from(const std::filesystem::path& source) const {

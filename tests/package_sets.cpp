@@ -1,6 +1,7 @@
 #include <test_support.hpp>
 
 #include <kaixa/kaixa.hpp>
+#include <kaixa/plugin/bundle.hpp>
 
 #include <cstddef>
 #include <filesystem>
@@ -339,7 +340,6 @@ KAIXA_TEST(target_policy_creates_a_separate_configured_package_instance) {
         "resolver = \"cmake\"\n"
         "\n"
         "[package-set]\n"
-        "default = [\"app\"]\n"
         "\n"
         "[package-set.policy]\n"
         "cxx = 23\n"
@@ -356,7 +356,8 @@ KAIXA_TEST(target_policy_creates_a_separate_configured_package_instance) {
     root.write("app.cpp", "int answer() { return 42; }\n");
     root.write("test.cpp", "int main() { return 0; }\n");
 
-    const auto resolution = kaixa::resolve_workspace(root.path());
+    kaixa::ExtensionRegistry extensions = kaixa::plugin::default_registry();
+    const auto resolution = kaixa::resolve_workspace(root.path(), kaixa::ResolutionOptions{{}, &extensions});
     context.check(resolution.has_value(), "configured workspace resolves");
     if (!resolution) {
         context.fail(kaixa::format_diagnostic(resolution.error()));
@@ -417,4 +418,59 @@ KAIXA_TEST(configured_features_activate_optional_dependencies) {
     if (app) {
         context.check_equal(resolution->graph[*app].active_features.front(), std::string("tools"), "configured feature is active");
     }
+}
+
+KAIXA_TEST(root_package_rejects_a_redundant_package_set_default) {
+    const TempDirectory root("package-set-redundant-default");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "name = \"app\"\n"
+        "default = [\"app\"]\n"
+    );
+
+    const auto document = kaixa::parse_manifest_document_file(root.path() / "Kaixa.toml");
+    context.check(!document.has_value(), "declaring a default next to `[package]` is rejected");
+    if (!document) {
+        context.check_contains(document.error().message, "`[package]` is already the root", "redundant default diagnostic");
+        context.check(document.error().location.has_value(), "diagnostic carries a location");
+        if (document.error().location)
+            context.check_contains(document.error().location->config_path, "default", "diagnostic points at the `default` key");
+    }
+}
+
+KAIXA_TEST(root_package_accepts_a_package_set_without_a_default) {
+    const TempDirectory root("package-set-root-package");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"app\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "name = \"app\"\n"
+        "members = [\"packages/*\"]\n"
+    );
+    root.write(
+        "packages/math/Kaixa.toml",
+        "[package]\n"
+        "name = \"math\"\n"
+        "version = \"0.4.3\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    const auto graph = kaixa::load_workspace(root.path());
+    context.check(graph.has_value(), "a root package may still declare set members");
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    context.check_equal((*graph)[graph->roots().front()].name, std::string("app"), "`[package]` remains the root");
 }

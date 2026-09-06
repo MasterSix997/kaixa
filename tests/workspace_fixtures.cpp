@@ -63,23 +63,41 @@ KAIXA_TEST(effective_products_apply_conditions_and_source_claim_order) {
         "product keeps only unclaimed source"
     );
     context.check_equal(debug->targets.front().target.sources.files.size(), std::size_t{1}, "target owns literal source");
-    context.check(debug->products.front().definitions.empty(), "inactive condition does not contribute definitions");
-    context.check_equal(debug->products.front().headers.files.size(), std::size_t{1}, "public header leaves private header set");
-    context.check_equal(
-        debug->products.front().public_headers.files.front().generic_string(),
-        std::string("public.hpp"),
-        "public header is a distinct interface set"
+    const kaixa::Value& debug_options = debug->products.front().resolver_options;
+    context.check(debug_options.find("defines") == nullptr, "inactive condition does not contribute definitions");
+    const auto declared_strings = [](const kaixa::Value& options, const std::string_view key) -> std::vector<std::string> {
+        const kaixa::Value* declared = options.find(key);
+        const std::vector<kaixa::Value>* values = declared ? declared->as_array() : nullptr;
+        std::vector<std::string> result;
+        if (!values)
+            return result;
+
+        for (const kaixa::Value& value: *values) {
+            if (value.as_string())
+                result.push_back(*value.as_string());
+        }
+        return result;
+    };
+    const std::vector<std::string> public_headers = declared_strings(debug_options, "public-headers");
+    context.check(
+        public_headers.size() == 1 && public_headers.front() == "public.hpp",
+        "public headers stay a distinct interface set owned by the resolver"
     );
-    context.check_equal(
-        debug->products.front().system_libraries.front(),
-        std::string("system_support"),
-        "system library remains part of the resolver-independent product"
+    context.check(!declared_strings(debug_options, "headers").empty(), "declared headers reach the resolver options");
+    const std::vector<std::string> system_libraries = declared_strings(debug_options, "system-libraries");
+    context.check(
+        system_libraries.size() == 1 && system_libraries.front() == "system_support",
+        "system libraries stay owned by the resolver"
     );
 
     const auto release = kaixa::realize_package(*graph, root, {"release", kaixa::host_target_os()});
     context.check(release.has_value(), "release product realizes");
     if (release) {
-        context.check_equal(release->products.front().definitions.size(), std::size_t{1}, "array condition matches profile");
+        const kaixa::Value* release_definitions = release->products.front().resolver_options.find("defines");
+        context.check(
+            release_definitions != nullptr && release_definitions->find("RELEASE_BRANCH") != nullptr,
+            "array condition matches profile"
+        );
         const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
         const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "release"};
         const auto plan = kaixa::plan_build(*graph, registry, environment);
@@ -196,8 +214,8 @@ KAIXA_TEST(single_package_workspace_loads_and_plans) {
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "test workspace plans");
     if (plan) {
-        context.check_equal(plan->actions().size(), std::size_t{2}, "configure and build");
-        context.check_equal(plan->actions().front().description, std::string("configure test_single"), "configure action");
+        context.check_equal(plan->action_count(), std::size_t{2}, "configure and build");
+        context.check_equal(plan->synchronization().front().description, std::string("configure test_single"), "configure action");
     }
 }
 
@@ -251,7 +269,7 @@ KAIXA_TEST(cmake_plans_each_selected_package_root) {
     context.check_equal(plan->outputs().size(), std::size_t{2}, "one build output per root");
     for (const kaixa::PackageId root: graph->roots()) {
         const std::string description = "configure " + (*graph)[root].name;
-        context.check(std::ranges::find(plan->actions(), description, &kaixa::Action::description) != plan->actions().end(), description);
+        context.check(kaixa::testing::find_action(plan->synchronization(), description) != nullptr, description);
     }
 
     const kaixa::PackageId game_runner = graph->roots().back();
@@ -262,15 +280,17 @@ KAIXA_TEST(cmake_plans_each_selected_package_root) {
     if (!selected)
         return;
 
+    const std::vector<kaixa::Action> selected_actions = kaixa::testing::all_actions(*selected);
     context.check(
-        std::ranges::none_of(selected->actions(), [&](const kaixa::Action& action) { return action.package == graph->roots().front(); }),
+        std::ranges::none_of(selected_actions, [&](const kaixa::Action& action) { return action.package == graph->roots().front(); }),
         "unselected root receives no actions"
     );
-    const auto selected_build = std::ranges::find_if(selected->actions(), [&](const kaixa::Action& action) {
-        return action.package == game_runner && action.stage == kaixa::ActionStage::build;
+    const std::span<const kaixa::Action> selected_builds = selected->builds();
+    const auto selected_build = std::ranges::find_if(selected_builds, [&](const kaixa::Action& action) {
+        return action.package == game_runner;
     });
-    context.check(selected_build != selected->actions().end(), "selected root has a build action");
-    if (selected_build != selected->actions().end()) {
+    context.check(selected_build != selected_builds.end(), "selected root has a build action");
+    if (selected_build != selected_builds.end()) {
         context.check(
             std::ranges::find(selected_build->argv, "game_runner") != selected_build->argv.end(),
             "explicit target reaches only its package"
@@ -288,7 +308,6 @@ KAIXA_TEST(inline_packages_share_one_cmake_project) {
         "resolver = \"cmake\"\n"
         "\n"
         "[package-set]\n"
-        "default = [\"logging\"]\n"
         "\n"
         "[dependencies]\n"
         "nameof = \"1\"\n"
@@ -396,7 +415,7 @@ KAIXA_TEST(export_project_builds_installs_and_is_consumed_without_kaixa_state) {
         kaixa::ProcessRequest request;
         request.argv = std::move(arguments);
         request.working_directory = workspace.path();
-        request.capture_output = true;
+        request.output = kaixa::ProcessOutputMode::capture;
         const auto result = kaixa::run_process(request);
         context.check(result.has_value() && result->succeeded(), description);
         if (!result)
@@ -517,7 +536,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     context.check(math.has_value(), "managed dependency exists");
     context.check(assets.has_value(), "opaque dependency exists");
     if (assets)
-        context.check((*graph)[*assets].kind == kaixa::PackageKind::opaque, "assets are opaque");
+        context.check((*graph)[*assets].is_opaque(), "assets are opaque");
 
     const auto order = graph->build_order();
     context.check(order.has_value(), "workspace has an order");
@@ -532,14 +551,15 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "workspace example plans");
     if (plan) {
-        context.check_equal(plan->actions().size(), std::size_t{2}, "one composed CMake build");
+        context.check_equal(plan->action_count(), std::size_t{2}, "one composed CMake build");
         context.check_equal(
             plan->generated_files().size(),
             std::size_t{4},
             "variant metadata, state integration, portable integration and File API query"
         );
-        if (plan->actions().size() == 2 && !plan->generated_files().empty()) {
-            context.check_equal(plan->actions()[0].description, std::string("configure test_source_app"), "root is configured once");
+        if (plan->action_count() == 2 && !plan->generated_files().empty()) {
+            context
+                .check_equal(plan->synchronization()[0].description, std::string("configure test_source_app"), "root is configured once");
             const auto integration = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& generated) {
                 return generated.path.filename() == "dependencies.cmake";
             });
@@ -548,7 +568,7 @@ KAIXA_TEST(source_dependency_workspace_models_managed_and_opaque_packages) {
                 context.check_contains(integration->content, "add_subdirectory", "source dependency is composed");
             }
 
-            const std::vector<std::string> configure = plan->actions()[0].argv;
+            const std::vector<std::string> configure = plan->synchronization()[0].argv;
             context.check(
                 std::ranges::find_if(
                     configure,
@@ -575,28 +595,26 @@ KAIXA_TEST(package_dependency_workspace_uses_install_and_find_package) {
     if (!plan)
         return;
 
-    context.check_equal(plan->actions().size(), std::size_t{5}, "dependency installs before app");
-    if (plan->actions().size() != 5)
+    context.check_equal(plan->action_count(), std::size_t{5}, "dependency installs before app");
+    if (plan->action_count() != 5)
         return;
 
-    context.check_equal(plan->actions()[2].description, std::string("install test_package_math"), "provider is installed");
-    context.check_equal(plan->actions()[3].description, std::string("configure test_package_app"), "consumer configures after provider");
-    for (std::size_t index = 0; index < 4; ++index) {
-        context.check(
-            plan->actions()[index].stage == kaixa::ActionStage::synchronize,
-            "provider preparation and consumer configuration synchronize"
-        );
-    }
-
-    context.check(plan->actions()[4].stage == kaixa::ActionStage::build, "consumer compilation stays in the build stage");
+    context.check_equal(plan->synchronization().size(), std::size_t{4}, "provider preparation and consumer configuration synchronize");
+    context.check_equal(plan->builds().size(), std::size_t{1}, "consumer compilation stays in the build phase");
+    context.check_equal(plan->synchronization()[2].description, std::string("install test_package_math"), "provider is installed");
+    context.check_equal(
+        plan->synchronization()[3].description,
+        std::string("configure test_package_app"),
+        "consumer configures after provider"
+    );
 
     const std::string artifact_root = (environment.state_root / "cache" / "cmake").string();
-    const std::optional<std::string>& provider_artifact = plan->actions()[2].configured_artifact;
+    const std::optional<std::string>& provider_artifact = plan->synchronization()[2].configured_artifact;
     context.check(provider_artifact.has_value(), "provider install identifies its configured artifact");
     if (!provider_artifact)
         return;
 
-    const std::vector<std::string> configure = plan->actions()[3].argv;
+    const std::vector<std::string> configure = plan->synchronization()[3].argv;
     context.check(
         std::ranges::find_if(
             configure,
@@ -618,7 +636,7 @@ namespace {
         const kaixa::Graph& graph,
         const kaixa::ExtensionRegistry& registry,
         const kaixa::BuildEnvironment& environment,
-        const kaixa::BuildPlan& plan,
+        const kaixa::ExecutionPlan& plan,
         const kaixa::GeneratedFile& generated
     ) {
         const auto run_targets = kaixa::discover_run_targets(graph, registry, environment);
@@ -638,11 +656,10 @@ namespace {
         const auto run_plan = kaixa::plan_run(graph, registry, environment, "test_generated");
         context.check(run_plan.has_value(), "run target plans");
         if (run_plan) {
-            const auto build = std::ranges::find_if(run_plan->actions(), [](const kaixa::Action& action) {
-                return action.description == "build selected targets for test_generated";
-            });
-            context.check(build != run_plan->actions().end(), "run plan has a build action");
-            if (build != run_plan->actions().end()) {
+            const std::vector<kaixa::Action> run_actions = kaixa::testing::all_actions(*run_plan);
+            const kaixa::Action* build = kaixa::testing::find_action(run_actions, "build selected targets for test_generated");
+            context.check(build != nullptr, "run plan has a build action");
+            if (build != nullptr) {
                 context.check(
                     std::ranges::find(build->argv, "--target") != build->argv.end()
                         && std::ranges::find(build->argv, "test_generated") != build->argv.end(),
@@ -703,7 +720,7 @@ namespace {
             );
             context.check(
                 std::ranges::any_of(
-                    changed_variant->actions(),
+                    kaixa::testing::all_actions(*changed_variant),
                     [](const kaixa::Action& action) { return action.description == "reset test_generated"; }
                 ),
                 "incompatible CMake state plans a private build reset"
@@ -724,7 +741,7 @@ namespace {
                 context.check(state.has_value(), "configured project can be checked");
                 if (state) {
                     context.check(
-                        state->actions.front().state == kaixa::ActionState::current,
+                        state->synchronization.front().state == kaixa::ActionState::current,
                         "CMake File API reports configuration as current"
                     );
                 }
@@ -738,7 +755,7 @@ namespace {
                 context.check(state.has_value(), "changed CMake input can be checked");
                 if (state) {
                     context.check(
-                        state->actions.front().state == kaixa::ActionState::required,
+                        state->synchronization.front().state == kaixa::ActionState::required,
                         "CMake File API detects configuration input changes"
                     );
                 }
@@ -765,23 +782,23 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     if (!plan)
         return;
 
-    context.check_equal(plan->actions().size(), std::size_t{3}, "configure, build and test actions");
-    const auto build_action = std::ranges::find_if(plan->actions(), [&](const kaixa::Action& action) {
-        return action.package == graph->roots().front() && action.stage == kaixa::ActionStage::build;
+    context.check_equal(plan->action_count(), std::size_t{3}, "configure, build and test actions");
+    const std::span<const kaixa::Action> builds = plan->builds();
+    const auto build_action = std::ranges::find_if(builds, [&](const kaixa::Action& action) {
+        return action.package == graph->roots().front();
     });
-    context.check(build_action != plan->actions().end(), "root build action is identifiable");
-    if (build_action != plan->actions().end()) {
+    context.check(build_action != builds.end(), "root build action is identifiable");
+    if (build_action != builds.end()) {
         context.check(
             std::ranges::find(build_action->argv, "test_generated") != build_action->argv.end(),
             "selected test target restricts the build"
         );
     }
 
-    const auto test_action = std::ranges::find_if(plan->actions(), [](const kaixa::Action& action) {
-        return action.stage == kaixa::ActionStage::test;
-    });
-    context.check(test_action != plan->actions().end(), "CTest action exists");
-    if (test_action != plan->actions().end()) {
+    const std::span<const kaixa::Action> test_actions = plan->tests();
+    const auto test_action = test_actions.begin();
+    context.check(!test_actions.empty(), "CTest action exists");
+    if (!test_actions.empty()) {
         context.check(std::ranges::find(test_action->argv, "gener") != test_action->argv.end(), "test name filter reaches CTest");
         context.check(
             std::ranges::find(test_action->argv, "^kaixa\\.target:test_generated$") != test_action->argv.end(),
@@ -794,11 +811,10 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
     const auto list_plan = kaixa::plan_tests(*graph, registry, environment, list_request);
     context.check(list_plan.has_value(), "generated project test list plans");
     if (list_plan) {
-        const auto list_action = std::ranges::find_if(list_plan->actions(), [](const kaixa::Action& action) {
-            return action.stage == kaixa::ActionStage::test;
-        });
-        context.check(list_action != list_plan->actions().end(), "CTest list action exists");
-        if (list_action != list_plan->actions().end()) {
+        const std::span<const kaixa::Action> list_actions = list_plan->tests();
+        const auto list_action = list_actions.begin();
+        context.check(!list_actions.empty(), "CTest list action exists");
+        if (!list_actions.empty()) {
             context.check(std::ranges::find(list_action->argv, "--show-only") != list_action->argv.end(), "CTest receives list mode");
             context.check(
                 std::ranges::find(list_action->argv, "--output-on-failure") == list_action->argv.end(),
@@ -827,7 +843,7 @@ KAIXA_TEST(generated_project_workspace_builds_from_kaixa_toml) {
         context.check_contains(metadata->content, "profile = \"debug\"", "variant profile");
         context.check(
             std::ranges::any_of(
-                plan->actions(),
+                plan->synchronization(),
                 [&](const kaixa::Action& action) {
                     return action.description == "configure test_generated"
                         && std::ranges::find(action.inputs, metadata->path) != action.inputs.end();
@@ -1010,7 +1026,7 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
     }
 
     const kaixa::PackageNode& root = (*graph)[graph->roots().front()];
-    const kaixa::Manifest& manifest = *root.manifest;
+    const kaixa::Manifest& manifest = *root.manifest();
     context.check_equal(manifest.targets.size(), std::size_t{1}, "inline declaration is preserved");
     context.check_equal(root.targets.size(), std::size_t{5}, "targets are normalized");
     context.check(
@@ -1095,11 +1111,10 @@ KAIXA_TEST(package_targets_can_be_inline_or_split_into_manifests) {
     const auto test_plan = kaixa::plan_tests(*graph, registry, environment, {});
     context.check(test_plan.has_value(), "official tests plan");
     if (test_plan) {
-        const auto build = std::ranges::find_if(test_plan->actions(), [](const kaixa::Action& action) {
-            return action.stage == kaixa::ActionStage::build;
-        });
-        context.check(build != test_plan->actions().end(), "test build action exists");
-        if (build != test_plan->actions().end()) {
+        const std::span<const kaixa::Action> test_builds = test_plan->builds();
+        const auto build = test_builds.begin();
+        context.check(!test_builds.empty(), "test build action exists");
+        if (!test_builds.empty()) {
             context.check(std::ranges::find(build->argv, "app_tests") != build->argv.end(), "test command builds the excluded test target");
         }
 
@@ -1138,9 +1153,11 @@ KAIXA_TEST(target_matrices_expand_names_and_resolver_values) {
 
     context.check_equal(root.targets[0].name.value_or(""), std::string("matrix.64"), "first matrix target name");
     context.check_equal(root.targets[1].name.value_or(""), std::string("matrix.128"), "second matrix target name");
-    const auto definition = std::ranges::find(root.targets[0].definitions, std::string_view{"MATRIX_VALUE"}, &kaixa::TableEntry::key);
+    const kaixa::Value* matrix_options = root.targets[0].resolver_options ? &*root.targets[0].resolver_options : nullptr;
+    const kaixa::Value* matrix_definitions = matrix_options ? matrix_options->find("defines") : nullptr;
+    const kaixa::Value* matrix_value = matrix_definitions ? matrix_definitions->find("MATRIX_VALUE") : nullptr;
     context.check(
-        definition != root.targets[0].definitions.end() && definition->value.as_string() && *definition->value.as_string() == "64",
+        matrix_value != nullptr && matrix_value->as_string() && *matrix_value->as_string() == "64",
         "matrix value reaches target definitions"
     );
 }

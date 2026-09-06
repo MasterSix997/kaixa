@@ -103,7 +103,7 @@ namespace kaixa {
         return std::unexpected(error("multiple runnable targets are available").add_note("select one with `--target`: " + choices));
     }
 
-    Result<BuildPlan> plan_run(
+    Result<ExecutionPlan> plan_run(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,

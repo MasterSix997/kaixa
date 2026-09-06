@@ -7,6 +7,7 @@
 #include <kaixa/foundation/diagnostic.hpp>
 #include <kaixa/foundation/process.hpp>
 #include <kaixa/model/graph.hpp>
+#include <kaixa/model/policy.hpp>
 
 #include <cstddef>
 #include <memory>
@@ -71,6 +72,7 @@ namespace kaixa {
         virtual ~Resolver() = default;
 
         [[nodiscard]] virtual ResolverInfo info() const = 0;
+        [[nodiscard]] virtual std::span<const PolicyDefinition> policies() const { return {}; }
         [[nodiscard]] virtual std::unique_ptr<ResolverSession> start_session(const Graph& graph) const = 0;
         [[nodiscard]] virtual Result<void> plan(
             const Graph& graph,
@@ -79,7 +81,7 @@ namespace kaixa {
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
             const BuildRequest& request,
-            BuildPlan& plan,
+            ExecutionPlan& plan,
             ResolverSession& session
         ) const = 0;
 
@@ -90,7 +92,7 @@ namespace kaixa {
             const BuildEnvironment& environment,
             std::span<const ConfiguredPackageInstance> instances,
             const TestRequest& request,
-            BuildPlan& plan,
+            ExecutionPlan& plan,
             ResolverSession& session
         ) const = 0;
 

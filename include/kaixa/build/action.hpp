@@ -16,13 +16,6 @@ namespace kaixa {
         unknown
     };
 
-    enum class ActionStage {
-        synchronize,
-        build,
-        task,
-        test
-    };
-
     struct Action {
         Action() = default;
 
@@ -33,7 +26,7 @@ namespace kaixa {
             std::vector<std::filesystem::path> action_inputs,
             std::vector<std::filesystem::path> action_outputs,
             std::optional<ActionState> known_state = std::nullopt,
-            const ActionStage action_stage = ActionStage::build
+            const ProcessOutputMode action_output = ProcessOutputMode::inherit
         )
             : description(std::move(action_description))
             , argv(std::move(action_argv))
@@ -41,7 +34,7 @@ namespace kaixa {
             , inputs(std::move(action_inputs))
             , outputs(std::move(action_outputs))
             , checked_state(known_state)
-            , stage(action_stage) {}
+            , output(action_output) {}
 
         std::string description;
         std::vector<std::string> argv;
@@ -52,6 +45,6 @@ namespace kaixa {
         std::optional<ActionState> checked_state;
         std::optional<PackageId> package;
         std::optional<std::string> configured_artifact;
-        ActionStage stage = ActionStage::build;
+        ProcessOutputMode output = ProcessOutputMode::inherit;
     };
 }

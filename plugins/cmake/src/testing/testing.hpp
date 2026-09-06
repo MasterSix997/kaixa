@@ -1,6 +1,6 @@
 #pragma once
 
-#include "configuration.hpp"
+#include <model/project_model.hpp>
 
 #include <kaixa/build/plan.hpp>
 #include <kaixa/extension/resolver.hpp>
@@ -27,6 +27,6 @@ namespace kaixa::plugin::cmake::detail {
         const PackageNode& package,
         const TestPlanRoute& route,
         const TestRequest& request,
-        BuildPlan& plan
+        ExecutionPlan& plan
     );
 }

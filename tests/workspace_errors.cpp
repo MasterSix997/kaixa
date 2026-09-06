@@ -103,10 +103,10 @@ KAIXA_TEST(cmake_options_select_the_source_and_build_arguments_select_the_genera
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", std::move(configuration)};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "configured CMake package plans");
-    if (!plan || plan->actions().empty())
+    if (!plan || plan->synchronization().empty())
         return;
 
-    const std::span<const kaixa::Action> actions = plan->actions();
+    const std::span<const kaixa::Action> actions = plan->synchronization();
     const std::vector<std::string>& command = actions.front().argv;
     const std::filesystem::path source = (*graph)[graph->roots().front()].directory / "project";
     context.check(std::ranges::find(command, "Ninja") != command.end(), "requested generator is forwarded");
@@ -203,10 +203,10 @@ KAIXA_TEST(cmake_forwards_compilers_toolchain_and_arguments) {
     const kaixa::BuildEnvironment environment{root.path(), root.path() / "out", std::move(configuration)};
     const auto plan = kaixa::plan_build(*graph, registry, environment);
     context.check(plan.has_value(), "CMake configure options plan");
-    if (!plan || plan->actions().empty())
+    if (!plan || plan->synchronization().empty())
         return;
 
-    const std::vector<std::string> command = plan->actions().front().argv;
+    const std::vector<std::string> command = plan->synchronization().front().argv;
     for (
         const std::string& expected: {std::string("Ninja"),
             std::string("-DCMAKE_C_COMPILER=clang"),
@@ -248,15 +248,12 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
     if (!plan)
         return;
 
-    const auto configure = std::ranges::find_if(plan->actions(), [](const kaixa::Action& action) {
-        return action.description == "configure test_package_app";
-    });
-    const auto install = std::ranges::find_if(plan->actions(), [](const kaixa::Action& action) {
-        return action.description == "install test_package_math";
-    });
-    context.check(configure != plan->actions().end(), "consumer configure action exists");
-    context.check(install != plan->actions().end(), "dependency install action exists");
-    if (configure != plan->actions().end()) {
+    const std::span<const kaixa::Action> synchronization = plan->synchronization();
+    const kaixa::Action* configure = kaixa::testing::find_action(synchronization, "configure test_package_app");
+    const kaixa::Action* install = kaixa::testing::find_action(synchronization, "install test_package_math");
+    context.check(configure != nullptr, "consumer configure action exists");
+    context.check(install != nullptr, "dependency install action exists");
+    if (configure != nullptr) {
         context.check(
             std::ranges::find(configure->argv, "-DROUTED_CONFIGURE=ON") != configure->argv.end()
                 && std::ranges::find(configure->argv, "-DCLI_CONFIGURE=ON") != configure->argv.end(),
@@ -264,7 +261,7 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
         );
         context.check(std::ranges::find(configure->argv, "--verbose") == configure->argv.end(), "configure excludes build arguments");
     }
-    if (install != plan->actions().end()) {
+    if (install != nullptr) {
         context.check(
             std::ranges::find(install->argv, "--strip") != install->argv.end()
                 && std::ranges::find(install->argv, "--component") != install->argv.end(),
@@ -272,7 +269,7 @@ KAIXA_TEST(cmake_routes_phase_arguments_and_parallel_jobs) {
         );
     }
 
-    for (const kaixa::Action& action: plan->actions()) {
+    for (const kaixa::Action& action: kaixa::testing::all_actions(*plan)) {
         if (!action.description.starts_with("build "))
             continue;
 

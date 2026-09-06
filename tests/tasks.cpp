@@ -205,9 +205,9 @@ KAIXA_TEST(task_planning_orders_dependencies_and_executes_incrementally) {
         context.fail(kaixa::format_diagnostic(plan.error()));
         return;
     }
-    context.check_equal(plan->actions().size(), std::size_t{2}, "one action is created per command");
-    context.check(plan->actions().front().stage == kaixa::ActionStage::task, "custom command has the task stage");
-    context.check_equal(plan->actions().front().environment.front().value, std::string("debug"), "environment values are interpolated");
+    context.check_equal(plan->action_count(), std::size_t{2}, "one action is created per command");
+    context.check_equal(plan->tasks().size(), std::size_t{2}, "custom commands live in the task phase");
+    context.check_equal(plan->tasks().front().environment.front().value, std::string("debug"), "environment values are interpolated");
 
     const auto first = kaixa::execute(*plan);
     context.check(first.has_value(), "custom task closure executes");
@@ -320,9 +320,10 @@ KAIXA_TEST(task_target_interpolation_requests_the_matching_build) {
         return;
     }
 
-    const auto task = std::ranges::find(plan->actions(), kaixa::ActionStage::task, &kaixa::Action::stage);
-    context.check(task != plan->actions().end(), "custom action follows the target build plan");
-    if (task != plan->actions().end()) {
+    const std::span<const kaixa::Action> task_actions = plan->tasks();
+    const auto task = task_actions.begin();
+    context.check(!task_actions.empty(), "custom action follows the target build plan");
+    if (!task_actions.empty()) {
         context.check_equal(task->argv.front(), executable.string(), "target interpolation resolves the product artifact");
         const auto build_root = std::ranges::find(task->environment, std::string("BUILD_ROOT"), &kaixa::EnvironmentVariable::name);
         context.check(

@@ -420,7 +420,7 @@ namespace kaixa {
             std::string_view selected;
         };
 
-        Result<void> append_command_action(BuildPlan& plan, const CommandPlanningContext& context, const TaskDefinition& task) {
+        Result<void> append_command_action(ExecutionPlan& plan, const CommandPlanningContext& context, const TaskDefinition& task) {
             const Interpolator interpolator{context.graph, context.environment, context.instances, plan.outputs(), context.products, task};
             std::filesystem::path working_directory = task.declaration.source.parent_path();
             if (working_directory.empty())
@@ -508,8 +508,7 @@ namespace kaixa {
                 action.configured_artifact = instance->artifact;
             }
 
-            action.stage = ActionStage::task;
-            plan.add(std::move(action));
+            plan.task(std::move(action));
             return {};
         }
     }
@@ -518,10 +517,10 @@ namespace kaixa {
         std::vector<TaskDefinition> result;
         for (const PackageId root: graph.roots()) {
             const PackageNode& package = graph[root];
-            if (!package.manifest)
+            if (!package.manifest())
                 continue;
 
-            for (const TaskDeclaration& declaration: package.manifest->commands) {
+            for (const TaskDeclaration& declaration: package.manifest()->commands) {
                 auto appended = append_task(result, package, declaration, std::nullopt);
                 if (!appended)
                     return std::unexpected(appended.error());
@@ -557,7 +556,7 @@ namespace kaixa {
         return result;
     }
 
-    Result<BuildPlan> plan_task(
+    Result<ExecutionPlan> plan_task(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
@@ -569,7 +568,7 @@ namespace kaixa {
         if (preparation.tasks.empty())
             return std::unexpected(error("task preparation contains no commands"));
 
-        BuildPlan plan;
+        ExecutionPlan plan;
         if (!preparation.build.packages.empty()) {
             auto build = plan_build(graph, registry, environment, preparation.build, instances);
             if (!build)
@@ -580,7 +579,11 @@ namespace kaixa {
 
         std::vector<ConfiguredPackageInstance> configured_instances;
         if (instances.empty()) {
-            auto configured = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+            auto configured = configure_package_instances(
+                graph,
+                {environment.configuration.profile, host_target_os()},
+                registry.policy_schema()
+            );
             if (!configured)
                 return std::unexpected(configured.error());
 

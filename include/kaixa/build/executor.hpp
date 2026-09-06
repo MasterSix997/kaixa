@@ -15,6 +15,15 @@ namespace kaixa {
         different
     };
 
+    // Names a phase when reporting on a plan. Actions never carry it: a plan's phases are its
+    // containers, so this only labels results.
+    enum class ExecutionPhase {
+        synchronize,
+        build,
+        task,
+        test
+    };
+
     struct GeneratedFileCheck {
         std::filesystem::path path;
         GeneratedFileState state = GeneratedFileState::current;
@@ -23,14 +32,17 @@ namespace kaixa {
     struct ActionCheck {
         std::string description;
         ActionState state = ActionState::unknown;
-        ActionStage stage = ActionStage::build;
     };
 
     struct CheckReport {
         std::vector<GeneratedFileCheck> generated_files;
-        std::vector<ActionCheck> actions;
+        std::vector<ActionCheck> synchronization;
+        std::vector<ActionCheck> build;
+        std::vector<ActionCheck> tasks;
+        std::vector<ActionCheck> tests;
 
         [[nodiscard]] bool requires_synchronization() const noexcept;
+        [[nodiscard]] std::span<const ActionCheck> phase(ExecutionPhase phase) const noexcept;
     };
 
     struct GenerationReport {
@@ -43,9 +55,9 @@ namespace kaixa {
         std::size_t executed = 0;
     };
 
-    [[nodiscard]] Result<CheckReport> check(const BuildPlan& plan);
-    [[nodiscard]] Result<GenerationReport> generate(const BuildPlan& plan);
-    [[nodiscard]] Result<ExecutionReport> execute_actions(const BuildPlan& plan, ActionStage stage);
-    [[nodiscard]] Result<ExecutionReport> execute(const BuildPlan& plan);
-    [[nodiscard]] Result<ExecutionReport> test(const BuildPlan& plan);
+    [[nodiscard]] Result<CheckReport> check(const ExecutionPlan& plan);
+    [[nodiscard]] Result<GenerationReport> generate(const ExecutionPlan& plan);
+    [[nodiscard]] Result<ExecutionReport> execute_actions(const ExecutionPlan& plan, ExecutionPhase phase);
+    [[nodiscard]] Result<ExecutionReport> execute(const ExecutionPlan& plan);
+    [[nodiscard]] Result<ExecutionReport> test(const ExecutionPlan& plan);
 }

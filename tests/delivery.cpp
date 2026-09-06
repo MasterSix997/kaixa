@@ -341,7 +341,7 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         return;
 
     const kaixa::PackageNode& package = resolution->graph[*component];
-    context.check(package.kind == kaixa::PackageKind::adopted, "manifest-free source is represented as adopted");
+    context.check(package.is_adopted(), "manifest-free source is represented as adopted");
     context.check_equal(package.directory, workspace.path() / "vendor/Build", "consumer path selects the external project");
     context.check(resolution->graph.find_by_name("helper").has_value(), "adopted source feature activates its package dependency");
     context.check(
@@ -543,8 +543,8 @@ KAIXA_TEST(source_only_packages_supply_raw_dependency_sources_without_a_manifest
     if (!raw)
         return;
 
-    context.check(resolution->graph[*raw].kind == kaixa::PackageKind::opaque, "raw source remains opaque");
-    context.check(!resolution->graph[*raw].manifest.has_value(), "raw source does not require a manifest");
+    context.check(resolution->graph[*raw].is_opaque(), "raw source remains opaque");
+    context.check(resolution->graph[*raw].manifest() == nullptr, "raw source does not require a manifest");
     context.check_equal(resolution->graph[*raw].directory, workspace.path() / "vendor", "provider-relative source is materialized");
 
     const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
@@ -732,13 +732,27 @@ KAIXA_TEST(resources_are_not_part_of_the_product_model) {
     );
     workspace.write("library.cpp", "int value() { return 0; }\n");
 
-    const auto graph = kaixa::load_workspace(workspace.path());
+    kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const auto graph = kaixa::load_workspace(workspace.path(), &registry);
     context.check(graph.has_value(), "workspace remains descriptive until product realization");
     if (!graph)
         return;
 
     const auto package = kaixa::realize_package(*graph, graph->roots().front());
-    context.check(!package.has_value(), "resources is rejected");
-    if (!package)
-        context.check_contains(package.error().message, "resources", "diagnostic identifies the removed field");
+    context.check(package.has_value(), "the core carries unknown product keys without interpreting them");
+    if (!package) {
+        context.fail(kaixa::format_diagnostic(package.error()));
+        return;
+    }
+
+    context.check(
+        package->products.front().resolver_options.find("resources") != nullptr,
+        "the unknown key reaches the resolver that owns the product schema"
+    );
+
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(!plan.has_value(), "resources is rejected by its owner");
+    if (!plan)
+        context.check_contains(kaixa::format_diagnostic(plan.error()), "resources", "diagnostic identifies the removed field");
 }

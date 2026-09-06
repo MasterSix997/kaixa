@@ -3,6 +3,7 @@
 #include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/foundation/hash.hpp>
 #include <kaixa/foundation/process.hpp>
+#include <kaixa/package/archive_backend.hpp>
 #include <kaixa/source/cache.hpp>
 
 #include <algorithm>
@@ -78,7 +79,7 @@ namespace kaixa::plugin::remote {
         }
 
         Result<void> run_checked(ProcessRequest request, const std::string_view operation) {
-            request.capture_output = true;
+            request.output = ProcessOutputMode::capture;
             auto result = run_process(request);
             if (!result)
                 return std::unexpected(result.error());
@@ -287,7 +288,10 @@ namespace kaixa::plugin::remote {
                             return std::unexpected(cloned.error());
 
                         auto resolved = run_process(
-                            {{"git", "-C", destination.string(), "rev-parse", "--verify", revision + "^{commit}"}, {}, {}, true}
+                            {{"git", "-C", destination.string(), "rev-parse", "--verify", revision + "^{commit}"},
+                                {},
+                                {},
+                                ProcessOutputMode::capture}
                         );
                         if (!resolved)
                             return std::unexpected(resolved.error());
@@ -393,66 +397,33 @@ namespace kaixa::plugin::remote {
             const std::filesystem::path& destination,
             const std::string& strip_prefix
         ) {
-            auto listing = run_process({{"cmake", "-E", "tar", "tf", archive.string()}, {}, {}, true});
-            if (!listing)
-                return std::unexpected(listing.error());
+            const ArchiveBackend& backend = default_archive_backend();
+            auto entries = backend.list_archive(archive);
+            if (!entries)
+                return std::unexpected(entries.error());
 
-            if (!listing->succeeded())
-                return std::unexpected(error("cannot list archive `" + archive.string() + "`").add_note(listing->output));
+            if (entries->size() > 250'000)
+                return std::unexpected(error("archive contains more than 250000 entries"));
 
-            std::size_t begin = 0;
-            std::size_t entry_count = 0;
-            while (begin < listing->output.size()) {
-                const std::size_t end = listing->output.find('\n', begin);
-                std::string entry = listing->output.substr(begin, end == std::string::npos ? end : end - begin);
-                if (!entry.empty() && entry.back() == '\r')
-                    entry.pop_back();
-
-                if (!entry.empty() && !safe_archive_entry(entry))
-                    return std::unexpected(error("archive contains an unsafe path `" + entry + "`"));
-
-                ++entry_count;
-                if (entry_count > 250'000)
-                    return std::unexpected(error("archive contains more than 250000 entries"));
-
-                if (end == std::string::npos)
-                    break;
-
-                begin = end + 1;
-            }
-
-            auto verbose = run_process({{"cmake", "-E", "tar", "tvf", archive.string()}, {}, {}, true});
-            if (!verbose)
-                return std::unexpected(verbose.error());
-
-            if (!verbose->succeeded())
-                return std::unexpected(error("cannot inspect archive entry types").add_note(verbose->output));
-
-            begin = 0;
-            while (begin < verbose->output.size()) {
-                const std::size_t end = verbose->output.find('\n', begin);
-                std::string_view entry(verbose->output.data() + begin, (end == std::string::npos ? verbose->output.size() : end) - begin);
-                if (!entry.empty() && (entry.front() == 'l' || entry.front() == 'h'))
+            for (const ArchiveEntry& entry: *entries) {
+                if (entry.kind == ArchiveEntryKind::link)
                     return std::unexpected(error("archive contains a symbolic or hard link, which is not allowed"));
 
-                if (end == std::string::npos)
-                    break;
-
-                begin = end + 1;
+                if (!safe_archive_entry(entry.path))
+                    return std::unexpected(error("archive contains an unsafe path `" + entry.path + "`"));
             }
-
             const std::filesystem::path extraction = strip_prefix.empty() ? destination : destination.parent_path() / "archive-root";
             std::error_code failure;
             std::filesystem::create_directories(extraction, failure);
             if (failure)
                 return std::unexpected(error("cannot create archive extraction directory: " + failure.message()));
 
-            auto extracted = run_checked({{"cmake", "-E", "tar", "xf", archive.string()}, extraction}, "archive extraction");
+            auto extracted = backend.extract_archive(archive, extraction);
             if (!extracted)
                 return std::unexpected(extracted.error());
 
             std::uintmax_t extracted_size = 0;
-            entry_count = 0;
+            std::size_t entry_count = 0;
             for (
                 std::filesystem::recursive_directory_iterator iterator(extraction, failure), end; iterator != end;
                 iterator.increment(failure)

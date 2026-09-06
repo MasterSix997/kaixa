@@ -1,16 +1,23 @@
 #pragma once
 
+#include <kaixa/build/plan.hpp>
 #include <kaixa/model/manifest.hpp>
 
 #include <cstddef>
 #include <filesystem>
 #include <iosfwd>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace kaixa::testing {
+    // Assertions that do not care which phase an action belongs to. Actions come back in the
+    // order the executor runs them: synchronize, build, task, test.
+    [[nodiscard]] std::vector<Action> all_actions(const ExecutionPlan& plan);
+    [[nodiscard]] const Action* find_action(std::span<const Action> actions, std::string_view description);
+
     class TestContext {
     public:
         TestContext(std::string_view name, std::ostream& out);

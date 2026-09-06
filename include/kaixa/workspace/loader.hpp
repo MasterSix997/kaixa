@@ -61,5 +61,5 @@ namespace kaixa {
         const std::filesystem::path& start,
         std::span<const std::string> selected_packages = {}
     );
-    [[nodiscard]] Result<Graph> load_workspace(const std::filesystem::path& start);
+    [[nodiscard]] Result<Graph> load_workspace(const std::filesystem::path& start, ExtensionRegistry* extensions = nullptr);
 }

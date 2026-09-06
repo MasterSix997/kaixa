@@ -84,7 +84,7 @@ namespace kaixa::cli::detail {
 
     bool resolver_is_active(const Graph& graph, const std::string_view resolver) {
         return std::ranges::any_of(graph.nodes(), [&](const PackageNode& package) {
-            return has_build_semantics(package.kind) && package.resolver == resolver;
+            return package.has_build_semantics() && package.resolver == resolver;
         });
     }
 

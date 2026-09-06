@@ -7,7 +7,7 @@
 #include <kaixa/model/graph.hpp>
 
 namespace kaixa {
-    [[nodiscard]] Result<BuildPlan> plan_build(
+    [[nodiscard]] Result<ExecutionPlan> plan_build(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,
@@ -22,7 +22,7 @@ namespace kaixa {
         std::span<const ConfiguredPackageInstance> instances = {}
     );
 
-    [[nodiscard]] Result<BuildPlan> plan_tests(
+    [[nodiscard]] Result<ExecutionPlan> plan_tests(
         const Graph& graph,
         const ExtensionRegistry& registry,
         const BuildEnvironment& environment,

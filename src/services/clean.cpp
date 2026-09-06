@@ -61,12 +61,16 @@ namespace kaixa {
     ) {
         std::vector<std::pair<Resolver*, std::unique_ptr<ResolverSession>>> sessions;
         CleanPlan plan;
-        auto instances = configure_package_instances(graph, {environment.configuration.profile, host_target_os()});
+        auto instances = configure_package_instances(
+            graph,
+            {environment.configuration.profile, host_target_os()},
+            registry.policy_schema()
+        );
         if (!instances)
             return std::unexpected(instances.error());
 
         for (const PackageNode& package: graph.nodes()) {
-            if (package.kind == PackageKind::opaque)
+            if (package.is_opaque())
                 continue;
 
             Resolver* resolver = registry.find_resolver(package.resolver);

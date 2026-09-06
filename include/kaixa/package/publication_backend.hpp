@@ -19,12 +19,6 @@ namespace kaixa {
     public:
         virtual ~PublicationBackend() = default;
 
-        [[nodiscard]] virtual Result<void> create_archive(
-            const std::filesystem::path& contents,
-            const std::filesystem::path& destination
-        ) const = 0;
         [[nodiscard]] virtual Result<void> upload(const PackageUpload& request) const = 0;
     };
-
-    [[nodiscard]] const PublicationBackend& command_publication_backend();
 }

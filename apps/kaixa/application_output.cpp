@@ -4,8 +4,10 @@
 #include <kaixa/model/effective_product.hpp>
 
 #include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iostream>
+#include <span>
 #include <string>
 #include <system_error>
 
@@ -14,11 +16,11 @@ namespace kaixa::cli::detail {
         void print_package(std::ostream& output, const Graph& graph, const PackageDependencyEntry& entry, const bool verbose) {
             const PackageNode& package = graph[entry.package];
             output << std::string(entry.depth * 2, ' ') << package.name;
-            if (package.kind == PackageKind::opaque)
+            if (package.is_opaque())
                 output << " (opaque)";
             else {
                 output << " (" << package.resolver << ')';
-                if (package.kind == PackageKind::adopted)
+                if (package.is_adopted())
                     output << " [adopted]";
             }
 
@@ -95,14 +97,27 @@ namespace kaixa::cli::detail {
         return "unknown";
     }
 
-    std::string_view stage_name(const ActionStage stage) {
-        switch (stage) {
-        case ActionStage::synchronize: return "synchronize";
-        case ActionStage::build: return "build";
-        case ActionStage::task: return "task";
-        case ActionStage::test: return "test";
+    std::string_view phase_name(const ExecutionPhase phase) {
+        switch (phase) {
+        case ExecutionPhase::synchronize: return "synchronize";
+        case ExecutionPhase::build: return "build";
+        case ExecutionPhase::task: return "task";
+        case ExecutionPhase::test: return "test";
         }
         return "action";
+    }
+
+    // Phases always run in this order, so reports and listings walk them in it.
+    constexpr std::array execution_phases{ExecutionPhase::synchronize, ExecutionPhase::build, ExecutionPhase::task, ExecutionPhase::test};
+
+    std::span<const Action> plan_phase(const ExecutionPlan& plan, const ExecutionPhase phase) {
+        switch (phase) {
+        case ExecutionPhase::synchronize: return plan.synchronization();
+        case ExecutionPhase::build: return plan.builds();
+        case ExecutionPhase::task: return plan.tasks();
+        case ExecutionPhase::test: return plan.tests();
+        }
+        return {};
     }
 
     bool is_inside(const std::filesystem::path& path, const std::filesystem::path& directory) {
@@ -127,38 +142,40 @@ namespace kaixa::cli::detail {
         std::cout << name << ": " << display_path(path, workspace) << (path_exists(path) ? " [present]" : " [missing]") << '\n';
     }
 
-    Result<void> print_actions(const BuildPlan& plan, const bool synchronization_only) {
+    Result<void> print_actions(const ExecutionPlan& plan, const bool synchronization_only) {
         auto state = check(plan);
         if (!state)
             return std::unexpected(state.error());
 
-        for (std::size_t index = 0; index < plan.actions().size(); ++index) {
-            const Action& action = plan.actions()[index];
-            if (synchronization_only && action.stage != ActionStage::synchronize)
+        for (const ExecutionPhase phase: execution_phases) {
+            if (synchronization_only && phase != ExecutionPhase::synchronize)
                 continue;
 
-            if ((action.stage == ActionStage::synchronize || action.stage == ActionStage::task)
-                && state->actions[index].state == ActionState::current) {
-                continue;
+            const std::span<const Action> actions = plan_phase(plan, phase);
+            const std::span<const ActionCheck> checks = state->phase(phase);
+            const bool skips_current = phase == ExecutionPhase::synchronize || phase == ExecutionPhase::task;
+            for (std::size_t index = 0; index < actions.size(); ++index) {
+                if (skips_current && checks[index].state == ActionState::current)
+                    continue;
+
+                // Keep the normal command output at the Kaixa action level.  The
+                // concrete argv is available from `inspect actions --verbose`;
+                // printing it here made resolver, CMake and shell diagnostics
+                // appear as one confusing stream.
+                std::cout << actions[index].description << '\n';
             }
-
-            // Keep the normal command output at the Kaixa action level.  The
-            // concrete argv is available from `inspect actions --verbose`;
-            // printing it here made resolver, CMake and shell diagnostics
-            // appear as one confusing stream.
-            std::cout << action.description << '\n';
         }
 
         std::cout.flush();
         return {};
     }
 
-    void print_outputs(const BuildPlan& plan, const std::filesystem::path& workspace) {
+    void print_outputs(const ExecutionPlan& plan, const std::filesystem::path& workspace) {
         for (const BuildOutput& output: plan.outputs())
             std::cout << "artifact: " << display_path(output.path, workspace) << '\n';
     }
 
-    void inspect_outputs(const Graph& graph, const BuildPlan& plan, const std::filesystem::path& workspace) {
+    void inspect_outputs(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace) {
         if (plan.outputs().empty()) {
             std::cout << "no build outputs\n";
             return;
@@ -169,37 +186,45 @@ namespace kaixa::cli::detail {
         }
     }
 
-    Result<void> inspect_actions(const Graph& graph, const BuildPlan& plan, const std::filesystem::path& workspace, const bool verbose) {
+    Result<void> inspect_actions(
+        const Graph& graph,
+        const ExecutionPlan& plan,
+        const std::filesystem::path& workspace,
+        const bool verbose
+    ) {
         auto report = check(plan);
         if (!report)
             return std::unexpected(report.error());
 
-        if (plan.actions().empty()) {
+        if (plan.action_count() == 0) {
             std::cout << "no build actions\n";
             return {};
         }
 
-        for (std::size_t index = 0; index < plan.actions().size(); ++index) {
-            const Action& action = plan.actions()[index];
-            const ActionCheck& checked = report->actions[index];
-            std::cout << state_name(checked.state) << ' ' << stage_name(action.stage) << ' ';
-            if (action.package)
-                std::cout << graph[*action.package].name << ": ";
+        for (const ExecutionPhase phase: execution_phases) {
+            const std::span<const Action> actions = plan_phase(plan, phase);
+            const std::span<const ActionCheck> checks = report->phase(phase);
+            for (std::size_t index = 0; index < actions.size(); ++index) {
+                const Action& action = actions[index];
+                std::cout << state_name(checks[index].state) << ' ' << phase_name(phase) << ' ';
+                if (action.package)
+                    std::cout << graph[*action.package].name << ": ";
 
-            std::cout << action.description << '\n';
-            if (!verbose)
-                continue;
+                std::cout << action.description << '\n';
+                if (!verbose)
+                    continue;
 
-            std::cout << "  command: " << format_command(action.argv) << '\n';
-            std::cout << "  working directory: " << display_path(action.working_directory, workspace) << '\n';
-            if (action.configured_artifact)
-                std::cout << "  configured artifact: " << *action.configured_artifact << '\n';
+                std::cout << "  command: " << format_command(action.argv) << '\n';
+                std::cout << "  working directory: " << display_path(action.working_directory, workspace) << '\n';
+                if (action.configured_artifact)
+                    std::cout << "  configured artifact: " << *action.configured_artifact << '\n';
 
-            for (const std::filesystem::path& input: action.inputs)
-                std::cout << "  input: " << display_path(input, workspace) << '\n';
+                for (const std::filesystem::path& input: action.inputs)
+                    std::cout << "  input: " << display_path(input, workspace) << '\n';
 
-            for (const std::filesystem::path& output: action.outputs)
-                std::cout << "  output: " << display_path(output, workspace) << '\n';
+                for (const std::filesystem::path& output: action.outputs)
+                    std::cout << "  output: " << display_path(output, workspace) << '\n';
+            }
         }
         return {};
     }
@@ -270,7 +295,7 @@ namespace kaixa::cli::detail {
     Result<void> inspect_effective_targets(const Graph& graph, const BuildEnvironment& environment, const bool verbose) {
         bool any = false;
         for (const PackageNode& node: graph.nodes()) {
-            if (!node.manifest)
+            if (!node.manifest())
                 continue;
 
             auto package = realize_package(graph, node.id, {environment.configuration.profile, host_target_os()});
@@ -290,17 +315,11 @@ namespace kaixa::cli::detail {
                 for (const std::filesystem::path& source: product.sources.files)
                     std::cout << "    source: " << source.generic_string() << '\n';
 
-                for (const std::filesystem::path& source: product.dependency_source_files)
-                    std::cout << "    dependency-source: " << source.generic_string() << '\n';
-
-                for (const std::filesystem::path& header: product.public_headers.files)
-                    std::cout << "    public-header: " << header.generic_string() << '\n';
-
-                for (const TableEntry& definition: product.definitions)
-                    std::cout << "    define: " << definition.key << '\n';
-
-                for (const TableEntry& definition: product.public_definitions)
-                    std::cout << "    public-define: " << definition.key << '\n';
+                // the artifact interface belongs to the resolver, so list its options by key only
+                if (const std::vector<TableEntry>* options = product.resolver_options.as_table()) {
+                    for (const TableEntry& option: *options)
+                        std::cout << "    " << node.resolver << "-option: " << option.key << '\n';
+                }
 
                 for (const std::filesystem::path& runtime_file: product.runtime_files.files)
                     std::cout << "    runtime-file: " << runtime_file.generic_string() << '\n';

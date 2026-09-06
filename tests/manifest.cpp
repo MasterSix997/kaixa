@@ -44,7 +44,6 @@ KAIXA_TEST(manifest_normalizes_products_public_edges_features_and_inline_members
         "\n"
         "[package-set]\n"
         "name = \"workspace\"\n"
-        "default = [\"app\"]\n"
         "\n"
         "[public-dependencies]\n"
         "graphics = \"^2\"\n"
@@ -255,14 +254,24 @@ KAIXA_TEST(manifest_reads_inline_targets_and_external_target_references) {
     context.check(!manifest->targets[0].each_source, "singular test is grouped");
     context.check(manifest->targets[1].each_source, "plural benchmarks are per source");
     context.check(manifest->targets[0].resolver_options.has_value(), "resolver options are retained");
-    context.check_equal(manifest->targets[0].include_directories.front(), std::string("support"), "target include is retained");
-    context.check_equal(
-        manifest->targets[0].system_include_directories.front(),
-        std::string("vendor/include"),
-        "target system include is retained"
+    const kaixa::Value& target_options = *manifest->targets[0].resolver_options;
+    const auto first_string = [&](const std::string_view key) -> std::string {
+        const kaixa::Value* declared = target_options.find(key);
+        const std::vector<kaixa::Value>* values = declared ? declared->as_array() : nullptr;
+        if (!values || values->empty() || !values->front().as_string())
+            return {};
+
+        return *values->front().as_string();
+    };
+    context.check_equal(first_string("include"), std::string("support"), "target include reaches the resolver options");
+    context
+        .check_equal(first_string("system-include"), std::string("vendor/include"), "target system include reaches the resolver options");
+    const kaixa::Value* target_definitions = target_options.find("defines");
+    context.check(
+        target_definitions != nullptr && target_definitions->find("CASE_ROOT") != nullptr,
+        "target definition reaches the resolver options"
     );
-    context.check_equal(manifest->targets[0].definitions.front().key, std::string("CASE_ROOT"), "target definition is retained");
-    context.check_equal(manifest->targets[0].system_libraries.front(), std::string("threads"), "target system library is retained");
+    context.check_equal(first_string("system-libraries"), std::string("threads"), "target system library reaches the resolver options");
     context.check_equal(manifest->targets[0].dependencies.size(), std::size_t{1}, "target dependency count");
     context.check_equal(manifest->targets[0].dependencies.front().request.package, std::string("support"), "target dependency name");
 
@@ -320,8 +329,8 @@ KAIXA_TEST(package_targets_preserve_feature_requirements_for_selection) {
         return;
 
     const kaixa::PackageNode& app = graph->nodes().front();
-    context.check(app.manifest.has_value(), "managed package retains its manifest");
-    if (app.manifest && !app.targets.empty()) {
+    context.check(app.manifest() != nullptr, "managed package retains its manifest");
+    if (app.manifest() && !app.targets.empty()) {
         context.check_equal(app.targets.front().required_features.front(), std::string("graphics"), "selection requirement is retained");
     }
 }
@@ -426,22 +435,22 @@ KAIXA_TEST(workspace_orders_local_dependencies_and_plans_cmake) {
     if (!plan)
         return;
 
-    context.check_equal(plan->actions().size(), std::size_t{2}, "one composed configure and build");
+    context.check_equal(plan->action_count(), std::size_t{2}, "one composed configure and build");
     context.check_equal(
         plan->generated_files().size(),
         std::size_t{4},
         "variant metadata, state integration, portable integration and File API query"
     );
-    if (plan->actions().size() == 2) {
-        context.check(plan->actions()[0].stage == kaixa::ActionStage::synchronize, "configure synchronizes");
-        context.check(plan->actions()[1].stage == kaixa::ActionStage::build, "build stays explicit");
+    if (plan->action_count() == 2) {
+        context.check_equal(plan->synchronization().size(), std::size_t{1}, "configure synchronizes");
+        context.check_equal(plan->builds().size(), std::size_t{1}, "build stays explicit");
     }
 }
 
 KAIXA_TEST(graph_rejects_dependency_cycles) {
     kaixa::Graph graph;
-    const kaixa::PackageId first = graph.add({{}, "first", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
-    const kaixa::PackageId second = graph.add({{}, "second", {}, kaixa::PackageKind::managed, "cmake", std::nullopt, {}, {}, {}});
+    const kaixa::PackageId first = graph.add({{}, "first", {}, "cmake", kaixa::ManagedPackage{}});
+    const kaixa::PackageId second = graph.add({{}, "second", {}, "cmake", kaixa::ManagedPackage{}});
     graph[first].dependencies.push_back(second);
     graph[second].dependencies.push_back(first);
 

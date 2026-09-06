@@ -134,6 +134,7 @@ namespace kaixa {
         std::optional<Value> policy;
         std::optional<std::filesystem::path> provider_config;
         SourceLocation location;
+        SourceLocation defaults_location;
     };
 
     enum class PackageTargetKind {
@@ -172,10 +173,6 @@ namespace kaixa {
         std::map<std::string, std::vector<std::string>> required_dependency_features;
         std::vector<DependencyBinding> dependencies;
         FileSet sources;
-        std::vector<std::string> include_directories;
-        std::vector<std::string> system_include_directories;
-        std::vector<TableEntry> definitions;
-        std::vector<std::string> system_libraries;
         std::vector<std::string> arguments;
         bool discover = false;
         bool hidden = false;

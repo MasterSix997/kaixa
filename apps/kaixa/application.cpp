@@ -255,8 +255,8 @@ namespace kaixa::cli {
                 return 1;
             }
 
-            for (const ActionCheck& action: report->actions) {
-                if (action.stage == ActionStage::synchronize && action.state == ActionState::required)
+            for (const ActionCheck& action: report->synchronization) {
+                if (action.state == ActionState::required)
                     std::cout << "required synchronization: " << action.description << '\n';
             }
 

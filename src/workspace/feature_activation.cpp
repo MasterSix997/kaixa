@@ -119,7 +119,7 @@ namespace kaixa::workspace_detail {
         if (requested.empty())
             return {};
 
-        if (!m_graph[package].manifest) {
+        if (!m_graph[package].manifest()) {
             for (const std::string& name: requested) {
                 if (std::ranges::find(m_graph[package].active_features, name) == m_graph[package].active_features.end())
                     m_graph[package].active_features.push_back(name);
@@ -127,8 +127,8 @@ namespace kaixa::workspace_detail {
             return {};
         }
 
-        const std::vector<DependencyBinding> dependencies = m_graph[package].manifest->dependencies;
-        const std::vector<FeatureDefinition> features = m_graph[package].manifest->features;
+        const std::vector<DependencyBinding> dependencies = m_graph[package].manifest()->dependencies;
+        const std::vector<FeatureDefinition> features = m_graph[package].manifest()->features;
         for (const std::string& name: requested) {
             if (std::ranges::find(m_graph[package].active_features, name) != m_graph[package].active_features.end())
                 continue;

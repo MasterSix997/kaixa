@@ -539,35 +539,6 @@ namespace kaixa {
             return {};
         }
 
-        Result<void> read_target_product_options(TableReader& table, PackageTarget& target) {
-            auto include_directories = table.string_array("include");
-            if (!include_directories)
-                return std::unexpected(include_directories.error());
-
-            target.include_directories = std::move(*include_directories);
-
-            auto system_include_directories = table.string_array("system-include");
-            if (!system_include_directories)
-                return std::unexpected(system_include_directories.error());
-
-            target.system_include_directories = std::move(*system_include_directories);
-
-            if (const Value* definitions = table.take("defines")) {
-                const std::vector<TableEntry>* entries = definitions->as_table();
-                if (!entries)
-                    return std::unexpected(error_at(definitions->location(), "target definitions must be a table"));
-
-                target.definitions = *entries;
-            }
-
-            auto system_libraries = table.string_array("system-libraries");
-            if (!system_libraries)
-                return std::unexpected(system_libraries.error());
-
-            target.system_libraries = std::move(*system_libraries);
-            return {};
-        }
-
         Result<void> read_target_behavior(TableReader& table, PackageTarget& target) {
             auto dependencies = read_dependencies(table);
             if (!dependencies)
@@ -655,37 +626,10 @@ namespace kaixa {
                 }
             }
 
-            constexpr std::array common_fields{std::string_view{"name"},
-                std::string_view{"name-template"},
-                std::string_view{"display-name"},
-                std::string_view{"description"},
-                std::string_view{"category"},
-                std::string_view{"sources"},
-                std::string_view{"source"},
-                std::string_view{"source-excludes"},
-                std::string_view{"exclude"},
-                std::string_view{"include"},
-                std::string_view{"system-include"},
-                std::string_view{"defines"},
-                std::string_view{"system-libraries"},
-                std::string_view{"required-features"},
-                std::string_view{"dependencies"},
-                std::string_view{"arguments"},
-                std::string_view{"discover"},
-                std::string_view{"hidden"},
-                std::string_view{"install"},
-                std::string_view{"framework"},
-                std::string_view{"policy"},
-                std::string_view{"matrix"}};
-            std::vector<TableEntry> direct_options;
-            for (const TableEntry& field: table.entries()) {
-                if (std::ranges::find(common_fields, field.key) != common_fields.end() || (!resolver.empty() && field.key == resolver)) {
-                    continue;
-                }
-                table.take(field.key);
-                direct_options.push_back(field);
-            }
-            if (!direct_options.empty()) {
+            Value remaining = table.take_remaining();
+            const std::vector<TableEntry>* leftover = remaining.as_table();
+            if (leftover && !leftover->empty()) {
+                std::vector<TableEntry> direct_options(leftover->begin(), leftover->end());
                 if (target.resolver_options) {
                     const std::vector<TableEntry>* existing = target.resolver_options->as_table();
                     direct_options.insert(direct_options.begin(), existing->begin(), existing->end());
@@ -719,10 +663,6 @@ namespace kaixa {
             auto sources = read_target_sources(table, target, allow_partial);
             if (!sources)
                 return std::unexpected(sources.error());
-
-            auto product_options = read_target_product_options(table, target);
-            if (!product_options)
-                return std::unexpected(product_options.error());
 
             auto required_features = read_target_required_features(table, target);
             if (!required_features)
@@ -988,6 +928,7 @@ namespace kaixa {
                 }
             }
             package_set.defaults = std::move(*defaults);
+            package_set.defaults_location = table.location_of("default");
 
             if (const Value* policy = table.take("policy")) {
                 if (!policy->is_table()) {
@@ -1525,6 +1466,12 @@ namespace kaixa {
 
         if (!result.package && !result.package_set) {
             return std::unexpected(error_at(document.location(), "manifest requires a `[package]` or `[package-set]` table"));
+        }
+        if (result.package && result.package_set && !result.package_set->defaults.empty()) {
+            return std::unexpected(
+                error_at(result.package_set->defaults_location, "`[package]` is already the root; `package-set.default` cannot be declared")
+                    .add_note("remove `default` or replace `[package]` with package set members")
+            );
         }
 
         auto configurations = read_configuration_set(root);

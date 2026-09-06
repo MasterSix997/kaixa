@@ -1,4 +1,4 @@
-#include <kaixa/package/publication_backend.hpp>
+#include "publication_backend.hpp"
 
 #include <kaixa/foundation/filesystem.hpp>
 #include <kaixa/foundation/process.hpp>
@@ -10,22 +10,6 @@ namespace kaixa {
     namespace {
         class CommandPublicationBackend final : public PublicationBackend {
         public:
-            [[nodiscard]] Result<void> create_archive(
-                const std::filesystem::path& contents,
-                const std::filesystem::path& destination
-            ) const override {
-                auto process = run_process(
-                    {{"cmake", "-E", "tar", "czf", destination.string(), "--format=gnutar", "."}, contents, {}, true}
-                );
-                if (!process)
-                    return std::unexpected(process.error());
-
-                if (!process->succeeded())
-                    return std::unexpected(error("cannot create package archive").add_note(process->output));
-
-                return {};
-            }
-
             [[nodiscard]] Result<void> upload(const PackageUpload& request) const override {
                 std::vector<std::string> arguments{
                     "curl",
@@ -77,7 +61,7 @@ namespace kaixa {
                     arguments.emplace_back(credential_file->string());
                 }
                 arguments.push_back(request.endpoint);
-                auto uploaded = run_process({std::move(arguments), request.working_directory, {}, true});
+                auto uploaded = run_process({std::move(arguments), request.working_directory, {}, ProcessOutputMode::capture});
                 if (credential_file) {
                     std::error_code ignored;
                     std::filesystem::remove(*credential_file, ignored);

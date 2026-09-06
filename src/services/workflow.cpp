@@ -123,12 +123,12 @@ namespace kaixa {
             if (!package)
                 return std::unexpected(package.error());
 
-            if (!graph[*package].manifest) {
+            if (!graph[*package].manifest()) {
                 return std::unexpected(
                     error_at(location, "local " + std::string(kind) + " `" + std::string(name) + "` requires a managed package")
                 );
             }
-            return &*graph[*package].manifest;
+            return graph[*package].manifest();
         }
     }
 
@@ -136,10 +136,10 @@ namespace kaixa {
         std::vector<WorkflowDefinition> result;
         for (const PackageId root: graph.roots()) {
             const PackageNode& package = graph[root];
-            if (!package.manifest)
+            if (!package.manifest())
                 continue;
 
-            for (const WorkflowDeclaration& declaration: package.manifest->workflows) {
+            for (const WorkflowDeclaration& declaration: package.manifest()->workflows) {
                 result.push_back({root, declaration, package.name + ':' + declaration.name});
             }
         }
