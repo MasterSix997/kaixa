@@ -1,0 +1,8 @@
+* text=auto
+
+CMakeLists.txt text eol=lf
+KaixaDependencies.cmake text eol=lf
+Kaixa.lock text eol=lf
+
+*.sh text eol=lf
+*.Dockerfile text eol=lf

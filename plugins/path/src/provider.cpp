@@ -105,7 +105,7 @@ namespace kaixa::plugin::path {
                 const ProviderDefinition& definition,
                 const ProviderContext& context
             ) const override {
-                auto options_result = TableReader::bind(definition.options, "providers." + definition.name);
+                auto options_result = TableReader::bind(definition.options, "provider." + definition.name);
                 if (!options_result)
                     return std::unexpected(options_result.error());
 
@@ -179,7 +179,7 @@ namespace kaixa::plugin::path {
                 const ProviderDefinition& definition,
                 const ProviderContext&
             ) const override {
-                auto options_result = TableReader::bind(definition.options, "providers." + definition.name);
+                auto options_result = TableReader::bind(definition.options, "provider." + definition.name);
                 if (!options_result)
                     return std::unexpected(options_result.error());
 
@@ -200,7 +200,7 @@ namespace kaixa::plugin::path {
                     for (std::size_t index = 0; index < entries->size(); ++index) {
                         auto package_result = TableReader::bind(
                             (*entries)[index],
-                            "providers." + definition.name + ".package." + std::to_string(index)
+                            "provider." + definition.name + ".package." + std::to_string(index)
                         );
                         if (!package_result)
                             return std::unexpected(package_result.error());

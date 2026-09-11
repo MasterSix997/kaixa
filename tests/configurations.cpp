@@ -23,7 +23,8 @@ KAIXA_TEST(configuration_document_reads_provider_definitions) {
         "name = \"debug\"\n"
         "profile = \"debug\"\n"
         "\n"
-        "[providers.component]\n"
+        "[[provider]]\n"
+        "name = \"component\"\n"
         "driver = \"path\"\n"
         "default = true\n"
         "path = \"../component\"\n"
@@ -50,7 +51,8 @@ KAIXA_TEST(provider_default_must_be_a_boolean) {
     const TempDirectory root("provider-default-type");
     root.write(
         "config.toml",
-        "[providers.component]\n"
+        "[[provider]]\n"
+        "name = \"component\"\n"
         "driver = \"path\"\n"
         "default = \"yes\"\n"
         "path = \"../component\"\n"

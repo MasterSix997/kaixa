@@ -30,7 +30,8 @@ resolver = "cmake"
 [dependencies]
 component = "1"
 
-[providers.official]
+[[provider]]
+name = "official"
 driver = "package-map"
 default = true
 package = [)"
@@ -40,9 +41,9 @@ package = [)"
 
     std::string routed_package_map_manifest(const std::string_view default_provider) {
         const auto provider = [&](const std::string_view name) {
-            return "\n[providers."
+            return "\n[[provider]]\nname = \""
                 + std::string(name)
-                + "]\ndriver = \"package-map\"\ndefault = "
+                + "\"\ndriver = \"package-map\"\ndefault = "
                 + (name == default_provider ? "true" : "false")
                 + "\npackage = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n";
         };
@@ -64,11 +65,13 @@ package = [)"
             + std::string(selected_provider)
             + "\"\n"
               "\n"
-              "[providers.official]\n"
+              "[[provider]]\n"
+              "name = \"official\"\n"
               "driver = \"package-map\"\n"
               "package = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n"
               "\n"
-              "[providers.company]\n"
+              "[[provider]]\n"
+              "name = \"company\"\n"
               "driver = \"package-map\"\n"
               "package = [{ name = \"component\", version = \"1.0.0\", consumer = { resolver = \"cmake\" } }]\n";
     }

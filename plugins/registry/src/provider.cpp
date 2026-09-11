@@ -384,7 +384,7 @@ namespace kaixa::plugin::registry {
                 const ProviderDefinition& definition,
                 const ProviderContext& context
             ) const override {
-                auto options_result = TableReader::bind(definition.options, "providers." + definition.name);
+                auto options_result = TableReader::bind(definition.options, "provider." + definition.name);
                 if (!options_result)
                     return std::unexpected(options_result.error());
 

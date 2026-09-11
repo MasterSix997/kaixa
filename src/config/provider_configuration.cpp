@@ -2,36 +2,47 @@
 
 #include <kaixa/model/manifest.hpp>
 
+#include <algorithm>
 #include <utility>
 
 namespace kaixa {
     Result<std::vector<ProviderDefinition>> read_provider_definitions(TableReader& root) {
-        auto providers_result = root.optional_table("providers");
-        if (!providers_result)
-            return std::unexpected(providers_result.error());
-
-        if (!*providers_result)
+        const Value* providers = root.take("provider");
+        if (!providers)
             return std::vector<ProviderDefinition>{};
 
-        TableReader providers = std::move(**providers_result);
-        std::vector<ProviderDefinition> result;
-        result.reserve(providers.entries().size());
-        for (const TableEntry& entry: providers.entries()) {
-            if (!is_valid_identifier(entry.key)) {
-                return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid provider name"));
-            }
+        const std::vector<Value>* definitions = providers->as_array();
+        if (!definitions) {
+            return std::unexpected(error_at(providers->location(), "provider definitions must be an array of tables"));
+        }
 
-            auto definition_result = TableReader::bind(entry.value, join_config_path(providers.path(), entry.key));
+        std::vector<ProviderDefinition> result;
+        result.reserve(definitions->size());
+        for (std::size_t index = 0; index < definitions->size(); ++index) {
+            const Value& entry = (*definitions)[index];
+            const std::string path = "provider." + std::to_string(index);
+            auto definition_result = TableReader::bind(entry, path);
             if (!definition_result)
                 return std::unexpected(definition_result.error());
 
             TableReader definition = std::move(*definition_result);
+            auto name = definition.string("name");
             auto driver = definition.string("driver");
+            if (!name)
+                return std::unexpected(name.error());
             if (!driver)
                 return std::unexpected(driver.error());
 
+            if (!is_valid_identifier(*name)) {
+                return std::unexpected(error_at(definition.location_of("name"), "`" + *name + "` is not a valid provider name"));
+            }
+
             if (!is_valid_identifier(*driver)) {
                 return std::unexpected(error_at(definition.location_of("driver"), "`" + *driver + "` is not a valid provider driver name"));
+            }
+
+            if (std::ranges::any_of(result, [&](const ProviderDefinition& existing) { return existing.name == *name; })) {
+                return std::unexpected(error_at(definition.location_of("name"), "provider `" + *name + "` is declared more than once"));
             }
 
             bool is_default = false;
@@ -43,23 +54,10 @@ namespace kaixa {
                 is_default = *boolean;
             }
 
-            std::vector<TableEntry> options;
-            for (const TableEntry& option: definition.entries()) {
-                if (option.key != "driver" && option.key != "default")
-                    options.push_back(option);
-            }
-            definition.take_all();
-            result.push_back(
-                {entry.key,
-                    std::move(*driver),
-                    is_default,
-                    Value::table(std::move(options), entry.value.location()),
-                    entry.value.location(),
-                    {}}
-            );
+            Value options = definition.take_remaining();
+            result.push_back({std::move(*name), std::move(*driver), is_default, std::move(options), entry.location(), {}});
         }
 
-        providers.take_all();
         return result;
     }
 }

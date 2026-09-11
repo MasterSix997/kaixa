@@ -157,11 +157,12 @@ KAIXA_TEST(prebuilt_descriptors_reach_cmake_consumers) {
         "[bin]\n"
         "sources = [\"source.cpp\"]\n"
         "\n"
-        "[providers.binary]\n"
+        "[[provider]]\n"
+        "name = \"binary\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.binary.package]]\n"
+        "[[provider.package]]\n"
         "name = \"toolkit\"\n"
         "version = \"1.0.0\"\n"
         "artifact = { driver = \"path\", path = \"toolkit\" }\n"
@@ -237,11 +238,12 @@ KAIXA_TEST(find_package_recipes_generate_discovery_and_link_the_declared_product
         "[bin]\n"
         "sources = [\"source.cpp\"]\n"
         "\n"
-        "[providers.system]\n"
+        "[[provider]]\n"
+        "name = \"system\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.system.package]]\n"
+        "[[provider.package]]\n"
         "name = \"sdk\"\n"
         "consumer = { resolver = \"cmake\", mode = \"find-package\", package = \"FakeSDK\" }\n"
         "products = { default = \"FakeSDK::Core\" }\n"
@@ -293,11 +295,12 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
     );
     workspace.write(
         "config/providers.toml",
-        "[providers.source]\n"
+        "[[provider]]\n"
+        "name = \"source\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.source.package]]\n"
+        "[[provider.package]]\n"
         "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "source = { driver = \"path\", path = \"../vendor\" }\n"
@@ -309,7 +312,7 @@ KAIXA_TEST(provider_source_recipes_adopt_external_cmake_products) {
         "feature-dependencies = { optional-api = [\"helper\"] }\n"
         "products = { default = \"UpstreamComponent\", optional-api = \"UpstreamFeature\" }\n"
         "\n"
-        "[[providers.source.package]]\n"
+        "[[provider.package]]\n"
         "name = \"helper\"\n"
     );
     workspace.write("main.cpp", "int component_value();\nint main() { return component_value() == 42 ? 0 : 1; }\n");
@@ -390,11 +393,12 @@ KAIXA_TEST(shared_provider_source_recipe_is_resolved_once) {
         "members = [\"first\", \"second\"]\n"
         "default = [\"first\", \"second\"]\n"
         "\n"
-        "[providers.source]\n"
+        "[[provider]]\n"
+        "name = \"source\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.source.package]]\n"
+        "[[provider.package]]\n"
         "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "source = { driver = \"path\", path = \"vendor\" }\n"
@@ -439,11 +443,12 @@ KAIXA_TEST(provider_source_recipe_requires_a_consumer_resolver) {
         "[dependencies]\n"
         "component = \"1\"\n"
         "\n"
-        "[providers.source]\n"
+        "[[provider]]\n"
+        "name = \"source\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.source.package]]\n"
+        "[[provider.package]]\n"
         "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "source = { driver = \"path\", path = \"vendor\" }\n"
@@ -456,7 +461,7 @@ KAIXA_TEST(provider_source_recipe_requires_a_consumer_resolver) {
     if (!resolution) {
         context.check_contains(
             kaixa::format_diagnostic(resolution.error()),
-            "[providers.source.package.0.consumer.resolver]: missing required key",
+            "[provider.source.package.0.consumer.resolver]: missing required key",
             "missing resolver diagnostic is precise"
         );
     }
@@ -473,11 +478,12 @@ KAIXA_TEST(provider_source_recipe_rejects_an_unsupported_consumer_mode) {
         "[dependencies]\n"
         "component = \"1\"\n"
         "\n"
-        "[providers.source]\n"
+        "[[provider]]\n"
+        "name = \"source\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.source.package]]\n"
+        "[[provider.package]]\n"
         "name = \"component\"\n"
         "version = \"1.0.0\"\n"
         "source = { driver = \"path\", path = \"vendor\" }\n"
@@ -517,11 +523,12 @@ KAIXA_TEST(source_only_packages_supply_raw_dependency_sources_without_a_manifest
     );
     workspace.write(
         "config/providers.toml",
-        "[providers.raw]\n"
+        "[[provider]]\n"
+        "name = \"raw\"\n"
         "driver = \"package-map\"\n"
         "default = true\n"
         "\n"
-        "[[providers.raw.package]]\n"
+        "[[provider.package]]\n"
         "name = \"raw_component\"\n"
         "kind = \"source-only\"\n"
         "source = { driver = \"path\", path = \"../vendor\" }\n"

@@ -197,7 +197,8 @@ KAIXA_TEST(published_source_is_searchable_downloadable_and_lockable) {
         "[dependencies]\n"
         "downloaded = \"^1.0\"\n"
         "\n"
-        "[providers.local]\n"
+        "[[provider]]\n"
+        "name = \"local\"\n"
         "driver = \"kaixa-registry\"\n"
         "default = true\n"
         "index = \"../registry/index.toml\"\n"
@@ -276,7 +277,7 @@ KAIXA_TEST(prebuilt_publication_materializes_an_opaque_package) {
         "workspace/Kaixa.toml",
         "[package]\nname = \"application\"\nresolver = \"cmake\"\n\n"
         "[dependencies]\nbinary_library = \"2\"\n\n"
-        "[providers.local]\ndriver = \"kaixa-registry\"\ndefault = true\nindex = \"../registry/index.toml\"\n"
+        "[[provider]]\nname = \"local\"\ndriver = \"kaixa-registry\"\ndefault = true\nindex = \"../registry/index.toml\"\n"
     );
     kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
     auto resolved = kaixa::resolve_workspace(
@@ -311,7 +312,7 @@ KAIXA_TEST(targeted_update_changes_only_an_explicitly_unlocked_candidate) {
         "workspace/Kaixa.toml",
         "[package]\nname = \"application\"\nresolver = \"cmake\"\n\n"
         "[dependencies]\nlibrary = \"^1\"\n\n"
-        "[providers.local]\ndriver = \"kaixa-registry\"\ndefault = true\nindex = \"../registry/index.toml\"\n"
+        "[[provider]]\nname = \"local\"\ndriver = \"kaixa-registry\"\ndefault = true\nindex = \"../registry/index.toml\"\n"
     );
     kaixa::ExtensionRegistry initial_registry = kaixa::plugin::default_registry();
     auto initial = kaixa::resolve_workspace(
