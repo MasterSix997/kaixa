@@ -7,9 +7,13 @@
 #include <array>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 namespace kaixa::cli::detail {
     namespace {
@@ -142,13 +146,15 @@ namespace kaixa::cli::detail {
         std::cout << name << ": " << display_path(path, workspace) << (path_exists(path) ? " [present]" : " [missing]") << '\n';
     }
 
-    Result<void> print_actions(const ExecutionPlan& plan, const bool synchronization_only) {
+    Result<void> print_actions(const ExecutionPlan& plan, const bool synchronization_only, const bool include_tests) {
         auto state = check(plan);
         if (!state)
             return std::unexpected(state.error());
 
         for (const ExecutionPhase phase: execution_phases) {
             if (synchronization_only && phase != ExecutionPhase::synchronize)
+                continue;
+            if (!include_tests && phase == ExecutionPhase::test)
                 continue;
 
             const std::span<const Action> actions = plan_phase(plan, phase);
@@ -171,8 +177,76 @@ namespace kaixa::cli::detail {
     }
 
     void print_outputs(const ExecutionPlan& plan, const std::filesystem::path& workspace) {
-        for (const BuildOutput& output: plan.outputs())
+        std::vector<std::filesystem::path> printed;
+        for (const BuildOutput& output: plan.outputs()) {
+            const std::filesystem::path normalized = output.path.lexically_normal();
+            if (std::ranges::find(printed, normalized) != printed.end())
+                continue;
+
             std::cout << "artifact: " << display_path(output.path, workspace) << '\n';
+            printed.push_back(normalized);
+        }
+    }
+
+    std::size_t print_test_listing(const ExecutionReport& report) {
+        struct PackageTests {
+            std::string package;
+            std::vector<std::string> tests;
+        };
+
+        constexpr std::string_view description_prefix = "list tests ";
+        std::vector<PackageTests> packages;
+        std::size_t total = 0;
+        for (const ExecutionReport::CapturedOutput& captured: report.captured_outputs) {
+            if (!captured.description.starts_with(description_prefix))
+                continue;
+
+            const std::string package = captured.description.substr(description_prefix.size());
+            auto group = std::ranges::find(packages, package, &PackageTests::package);
+            if (group == packages.end()) {
+                packages.push_back({package, {}});
+                group = std::prev(packages.end());
+            }
+
+            std::string_view remaining = captured.content;
+            while (!remaining.empty()) {
+                const std::size_t newline = remaining.find('\n');
+                std::string_view line = remaining.substr(0, newline);
+                remaining = newline == std::string_view::npos ? std::string_view{} : remaining.substr(newline + 1);
+                while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+                    line.remove_prefix(1);
+                if (!line.starts_with("Test #"))
+                    continue;
+
+                const std::size_t separator = line.find(": ");
+                if (separator == std::string_view::npos)
+                    continue;
+
+                std::string name(line.substr(separator + 2));
+                if (!name.empty() && name.back() == '\r')
+                    name.pop_back();
+                if (std::ranges::find(group->tests, name) == group->tests.end()) {
+                    group->tests.push_back(std::move(name));
+                    ++total;
+                }
+            }
+        }
+
+        if (total == 0) {
+            std::cout << "no tests found\n";
+            return 0;
+        }
+
+        std::cout << "tests:\n";
+        for (const PackageTests& package: packages) {
+            if (package.tests.empty())
+                continue;
+
+            std::cout << "  " << package.package << ":\n";
+            for (const std::string& test: package.tests)
+                std::cout << "    " << test << '\n';
+        }
+        return total;
     }
 
     void inspect_outputs(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace) {

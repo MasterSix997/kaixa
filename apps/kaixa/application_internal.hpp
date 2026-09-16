@@ -23,7 +23,9 @@ namespace kaixa::cli::detail {
         BuildEnvironment environment;
         ExtensionRegistry registry;
         std::vector<ConfigurationSource> configuration_sources;
+        std::vector<std::string> package_set_packages;
         bool lock_changed = false;
+        bool has_package_set = false;
     };
 
     int fail(const Diagnostic& diagnostic);
@@ -51,8 +53,9 @@ namespace kaixa::cli::detail {
     bool is_inside(const std::filesystem::path& path, const std::filesystem::path& directory);
     std::string display_path(const std::filesystem::path& path, const std::filesystem::path& workspace);
     void print_configuration_path(std::string_view name, const std::filesystem::path& path, const std::filesystem::path& workspace);
-    Result<void> print_actions(const ExecutionPlan& plan, bool synchronization_only = false);
+    Result<void> print_actions(const ExecutionPlan& plan, bool synchronization_only = false, bool include_tests = true);
     void print_outputs(const ExecutionPlan& plan, const std::filesystem::path& workspace);
+    std::size_t print_test_listing(const ExecutionReport& report);
     void inspect_outputs(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace);
     Result<void> inspect_actions(const Graph& graph, const ExecutionPlan& plan, const std::filesystem::path& workspace, bool verbose);
     std::string_view product_purpose_name(ProductPurpose purpose);

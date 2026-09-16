@@ -115,7 +115,7 @@ namespace kaixa {
             return output;
         }
 
-        Result<void> execute_action(const Action& action) {
+        Result<ProcessResult> execute_action(const Action& action) {
             const ProcessRequest request{action.argv, action.working_directory, action.environment, action.output};
             auto result = run_process(request);
             if (!result) {
@@ -130,7 +130,7 @@ namespace kaixa {
 
                 return std::unexpected(std::move(diagnostic));
             }
-            return {};
+            return std::move(*result);
         }
     }
 
@@ -253,6 +253,9 @@ namespace kaixa {
                 return std::unexpected(executed.error());
 
             ++report.executed;
+            if (action.output == ProcessOutputMode::capture && !executed->output.empty()) {
+                report.captured_outputs.push_back({action.description, std::move(executed->output)});
+            }
         }
         return report;
     }
@@ -272,6 +275,11 @@ namespace kaixa {
 
         built->executed += tasks->executed;
         built->executed += generated->synchronized;
+        built->captured_outputs.insert(
+            built->captured_outputs.end(),
+            std::make_move_iterator(tasks->captured_outputs.begin()),
+            std::make_move_iterator(tasks->captured_outputs.end())
+        );
         return built;
     }
 
@@ -285,6 +293,11 @@ namespace kaixa {
             return std::unexpected(tested.error());
 
         executed->executed += tested->executed;
+        executed->captured_outputs.insert(
+            executed->captured_outputs.end(),
+            std::make_move_iterator(tested->captured_outputs.begin()),
+            std::make_move_iterator(tested->captured_outputs.end())
+        );
         return executed;
     }
 }

@@ -428,8 +428,12 @@ KAIXA_TEST(export_project_builds_installs_and_is_consumed_without_kaixa_state) {
 
     const std::filesystem::path build = workspace.path() / "standalone-build";
     const std::filesystem::path prefix = workspace.path() / "standalone-prefix";
-    if (!run({"cmake", "-S", workspace.path().string(), "-B", build.string()}, "standalone project configures"))
+    if (!run(
+            {"cmake", "-S", workspace.path().string(), "-B", build.string(), "-DCMAKE_BUILD_TYPE=Debug"},
+            "standalone project configures"
+        )) {
         return;
+    }
     if (!run({"cmake", "--build", build.string(), "--config", "Debug", "--parallel"}, "standalone project builds"))
         return;
     if (!run({"cmake", "--install", build.string(), "--config", "Debug", "--prefix", prefix.string()}, "standalone project installs")) {
@@ -452,6 +456,7 @@ KAIXA_TEST(export_project_builds_installs_and_is_consumed_without_kaixa_state) {
                 (workspace.path() / "consumer").string(),
                 "-B",
                 consumer_build.string(),
+                "-DCMAKE_BUILD_TYPE=Debug",
                 "-DCMAKE_PREFIX_PATH=" + prefix.string()},
             "installed package is found"
         )) {

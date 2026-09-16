@@ -167,6 +167,8 @@ namespace kaixa::cli::detail {
         resolution_options.refresh_sources = refresh_sources;
         resolution_options.source_progress = print_source_progress;
         resolution_options.load_model = false;
+        resolution_options.excluded_packages = options.excluded_packages;
+        resolution_options.package_set = options.package_set;
         auto resolved = resolve_workspace(*manifest, *manifest_document, resolution_options);
         if (!resolved)
             return std::unexpected(resolved.error());
@@ -181,13 +183,24 @@ namespace kaixa::cli::detail {
             }
         }
 
+        std::vector<std::string> package_set_packages;
+        package_set_packages.reserve(resolved->available.candidates().size());
+        for (const LocalPackageCandidate& candidate: resolved->available.candidates())
+            package_set_packages.push_back(candidate.name);
+
+        bool has_package_set = false;
+        if (const ManifestDocument* context = resolved->available.document(resolved->context.manifest))
+            has_package_set = context->package_set.has_value();
+
         return Workspace{std::move(resolved->graph),
             resolved->model.summary,
             std::move(resolved->instances),
             BuildEnvironment{directory, directory / ".kaixa", std::move(*configuration)},
             std::move(registry),
             std::move(sources),
-            resolved->lock_changed};
+            std::move(package_set_packages),
+            resolved->lock_changed,
+            has_package_set};
     }
 
     Result<std::filesystem::path> selected_manifest(const WorkspaceOptions& options) {
@@ -198,6 +211,10 @@ namespace kaixa::cli::detail {
         auto document = parse_manifest_document_file(*manifest);
         if (!document)
             return std::unexpected(document.error());
+
+        if (options.package_set || !options.excluded_packages.empty()) {
+            return std::unexpected(error("package editing accepts `--package <name>`, not package-set or exclusion selections"));
+        }
 
         if (options.packages.size() > 1)
             return std::unexpected(error("package editing accepts at most one `--package` selection"));

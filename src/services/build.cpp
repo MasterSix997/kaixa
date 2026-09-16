@@ -196,11 +196,31 @@ namespace kaixa {
 
         std::vector<ActiveResolverSession> sessions;
         ExecutionPlan plan;
-        auto build = append_build_plan(graph, registry, environment, {}, instances, sessions, plan);
-        if (!build)
-            return std::unexpected(build.error());
+        const std::span<const PackageId> requested = request.packages.empty() ? graph.roots()
+                                                                              : std::span<const PackageId>{request.packages};
+        std::vector<PackageId> selected;
+        selected.reserve(requested.size());
+        const PackageTargetKind kind = request.purpose == ProductPurpose::benchmark ? PackageTargetKind::benchmark
+                                                                                    : PackageTargetKind::test;
+        for (const PackageId id: requested) {
+            if (request.target
+                || std::ranges::any_of(graph[id].targets, [&](const PackageTarget& target) { return target.kind == kind; })) {
+                selected.push_back(id);
+            }
+        }
 
-        for (const PackageId id: graph.roots()) {
+        BuildRequest build_request;
+        for (const PackageId id: selected) {
+            if (graph.is_root(id))
+                build_request.packages.push_back({id, {}, true});
+        }
+        if (!build_request.packages.empty()) {
+            auto build = append_build_plan(graph, registry, environment, build_request, instances, sessions, plan);
+            if (!build)
+                return std::unexpected(build.error());
+        }
+
+        for (const PackageId id: selected) {
             const PackageNode& root = graph[id];
             Resolver* resolver = registry.find_resolver(root.resolver);
             if (!resolver) {

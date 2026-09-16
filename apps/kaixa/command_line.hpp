@@ -19,11 +19,13 @@ namespace kaixa::cli {
     struct WorkspaceOptions {
         std::filesystem::path path = ".";
         std::vector<std::string> packages;
+        std::vector<std::string> excluded_packages;
         std::optional<std::string> profile;
         std::vector<std::string> configurations;
         std::vector<ResolverArgumentOverride> resolver_arguments;
         bool use_default_configurations = true;
         LockMode lock_mode = LockMode::update;
+        bool package_set = false;
     };
 
     struct HelpCommand {};
@@ -90,9 +92,16 @@ namespace kaixa::cli {
         std::optional<std::filesystem::path> prefix;
     };
 
+    enum class DependencyTestSelection {
+        none,
+        package_set,
+        all
+    };
+
     struct TestCommand {
         WorkspaceOptions workspace;
         TestRequest request;
+        DependencyTestSelection dependency_tests = DependencyTestSelection::none;
     };
 
     struct BenchCommand {

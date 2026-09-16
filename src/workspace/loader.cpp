@@ -35,6 +35,8 @@ namespace kaixa {
                 , m_refresh_sources(options.refresh_sources)
                 , m_source_progress(options.source_progress)
                 , m_load_model(options.load_model)
+                , m_excluded_packages(options.excluded_packages)
+                , m_select_package_set(options.package_set)
                 , m_manifest_document(manifest_document) {}
 
             Result<PackageResolution> load(
@@ -55,9 +57,11 @@ namespace kaixa {
                 if (!providers)
                     return std::unexpected(providers.error());
 
-                auto roots = load_selected_packages(workspace->manifest, workspace->document, selected_packages);
-                if (selected_packages.empty())
-                    roots = load_default_packages(workspace->manifest, workspace->document);
+                auto selection = selected_package_names(workspace->document, selected_packages);
+                if (!selection)
+                    return std::unexpected(selection.error());
+
+                auto roots = load_selected_packages(workspace->manifest, workspace->document, *selection);
 
                 if (!roots)
                     return std::unexpected(roots.error());
@@ -211,42 +215,72 @@ namespace kaixa {
                 return configure_providers(*m_extensions, layers);
             }
 
-            Result<std::vector<PackageId>> load_default_packages(
-                const std::filesystem::path& manifest_path,
-                const ManifestDocument& document
+            Result<std::vector<std::string>> selected_package_names(
+                const ManifestDocument& document,
+                const std::span<const std::string> explicit_packages
             ) {
-                if (document.package) {
-                    auto root = load_managed(manifest_path, std::nullopt, {});
-                    if (!root)
-                        return std::unexpected(root.error());
-
-                    return std::vector{*root};
+                for (std::size_t index = 0; index < explicit_packages.size(); ++index) {
+                    for (std::size_t previous = 0; previous < index; ++previous) {
+                        if (explicit_packages[previous] == explicit_packages[index]) {
+                            return std::unexpected(error("package `" + explicit_packages[index] + "` was selected more than once"));
+                        }
+                    }
                 }
-                if (!document.package_set)
-                    return std::unexpected(error("manifest does not declare a package"));
 
-                if (document.package_set->defaults.empty()) {
-                    return std::unexpected(
-                        error_at(document.package_set->location, "package set requires `default` or an explicit package selection")
-                    );
+                std::vector<std::string> selected;
+                if (m_select_package_set) {
+                    auto context = m_packages.load_document(m_context_manifest);
+                    if (!context)
+                        return std::unexpected(context.error());
+
+                    if (!(**context).package_set) {
+                        return std::unexpected(error("current manifest context does not declare a package set"));
+                    }
+                    selected.reserve(m_packages.candidates().size() + explicit_packages.size());
+                    for (const LocalPackageCandidate& candidate: m_packages.candidates())
+                        selected.push_back(candidate.name);
                 }
-                std::vector<PackageId> roots;
-                roots.reserve(document.package_set->defaults.size());
-                for (const std::string& name: document.package_set->defaults) {
-                    const LocalPackageCandidate* candidate = m_packages.find_in_set(manifest_path, name);
-                    if (!candidate) {
+
+                if (!explicit_packages.empty()) {
+                    if (!m_select_package_set)
+                        selected.reserve(explicit_packages.size());
+
+                    for (const std::string& name: explicit_packages) {
+                        if (std::ranges::find(selected, name) == selected.end())
+                            selected.push_back(name);
+                    }
+                } else if (!m_select_package_set) {
+                    if (document.package) {
+                        selected.push_back(document.package->name);
+                    } else if (!document.package_set) {
+                        return std::unexpected(error("manifest does not declare a package"));
+                    } else if (document.package_set->defaults.empty()) {
                         return std::unexpected(
-                            error_at(document.package_set->location, "default package `" + name + "` is not a member of the package set")
+                            error_at(document.package_set->location, "package set requires `default` or an explicit package selection")
                         );
+                    } else {
+                        selected = document.package_set->defaults;
+                    }
+                }
+
+                for (std::size_t index = 0; index < m_excluded_packages.size(); ++index) {
+                    const std::string& name = m_excluded_packages[index];
+                    for (std::size_t previous = 0; previous < index; ++previous) {
+                        if (m_excluded_packages[previous] == name) {
+                            return std::unexpected(error("package `" + name + "` was excluded more than once"));
+                        }
                     }
 
-                    auto root = load_managed(candidate->manifest, name, document.package_set->location);
-                    if (!root)
-                        return std::unexpected(root.error());
+                    const auto excluded = std::ranges::find(selected, name);
+                    if (excluded == selected.end())
+                        return std::unexpected(error("package `" + name + "` is not selected and cannot be excluded"));
 
-                    roots.push_back(*root);
+                    selected.erase(excluded);
                 }
-                return roots;
+                if (selected.empty())
+                    return std::unexpected(error("package selection is empty after exclusions"));
+
+                return selected;
             }
 
             Result<std::vector<PackageId>> load_selected_packages(
@@ -555,6 +589,8 @@ namespace kaixa {
             bool m_refresh_sources = true;
             std::function<void(std::string_view)> m_source_progress;
             bool m_load_model = true;
+            std::span<const std::string> m_excluded_packages;
+            bool m_select_package_set = false;
             const ManifestDocument* m_manifest_document = nullptr;
         };
     }

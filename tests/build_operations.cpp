@@ -1,9 +1,12 @@
 #include <test_support.hpp>
 
 #include <kaixa/kaixa.hpp>
+#include <kaixa/plugin/bundle.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <filesystem>
+#include <string>
 #include <utility>
 
 using kaixa::testing::TempDirectory;
@@ -174,4 +177,85 @@ KAIXA_TEST(changed_generated_input_requires_synchronization) {
 
     context.check_equal(report->synchronized, std::size_t{1}, "one action synchronizes");
     context.check(std::filesystem::exists(configured), "synchronization action executes");
+}
+
+KAIXA_TEST(test_planning_can_include_selected_dependency_packages_without_promoting_graph_roots) {
+    const TempDirectory root("dependency-test-planning");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"application\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "dependency = { path = \"dependency\" }\n"
+        "\n"
+        "[lib]\n"
+        "type = \"interface\"\n"
+    );
+    root.write("dependency/dependency.test.cpp", "int main() { return 0; }\n");
+    root.write(
+        "dependency/Kaixa.toml",
+        "[package]\n"
+        "name = \"dependency\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[lib]\n"
+        "type = \"interface\"\n"
+        "\n"
+        "[[test]]\n"
+        "name = \"dependency.tests\"\n"
+        "sources = [\"dependency.test.cpp\"]\n"
+    );
+
+    const auto graph = kaixa::load_workspace(root.path());
+    context.check(graph.has_value(), "dependency workspace loads");
+    if (!graph)
+        return;
+
+    const auto application = graph->find_by_name("application");
+    const auto dependency = graph->find_by_name("dependency");
+    context.check(application.has_value() && dependency.has_value(), "root and dependency are resolved");
+    if (!application || !dependency)
+        return;
+
+    kaixa::TestRequest request;
+    request.packages = {*application, *dependency};
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{root.path(), root.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_tests(*graph, registry, environment, request);
+    context.check(plan.has_value(), "dependency test selection plans");
+    if (!plan)
+        return;
+
+    context.check_equal(plan->tests().size(), std::size_t{1}, "only packages with tests receive test actions");
+    if (plan->tests().size() == 1)
+        context.check(plan->tests()[0].package == dependency, "dependency is selected for tests");
+    context.check(
+        std::ranges::any_of(plan->builds(), [&](const kaixa::Action& action) { return action.package == dependency; }),
+        "dependency tests receive their own build action"
+    );
+    context.check_equal(graph->roots().size(), std::size_t{1}, "dependency is not promoted to a resolution root");
+}
+
+KAIXA_TEST(execution_reports_captured_action_output) {
+    kaixa::ExecutionPlan plan;
+    kaixa::Action action;
+    action.description = "captured action";
+    action.argv = {"cmake", "-E", "echo", "captured text"};
+    action.output = kaixa::ProcessOutputMode::capture;
+    plan.build(std::move(action));
+
+    const auto report = kaixa::execute(plan);
+    context.check(report.has_value(), "captured action executes");
+    if (!report)
+        return;
+
+    context.check_equal(report->captured_outputs.size(), std::size_t{1}, "one captured output is reported");
+    if (!report->captured_outputs.empty()) {
+        context.check_equal(report->captured_outputs.front().description, std::string("captured action"), "action identity is retained");
+        context.check_contains(report->captured_outputs.front().content, "captured text", "captured output content is retained");
+    }
 }

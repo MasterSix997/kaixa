@@ -854,7 +854,11 @@ namespace kaixa::plugin::cmake {
             }
 
         private:
-            [[nodiscard]] Result<void> plan_route(const ConfiguredRoute& route, RoutePlanningContext& planning) const {
+            [[nodiscard]] Result<void> plan_route(
+                const ConfiguredRoute& route,
+                RoutePlanningContext& planning,
+                const bool force_build = false
+            ) const {
                 const ProductRealizationContext realization{planning.environment.configuration.profile, host_target_os()};
                 auto
                     dependency_install = requires_install(planning.graph, planning.registry, planning.package, realization, planning.cache);
@@ -863,7 +867,7 @@ namespace kaixa::plugin::cmake {
 
                 const std::optional<std::filesystem::path>
                     install = install_destination(route.request, *dependency_install, planning.environment, *route.instance);
-                if (!planning.graph.is_root(planning.package.id) && !install)
+                if (!force_build && !planning.graph.is_root(planning.package.id) && !install)
                     return {};
 
                 auto build = prepare_build_context(
@@ -968,7 +972,7 @@ namespace kaixa::plugin::cmake {
                         ConfiguredRoute build_route = route;
                         build_route.request.targets.clear();
                         build_route.request.build_default = true;
-                        auto planned = plan_route(build_route, planning);
+                        auto planned = plan_route(build_route, planning, true);
                         if (!planned)
                             return std::unexpected(planned.error());
                     }

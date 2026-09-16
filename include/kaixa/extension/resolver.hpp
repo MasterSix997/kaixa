@@ -34,6 +34,7 @@ namespace kaixa {
         std::optional<std::string> target;
         TestMode mode = TestMode::run;
         ProductPurpose purpose = ProductPurpose::test;
+        std::vector<PackageId> packages;
     };
 
     struct PackageBuildRequest {

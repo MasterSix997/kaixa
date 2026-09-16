@@ -402,6 +402,45 @@ namespace kaixa::cli::detail {
         return report->executed;
     }
 
+    Result<TestRequest> dependency_test_request(const Workspace& workspace, const TestCommand& command) {
+        TestRequest request = command.request;
+        if (command.dependency_tests == DependencyTestSelection::none)
+            return request;
+
+        if (command.dependency_tests == DependencyTestSelection::package_set && !workspace.has_package_set) {
+            return std::unexpected(error("--dependency-tests=package-set requires a package-set context"));
+        }
+
+        request.packages.assign(workspace.graph.roots().begin(), workspace.graph.roots().end());
+        const std::vector<PackageDependencyEntry> dependencies = workspace.graph.dependency_tree(workspace.graph.roots());
+        for (const PackageDependencyEntry& dependency: dependencies) {
+            if (dependency.depth == 0)
+                continue;
+
+            const PackageNode& package = workspace.graph[dependency.package];
+            const bool has_tests = std::ranges::any_of(package.targets, [](const PackageTarget& target) {
+                return target.kind == PackageTargetKind::test;
+            });
+            if (!has_tests)
+                continue;
+
+            if (command.dependency_tests == DependencyTestSelection::package_set
+                && std::ranges::find(workspace.package_set_packages, package.name) == workspace.package_set_packages.end()) {
+                continue;
+            }
+            if (std::ranges::find(request.packages, dependency.package) == request.packages.end())
+                request.packages.push_back(dependency.package);
+        }
+        return request;
+    }
+
+    void capture_plan_output(ExecutionPlan& plan) {
+        for (const std::span<Action> actions: {plan.synchronization(), plan.builds(), plan.tasks(), plan.tests()}) {
+            for (Action& action: actions)
+                action.output = ProcessOutputMode::capture;
+        }
+    }
+
     Result<std::size_t> execute_workflow_step(const Workspace& workspace, const PreparedWorkflowStep& step) {
         switch (step.kind) {
         case WorkflowStepKind::generate: return execute_workflow_generate(workspace);
@@ -529,11 +568,19 @@ namespace kaixa::cli::detail {
         if (!workspace)
             return fail(workspace.error());
 
-        auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, command.request, workspace->instances);
+        auto request = dependency_test_request(*workspace, command);
+        if (!request)
+            return fail(request.error());
+
+        auto plan = plan_tests(workspace->graph, workspace->registry, workspace->environment, *request, workspace->instances);
         if (!plan)
             return fail(plan.error());
 
-        auto printed = print_actions(*plan);
+        const bool listing = command.request.mode == TestMode::list;
+        if (listing)
+            capture_plan_output(*plan);
+
+        auto printed = print_actions(*plan, false, !listing);
         if (!printed)
             return fail(printed.error());
 
@@ -541,8 +588,13 @@ namespace kaixa::cli::detail {
         if (!report)
             return fail(report.error());
 
-        std::cout << "tests completed: " << report->executed << " action(s) run\n";
-        print_outputs(*plan, workspace->environment.workspace);
+        if (listing) {
+            const std::size_t listed = print_test_listing(*report);
+            std::cout << listed << " test(s) listed\n";
+        } else {
+            std::cout << "tests completed: " << report->executed << " action(s) run\n";
+            print_outputs(*plan, workspace->environment.workspace);
+        }
         return 0;
     }
 

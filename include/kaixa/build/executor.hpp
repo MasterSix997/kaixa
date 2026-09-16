@@ -53,6 +53,11 @@ namespace kaixa {
 
     struct ExecutionReport {
         std::size_t executed = 0;
+        struct CapturedOutput {
+            std::string description;
+            std::string content;
+        };
+        std::vector<CapturedOutput> captured_outputs;
     };
 
     [[nodiscard]] Result<CheckReport> check(const ExecutionPlan& plan);

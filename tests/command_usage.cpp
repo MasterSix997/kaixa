@@ -70,6 +70,15 @@ KAIXA_TEST(usage_documents_no_command_the_dispatch_rejects) {
         context.check(dispatches(name), std::string("`") + name + "` dispatches");
 }
 
+KAIXA_TEST(usage_documents_package_selection_and_path_semantics) {
+    const std::string usage = usage_text();
+    context.check_contains(usage, "--package name", "usage documents explicit package selection");
+    context.check_contains(usage, "--package-set", "usage documents package-set selection");
+    context.check_contains(usage, "--exclude-package name", "usage documents package exclusions");
+    context.check_contains(usage, "--dependency-tests package-set|all", "usage documents dependency test selection");
+    context.check_contains(usage, "--path selects the manifest context", "usage distinguishes path from package selection");
+}
+
 KAIXA_TEST(an_unknown_command_is_rejected_with_usage) {
     const std::array<std::string_view, 1> arguments{"frobnicate"};
     const auto parsed = kaixa::cli::parse_command_line(arguments);

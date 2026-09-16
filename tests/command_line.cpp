@@ -111,6 +111,29 @@ KAIXA_TEST(command_line_build_keeps_workspace_options) {
     context.check_equal(command->workspace.configurations.size(), std::size_t{1}, "configuration count");
 }
 
+KAIXA_TEST(command_line_package_selection_keeps_package_set_and_exclusions) {
+    constexpr std::array arguments = {std::string_view("build"),
+        std::string_view("--package-set"),
+        std::string_view("--package"),
+        std::string_view("ecs"),
+        std::string_view("--exclude-package"),
+        std::string_view("editor")};
+
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(parsed.has_value(), "package-set selection parses");
+    if (!parsed)
+        return;
+
+    const auto* command = std::get_if<kaixa::cli::BuildCommand>(&*parsed);
+    context.check(command != nullptr, "package selection keeps build command type");
+    if (!command)
+        return;
+
+    context.check(command->workspace.package_set, "package-set selection is retained");
+    context.check_equal(command->workspace.packages.front(), std::string("ecs"), "explicit package is retained");
+    context.check_equal(command->workspace.excluded_packages.front(), std::string("editor"), "package exclusion is retained");
+}
+
 KAIXA_TEST(command_line_can_replace_default_configurations) {
     constexpr std::array arguments = {std::string_view("build"),
         std::string_view("--no-default-configs"),
@@ -335,6 +358,47 @@ KAIXA_TEST(command_line_test_list_composes_with_filter_and_target) {
     context.check_equal(command->request.target.value_or(""), std::string("kaixa_tests"), "list target");
 }
 
+KAIXA_TEST(command_line_test_selects_dependency_test_scope) {
+    constexpr std::array package_set_arguments = {std::string_view("test"), std::string_view("--dependency-tests=package-set")};
+    const auto package_set = kaixa::cli::parse_command_line(package_set_arguments);
+    context.check(package_set.has_value(), "package-set dependency tests parse");
+    if (package_set) {
+        const auto* command = std::get_if<kaixa::cli::TestCommand>(&*package_set);
+        context.check(
+            command && command->dependency_tests == kaixa::cli::DependencyTestSelection::package_set,
+            "package-set dependency test scope is retained"
+        );
+    }
+
+    constexpr std::array all_arguments = {std::string_view("test"), std::string_view("--dependency-tests"), std::string_view("all")};
+    const auto all = kaixa::cli::parse_command_line(all_arguments);
+    context.check(all.has_value(), "all dependency tests parse");
+    if (all) {
+        const auto* command = std::get_if<kaixa::cli::TestCommand>(&*all);
+        context.check(
+            command && command->dependency_tests == kaixa::cli::DependencyTestSelection::all,
+            "all dependency test scope is retained"
+        );
+    }
+}
+
+KAIXA_TEST(command_line_dependency_tests_reject_unknown_scopes_and_target_selection) {
+    constexpr std::array unknown_arguments = {std::string_view("test"), std::string_view("--dependency-tests=remote")};
+    const auto unknown = kaixa::cli::parse_command_line(unknown_arguments);
+    context.check(!unknown.has_value(), "unknown dependency test scope is rejected");
+    if (!unknown)
+        context.check_contains(unknown.error().message, "unknown dependency test selection", "unknown scope diagnostic");
+
+    constexpr std::array target_arguments = {std::string_view("test"),
+        std::string_view("--target"),
+        std::string_view("ecs.tests"),
+        std::string_view("--dependency-tests=all")};
+    const auto target = kaixa::cli::parse_command_line(target_arguments);
+    context.check(!target.has_value(), "dependency tests and a target cannot be mixed");
+    if (!target)
+        context.check_contains(target.error().message, "cannot be combined", "target conflict diagnostic");
+}
+
 KAIXA_TEST(command_line_run_separates_program_arguments) {
     constexpr std::array arguments = {std::string_view("run"),
         std::string_view("--target"),
@@ -510,6 +574,16 @@ KAIXA_TEST(command_line_clean_all_rejects_configuration_selection) {
     context.check(!parsed.has_value(), "clean all rejects configuration");
     if (!parsed) {
         context.check_contains(parsed.error().message, "cannot be combined", "clean all error");
+    }
+}
+
+KAIXA_TEST(command_line_clean_all_rejects_package_selection) {
+    constexpr std::array arguments = {std::string_view("clean"), std::string_view("--all"), std::string_view("--package-set")};
+
+    const auto parsed = kaixa::cli::parse_command_line(arguments);
+    context.check(!parsed.has_value(), "clean all rejects package selection");
+    if (!parsed) {
+        context.check_contains(parsed.error().message, "cannot be combined", "clean all package error");
     }
 }
 

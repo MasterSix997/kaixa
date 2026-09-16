@@ -48,6 +48,8 @@ namespace kaixa {
         bool refresh_sources = true;
         std::function<void(std::string_view)> source_progress;
         bool load_model = true;
+        std::span<const std::string> excluded_packages;
+        bool package_set = false;
     };
 
     [[nodiscard]] Result<std::filesystem::path> find_manifest(const std::filesystem::path& start);

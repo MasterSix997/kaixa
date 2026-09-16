@@ -219,6 +219,104 @@ KAIXA_TEST(package_set_supports_multiple_defaults_and_explicit_roots) {
         .check_equal(selected->graph[selected->graph.roots().front()].name, std::string("game_runner"), "explicit root replaces defaults");
 }
 
+KAIXA_TEST(package_set_selection_includes_the_root_and_nested_members_but_not_external_dependencies) {
+    const TempDirectory root("package-set-selection");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"engine\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "members = [\"modules/*\"]\n"
+        "\n"
+        "[dependencies]\n"
+        "vendor = { path = \"vendor\" }\n"
+    );
+    root.write(
+        "modules/render/Kaixa.toml",
+        "[package]\n"
+        "name = \"render\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "members = [\"ecs\"]\n"
+    );
+    root.write(
+        "modules/render/ecs/Kaixa.toml",
+        "[package]\n"
+        "name = \"ecs\"\n"
+        "resolver = \"cmake\"\n"
+    );
+    root.write(
+        "vendor/Kaixa.toml",
+        "[package]\n"
+        "name = \"vendor\"\n"
+        "resolver = \"cmake\"\n"
+    );
+
+    kaixa::ResolutionOptions options;
+    options.package_set = true;
+    options.write_lock = false;
+    options.refresh_sources = false;
+    const auto selected = kaixa::resolve_workspace(root.path(), options);
+    context.check(selected.has_value(), "package-set selection resolves");
+    if (!selected) {
+        context.fail(kaixa::format_diagnostic(selected.error()));
+        return;
+    }
+
+    context.check_equal(selected->graph.roots().size(), std::size_t{3}, "root and nested member count");
+    for (const std::string& name: {std::string("engine"), std::string("render"), std::string("ecs")}) {
+        const auto package = selected->graph.find_by_name(name);
+        context.check(package.has_value() && selected->graph.is_root(*package), name + " is selected as a development root");
+    }
+    const auto vendor = selected->graph.find_by_name("vendor");
+    context.check(vendor.has_value(), "external path dependency is resolved");
+    if (vendor)
+        context.check(!selected->graph.is_root(*vendor), "external path dependency is not selected by --package-set");
+
+    context.check_equal(selected->context.directory, root.path(), "package-set selection keeps the original context directory");
+}
+
+KAIXA_TEST(package_set_selection_composes_explicit_packages_and_exclusions) {
+    const TempDirectory root("package-set-selection-composition");
+    root.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"engine\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[package-set]\n"
+        "members = [\"modules/*\"]\n"
+    );
+    for (const std::string& name: {std::string("ecs"), std::string("render")}) {
+        root.write("modules/" + name + "/Kaixa.toml", "[package]\nname = \"" + name + "\"\nresolver = \"cmake\"\n");
+    }
+
+    const std::vector<std::string> explicit_packages{"ecs"};
+    const std::vector<std::string> exclusions{"render"};
+    kaixa::ResolutionOptions options;
+    options.packages = explicit_packages;
+    options.excluded_packages = exclusions;
+    options.package_set = true;
+    options.write_lock = false;
+    options.refresh_sources = false;
+    const auto selected = kaixa::resolve_workspace(root.path(), options);
+    context.check(selected.has_value(), "package-set selection and explicit packages compose");
+    if (!selected) {
+        context.fail(kaixa::format_diagnostic(selected.error()));
+        return;
+    }
+
+    context.check_equal(selected->graph.roots().size(), std::size_t{2}, "one package-set package is excluded");
+    const auto engine = selected->graph.find_by_name("engine");
+    const auto ecs = selected->graph.find_by_name("ecs");
+    context.check(engine.has_value() && selected->graph.is_root(*engine), "root package remains selected");
+    context.check(ecs.has_value() && selected->graph.is_root(*ecs), "explicit package is deduplicated against package-set selection");
+    context.check(!selected->graph.find_by_name("render").has_value(), "excluded package is not loaded");
+}
+
 KAIXA_TEST(package_selection_reports_duplicates_and_available_names) {
     const TempDirectory root("package-selection-errors");
     root.write(
