@@ -243,8 +243,13 @@ namespace kaixa::plugin::cmake::detail {
             return {};
         }
 
-        std::filesystem::path installed_header_path(const std::filesystem::path& header, const std::vector<std::string>& public_includes) {
-            std::filesystem::path selected = header;
+        struct HeaderInstallPath {
+            std::filesystem::path path;
+            bool under_public_include = false;
+        };
+
+        HeaderInstallPath installed_header_path(const std::filesystem::path& header, const std::vector<std::string>& public_includes) {
+            HeaderInstallPath selected{header, false};
             std::size_t selected_depth = 0;
             for (const std::string& include: public_includes) {
                 const std::filesystem::path root = std::filesystem::path(include).lexically_normal();
@@ -257,11 +262,12 @@ namespace kaixa::plugin::cmake::detail {
 
                 const std::size_t depth = static_cast<std::size_t>(std::ranges::distance(root));
                 if (depth >= selected_depth) {
-                    selected = relative;
+                    selected = {relative, true};
                     selected_depth = depth;
                 }
             }
-            return selected.lexically_normal();
+            selected.path = selected.path.lexically_normal();
+            return selected;
         }
 
         Result<void> collect_runtime_files(
@@ -373,13 +379,11 @@ namespace kaixa::plugin::cmake::detail {
             for (const std::filesystem::path& source: native.dependency_source_files)
                 result.sources.push_back(source.generic_string());
 
-            if (product.type != EffectiveProductType::interface_library) {
-                for (const std::filesystem::path& header: native.headers.files)
-                    result.sources.push_back(header.generic_string());
+            for (const std::filesystem::path& header: native.headers.files)
+                result.sources.push_back(header.generic_string());
 
-                for (const std::filesystem::path& header: native.public_headers.files)
-                    result.sources.push_back(header.generic_string());
-            }
+            for (const std::filesystem::path& header: native.public_headers.files)
+                result.sources.push_back(header.generic_string());
             std::ranges::sort(result.sources);
             result.sources.erase(std::ranges::unique(result.sources).begin(), result.sources.end());
             result.include_directories = native.include_directories;
@@ -388,10 +392,14 @@ namespace kaixa::plugin::cmake::detail {
             result.public_system_include_directories = native.public_system_include_directories;
             result.link_libraries = native.system_libraries;
 
+            for (const std::filesystem::path& header: native.headers.files) {
+                const HeaderInstallPath destination = installed_header_path(header, native.public_include_directories);
+                if (destination.under_public_include)
+                    result.install_headers.push_back({(source_root / header).lexically_normal(), destination.path});
+            }
             for (const std::filesystem::path& header: native.public_headers.files) {
-                result.install_headers.push_back(
-                    {(source_root / header).lexically_normal(), installed_header_path(header, native.public_include_directories)}
-                );
+                const HeaderInstallPath destination = installed_header_path(header, native.public_include_directories);
+                result.install_headers.push_back({(source_root / header).lexically_normal(), destination.path});
             }
             for (const std::filesystem::path& runtime_file: product.runtime_files.files) {
                 auto appended = append_runtime_file(
@@ -424,11 +432,14 @@ namespace kaixa::plugin::cmake::detail {
                 return std::unexpected(error_at(product.location, "compiled product `" + result.name + "` requires at least one source"));
             }
             if (result.type == TargetType::interface_library
-                && (!result.sources.empty()
+                && (!product.sources.files.empty()
+                    || !native.dependency_source_files.empty()
                     || !result.include_directories.empty()
                     || !result.system_include_directories.empty()
                     || !result.compile_definitions.empty())) {
-                return std::unexpected(error_at(product.location, "an interface product cannot have private product properties"));
+                return std::unexpected(
+                    error_at(product.location, "an interface product cannot have compilation sources or private usage requirements")
+                );
             }
             result.install = true;
             return result;

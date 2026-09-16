@@ -617,6 +617,80 @@ KAIXA_TEST(runtime_files_headers_and_exports_are_generated) {
     );
 }
 
+KAIXA_TEST(interface_headers_are_visible_and_internal_headers_are_installed) {
+    const kaixa::testing::TempDirectory workspace("interface-headers");
+    workspace.write(
+        "Kaixa.toml",
+        "[package]\n"
+        "name = \"interface_headers\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[lib]\n"
+        "type = \"interface\"\n"
+        "headers = [\"include/**/*.hpp\", \"src/**/*.hpp\"]\n"
+        "public-headers = [\"include/interface_headers/api.hpp\"]\n"
+        "public-include = [\"include\"]\n"
+    );
+    workspace.write("include/interface_headers/api.hpp", "#pragma once\n#include <interface_headers/detail/required.hpp>\n");
+    workspace.write("include/interface_headers/detail/required.hpp", "#pragma once\n");
+    workspace.write("src/local.hpp", "#pragma once\n");
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "interface-header workspace loads");
+    if (!graph)
+        return;
+
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const std::filesystem::path prefix = workspace.path() / "distribution";
+    kaixa::BuildRequest request;
+    request.install = true;
+    request.install_prefix = prefix;
+    const auto plan = kaixa::plan_build(*graph, registry, environment, request);
+    context.check(plan.has_value(), "interface headers plan");
+    if (!plan)
+        return;
+
+    const auto project = std::ranges::find_if(plan->generated_files(), [](const kaixa::GeneratedFile& file) {
+        return file.path.filename() == "CMakeLists.txt";
+    });
+    context.check(project != plan->generated_files().end(), "interface headers generate a CMake project");
+    if (project == plan->generated_files().end())
+        return;
+
+    context.check_contains(project->content, "add_library(interface_headers INTERFACE", "interface target is generated");
+    context.check_contains(project->content, "[[src/local.hpp]]", "non-installed headers are visible to IDEs");
+    context.check_contains(
+        project->content,
+        "[[include/interface_headers/detail/required.hpp]]",
+        "installed internal headers are visible to IDEs"
+    );
+    context.check_contains(
+        project->content,
+        "DESTINATION [[include/interface_headers/detail]]",
+        "installed internal header layout is preserved"
+    );
+    context.check(
+        !project->content.contains("install(FILES \"${CMAKE_CURRENT_LIST_DIR}/src/local.hpp\""),
+        "headers outside public include roots remain source-only"
+    );
+
+    const auto installed = kaixa::execute(*plan);
+    context.check(installed.has_value(), "interface headers install");
+    if (!installed) {
+        context.fail(kaixa::format_diagnostic(installed.error()));
+        return;
+    }
+
+    context.check(std::filesystem::is_regular_file(prefix / "include/interface_headers/api.hpp"), "public header is installed");
+    context.check(
+        std::filesystem::is_regular_file(prefix / "include/interface_headers/detail/required.hpp"),
+        "internal dependency header is installed"
+    );
+    context.check(!std::filesystem::exists(prefix / "include/src/local.hpp"), "source-only header is not installed");
+}
+
 KAIXA_TEST(install_materializes_a_runnable_tree_outside_the_build_directory) {
     const kaixa::testing::TempDirectory workspace("install-runtime");
     workspace.write(
