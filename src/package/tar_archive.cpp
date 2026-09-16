@@ -304,7 +304,7 @@ namespace kaixa {
                     | (static_cast<std::size_t>(static_cast<unsigned char>(extra[1])) << 8U);
                 input.seekg(static_cast<std::streamoff>(length), std::ios::cur);
             }
-            for (const unsigned char mask: {0x08U, 0x10U}) {
+            for (const unsigned int mask: {0x08U, 0x10U}) {
                 if ((flags & mask) == 0)
                     continue;
 

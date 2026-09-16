@@ -524,11 +524,11 @@ namespace kaixa::plugin::cmake::detail {
                     continue;
                 }
                 if (entry->key == "defines") {
-                    const std::vector<TableEntry>* declared = entry->value.as_table();
-                    if (!declared)
+                    const std::vector<TableEntry>* definitions = entry->value.as_table();
+                    if (!definitions)
                         return std::unexpected(error_at(entry->value.location(), "target definitions must be a table"));
 
-                    declared_definitions = *declared;
+                    declared_definitions = *definitions;
                     entry = entries.erase(entry);
                     continue;
                 }

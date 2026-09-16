@@ -33,7 +33,6 @@ namespace kaixa::plugin::cmake::detail {
         const BuildContext& context,
         const ConfiguredPackageInstance& instance,
         const BuildRequest& request,
-        bool installing,
         bool selected
     );
     [[nodiscard]] Action install_action(

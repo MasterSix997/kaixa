@@ -295,17 +295,6 @@ namespace kaixa::plugin::cmake {
             return {};
         }
 
-        std::string join_prefixes(const std::vector<std::filesystem::path>& prefixes) {
-            std::string result;
-            for (const std::filesystem::path& prefix: prefixes) {
-                if (!result.empty())
-                    result += ';';
-
-                result += prefix.string();
-            }
-            return result;
-        }
-
         void append_toml_array(std::string& output, const std::string_view name, const std::span<const std::string> values) {
             output += std::string(name) + " = [";
             for (std::size_t index = 0; index < values.size(); ++index) {
@@ -786,14 +775,14 @@ namespace kaixa::plugin::cmake {
             if (route.request.build_default) {
                 append_build_action(
                     planning.plan,
-                    build_action(planning.package, build, *route.instance, route.request, install.has_value(), false),
+                    build_action(planning.package, build, *route.instance, route.request, false),
                     install.has_value()
                 );
             }
             if (!route.request.targets.empty()) {
                 append_build_action(
                     planning.plan,
-                    build_action(planning.package, build, *route.instance, route.request, install.has_value(), true),
+                    build_action(planning.package, build, *route.instance, route.request, true),
                     install.has_value()
                 );
             }

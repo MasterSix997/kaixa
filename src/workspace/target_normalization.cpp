@@ -56,16 +56,6 @@ namespace kaixa::workspace_detail {
             }
         }
 
-        void merge_entries(std::vector<TableEntry>& output, const std::vector<TableEntry>& values) {
-            for (const TableEntry& value: values) {
-                const auto existing = std::ranges::find(output, value.key, &TableEntry::key);
-                if (existing == output.end())
-                    output.push_back(value);
-                else
-                    *existing = value;
-            }
-        }
-
         void merge_target_layer(PackageTarget& target, const PackageTarget& layer) {
             if (layer.display_name)
                 target.display_name = layer.display_name;

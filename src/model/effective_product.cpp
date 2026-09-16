@@ -114,20 +114,7 @@ namespace kaixa {
             return result;
         }
 
-        Result<std::vector<TableEntry>> definitions(TableReader& table, const std::string_view key) {
-            const Value* value = table.take(key);
-            if (!value)
-                return std::vector<TableEntry>{};
-
-            const std::vector<TableEntry>* entries = value->as_table();
-            if (!entries)
-                return std::unexpected(wrong_kind(value->location(), "a definitions table", value->kind()));
-
-            return *entries;
-        }
-
         Result<EffectiveProduct> realize_product(
-            const Graph& graph,
             const ProductDeclaration& declaration,
             const PackageNode& package,
             const ProductRealizationContext& context,
@@ -377,7 +364,7 @@ namespace kaixa {
             return result;
 
         for (const ProductDeclaration& declaration: package.manifest()->products) {
-            auto product = realize_product(graph, declaration, package, context, files);
+            auto product = realize_product(declaration, package, context, files);
             if (!product)
                 return std::unexpected(product.error());
 
