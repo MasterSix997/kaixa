@@ -335,6 +335,9 @@ namespace kaixa::plugin::cmake::detail {
 
             output += "if(PROJECT_IS_TOP_LEVEL AND NOT KAIXA_CMAKE_DEPENDENCIES_INCLUDED)\n"
                       "    include(\"${CMAKE_CURRENT_LIST_DIR}/KaixaDependencies.cmake\")\n"
+                      "endif()\n"
+                      "if(PROJECT_IS_TOP_LEVEL)\n"
+                      "    enable_testing()\n"
                       "endif()\n\n";
         }
 

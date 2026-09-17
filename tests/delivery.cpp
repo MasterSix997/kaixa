@@ -143,6 +143,98 @@ KAIXA_TEST(frameworks_inject_dependencies_and_generate_shared_ctest_catalogs) {
     }
 }
 
+KAIXA_TEST(portable_parent_projects_include_associated_dependencies_of_source_packages) {
+    const kaixa::testing::TempDirectory workspace("nested-associated-dependencies");
+    workspace.write(
+        "Kaixa.toml",
+        "[package-set]\n"
+        "members = [\"library\", \"test_framework\"]\n"
+        "\n"
+        "[package]\n"
+        "name = \"application\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[dependencies]\n"
+        "library = \"1\"\n"
+        "\n"
+        "[lib]\n"
+        "type = \"interface\"\n"
+    );
+    workspace.write(
+        "library/Kaixa.toml",
+        "[package]\n"
+        "name = \"library\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "tests = [\"tests\"]\n"
+        "\n"
+        "[lib]\n"
+        "sources = [\"library.cpp\"]\n"
+    );
+    workspace.write("library/library.cpp", "int library() { return 0; }\n");
+    workspace.write(
+        "library/tests/Kaixa.test.toml",
+        "[[test]]\n"
+        "name = \"library.tests\"\n"
+        "sources = [\"test.cpp\"]\n"
+        "\n"
+        "[test.dependencies]\n"
+        "test_framework = \"1\"\n"
+        "\n"
+        "[test.cmake]\n"
+        "link-libraries = [\"test_framework\"]\n"
+    );
+    workspace.write("library/tests/test.cpp", "int main() { return 0; }\n");
+    workspace.write(
+        "test_framework/Kaixa.toml",
+        "[package]\n"
+        "name = \"test_framework\"\n"
+        "version = \"1.0.0\"\n"
+        "resolver = \"cmake\"\n"
+        "\n"
+        "[lib]\n"
+        "type = \"interface\"\n"
+    );
+
+    const auto graph = kaixa::load_workspace(workspace.path());
+    context.check(graph.has_value(), "nested source package workspace loads");
+    if (!graph) {
+        context.fail(kaixa::format_diagnostic(graph.error()));
+        return;
+    }
+
+    const kaixa::ExtensionRegistry registry = kaixa::plugin::default_registry();
+    const kaixa::BuildEnvironment environment{workspace.path(), workspace.path() / ".kaixa", "debug"};
+    const auto plan = kaixa::plan_build(*graph, registry, environment);
+    context.check(plan.has_value(), "nested source package workspace plans");
+    if (!plan)
+        return;
+
+    const auto dependencies = std::ranges::find_if(plan->generated_files(), [&](const kaixa::GeneratedFile& file) {
+        return file.path == workspace.path() / "KaixaDependencies.cmake";
+    });
+    context.check(dependencies != plan->generated_files().end(), "parent portable dependency bootstrap is generated");
+    if (dependencies != plan->generated_files().end()) {
+        context.check_contains(
+            dependencies->content,
+            "test_framework",
+            "associated dependency of nested source package reaches the parent project"
+        );
+    }
+
+    const auto project = std::ranges::find_if(plan->generated_files(), [&](const kaixa::GeneratedFile& file) {
+        return file.path == workspace.path() / "CMakeLists.txt";
+    });
+    context.check(project != plan->generated_files().end(), "parent portable project is generated");
+    if (project != plan->generated_files().end()) {
+        context.check_contains(
+            project->content,
+            "if(PROJECT_IS_TOP_LEVEL)\n    enable_testing()",
+            "top-level portable project exposes tests registered by nested source packages"
+        );
+    }
+}
+
 KAIXA_TEST(prebuilt_descriptors_reach_cmake_consumers) {
     const kaixa::testing::TempDirectory workspace("prebuilt-consumer");
     workspace.write(

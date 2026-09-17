@@ -211,7 +211,7 @@ namespace kaixa::plugin::cmake {
                 if (dependency_mode(**options, dependency) != DependencyMode::add_subdirectory)
                     continue;
 
-                auto collected = collect_source_dependencies(dependency, false, context);
+                auto collected = collect_source_dependencies(dependency, include_associated, context);
                 if (!collected)
                     return std::unexpected(collected.error());
             }
@@ -228,7 +228,7 @@ namespace kaixa::plugin::cmake {
                         if (!target.has_build_semantics() || target.resolver != "cmake")
                             continue;
 
-                        auto collected = collect_source_dependencies(dependency, false, context);
+                        auto collected = collect_source_dependencies(dependency, true, context);
                         if (!collected)
                             return std::unexpected(collected.error());
                     }
