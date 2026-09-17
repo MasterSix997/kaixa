@@ -169,7 +169,11 @@ namespace kaixa {
             if (*configurations_result) {
                 TableReader configurations = std::move(**configurations_result);
                 for (const TableEntry& entry: configurations.entries()) {
-                    auto definition_result = TableReader::bind(entry.value, join_config_path(configurations.path(), entry.key));
+                    auto definition_result = TableReader::bind(
+                        entry.value,
+                        join_config_path(configurations.path(), entry.key),
+                        configurations.sink()
+                    );
                     if (!definition_result)
                         return std::unexpected(definition_result.error());
 
@@ -195,7 +199,7 @@ namespace kaixa {
                 );
             }
             for (std::size_t index = 0; index < configurations->size(); ++index) {
-                auto definition_result = TableReader::bind((*configurations)[index], "config." + std::to_string(index));
+                auto definition_result = TableReader::bind((*configurations)[index], "config." + std::to_string(index), root.sink());
                 if (!definition_result)
                     return std::unexpected(definition_result.error());
 
@@ -214,12 +218,8 @@ namespace kaixa {
         return result;
     }
 
-    Result<ConfigurationDocument> parse_configuration_document_file(const std::filesystem::path& path) {
-        auto document = parse_file(path);
-        if (!document)
-            return std::unexpected(document.error());
-
-        auto root_result = TableReader::bind(*document);
+    Result<ConfigurationDocument> parse_configuration_document(const Value& document, DiagnosticSink* sink) {
+        auto root_result = TableReader::bind(document, {}, sink);
         if (!root_result)
             return std::unexpected(root_result.error());
 
@@ -242,6 +242,26 @@ namespace kaixa {
             return std::unexpected(finished.error());
 
         return ConfigurationDocument{std::move(*configurations), std::move(*providers), std::move(*automation)};
+    }
+
+    Result<ConfigurationDocument> parse_configuration_document_string(
+        const std::string_view text,
+        const std::string_view source_name,
+        DiagnosticSink* sink
+    ) {
+        auto document = parse_string(text, source_name);
+        if (!document)
+            return std::unexpected(document.error());
+
+        return parse_configuration_document(*document, sink);
+    }
+
+    Result<ConfigurationDocument> parse_configuration_document_file(const std::filesystem::path& path) {
+        auto document = parse_file(path);
+        if (!document)
+            return std::unexpected(document.error());
+
+        return parse_configuration_document(*document);
     }
 
     Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path) {

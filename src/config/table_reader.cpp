@@ -10,18 +10,19 @@ namespace kaixa {
         }
     }
 
-    TableReader::TableReader(const Value& value, std::string path)
+    TableReader::TableReader(const Value& value, std::string path, DiagnosticSink* sink)
         : m_value(&value)
         , m_path(std::move(path))
-        , m_consumed(value.size(), false) {}
+        , m_consumed(value.size(), false)
+        , m_sink(sink) {}
 
-    Result<TableReader> TableReader::bind(const Value& value, std::string path) {
+    Result<TableReader> TableReader::bind(const Value& value, std::string path, DiagnosticSink* sink) {
         if (!value.is_table()) {
             SourceLocation location = value.location();
             location.config_path = path;
             return std::unexpected(wrong_kind(std::move(location), "a table", value.kind()));
         }
-        return TableReader(value, std::move(path));
+        return TableReader(value, std::move(path), sink);
     }
 
     const Value* TableReader::take(const std::string_view key) {
@@ -162,7 +163,7 @@ namespace kaixa {
         if (!value)
             return std::unexpected(error_at(location_of(key), "missing required key"));
 
-        return bind(*value, join_config_path(m_path, key));
+        return bind(*value, join_config_path(m_path, key), m_sink);
     }
 
     Result<std::optional<TableReader>> TableReader::optional_table(const std::string_view key) {
@@ -170,7 +171,7 @@ namespace kaixa {
         if (!value)
             return std::nullopt;
 
-        auto reader = bind(*value, join_config_path(m_path, key));
+        auto reader = bind(*value, join_config_path(m_path, key), m_sink);
         if (!reader)
             return std::unexpected(reader.error());
 
@@ -185,10 +186,15 @@ namespace kaixa {
                 continue;
 
             const std::string path = join_config_path(m_path, table[index].key);
+            SourceLocation location = table[index].value.location();
+            location.config_path = path;
+            Diagnostic unknown = error_at(std::move(location), "unknown key `" + path + "`");
+            if (m_sink) {
+                m_sink->report(std::move(unknown));
+                continue;
+            }
             if (!failure) {
-                SourceLocation location = table[index].value.location();
-                location.config_path = path;
-                failure = error_at(std::move(location), "unknown key `" + path + "`");
+                failure = std::move(unknown);
             } else {
                 failure->notes.push_back("unknown key `" + path + "`");
             }

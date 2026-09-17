@@ -1,5 +1,6 @@
 #include <kaixa/foundation/diagnostic.hpp>
 
+#include <string_view>
 #include <utility>
 
 namespace kaixa {
@@ -9,15 +10,40 @@ namespace kaixa {
     }
 
     Diagnostic error(std::string message) {
-        return Diagnostic{std::move(message), std::nullopt, {}};
+        return Diagnostic{std::move(message), std::nullopt, {}, Severity::error};
     }
 
     Diagnostic error_at(SourceLocation location, std::string message) {
-        return Diagnostic{std::move(message), std::move(location), {}};
+        return Diagnostic{std::move(message), std::move(location), {}, Severity::error};
+    }
+
+    Diagnostic warning_at(SourceLocation location, std::string message) {
+        return Diagnostic{std::move(message), std::move(location), {}, Severity::warning};
+    }
+
+    void DiagnosticSink::report(Diagnostic diagnostic) {
+        if (diagnostic.severity == Severity::error)
+            ++m_errors;
+
+        m_diagnostics.push_back(std::move(diagnostic));
+    }
+
+    const Diagnostic* DiagnosticSink::first_error() const noexcept {
+        for (const Diagnostic& diagnostic: m_diagnostics) {
+            if (diagnostic.severity == Severity::error)
+                return &diagnostic;
+        }
+        return nullptr;
+    }
+
+    namespace {
+        std::string_view severity_name(const Severity severity) {
+            return severity == Severity::warning ? "warning" : "error";
+        }
     }
 
     std::string format_diagnostic(const Diagnostic& diagnostic) {
-        std::string text = "error: ";
+        std::string text = std::string(severity_name(diagnostic.severity)) + ": ";
 
         if (diagnostic.location) {
             const SourceLocation& location = *diagnostic.location;
@@ -70,7 +96,7 @@ namespace kaixa {
             prefix += ": ";
         }
 
-        std::string text = prefix + "error: " + diagnostic.message;
+        std::string text = prefix + std::string(severity_name(diagnostic.severity)) + ": " + diagnostic.message;
         if (diagnostic.location
             && !diagnostic.location->config_path.empty()
             && diagnostic.message.find(diagnostic.location->config_path) == std::string::npos) {

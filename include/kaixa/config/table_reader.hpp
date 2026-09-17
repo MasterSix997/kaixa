@@ -12,7 +12,7 @@
 namespace kaixa {
     class TableReader {
     public:
-        [[nodiscard]] static Result<TableReader> bind(const Value& value, std::string path = {});
+        [[nodiscard]] static Result<TableReader> bind(const Value& value, std::string path = {}, DiagnosticSink* sink = nullptr);
 
         const Value* take(std::string_view key);
         void take_all() noexcept;
@@ -32,13 +32,15 @@ namespace kaixa {
         [[nodiscard]] Result<void> finish() const;
 
         [[nodiscard]] const std::string& path() const noexcept { return m_path; }
+        [[nodiscard]] DiagnosticSink* sink() const noexcept { return m_sink; }
         [[nodiscard]] SourceLocation location_of(std::string_view key) const;
 
     private:
-        TableReader(const Value& value, std::string path);
+        TableReader(const Value& value, std::string path, DiagnosticSink* sink);
 
         const Value* m_value;
         std::string m_path;
         std::vector<bool> m_consumed;
+        DiagnosticSink* m_sink = nullptr;
     };
 }

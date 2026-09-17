@@ -66,6 +66,12 @@ namespace kaixa {
     };
 
     [[nodiscard]] Result<ConfigurationSet> read_configuration_set(TableReader& root);
+    [[nodiscard]] Result<ConfigurationDocument> parse_configuration_document(const Value& document, DiagnosticSink* sink = nullptr);
+    [[nodiscard]] Result<ConfigurationDocument> parse_configuration_document_string(
+        std::string_view text,
+        std::string_view source_name,
+        DiagnosticSink* sink = nullptr
+    );
     [[nodiscard]] Result<ConfigurationDocument> parse_configuration_document_file(const std::filesystem::path& path);
     [[nodiscard]] Result<ConfigurationSet> parse_configuration_file(const std::filesystem::path& path);
     [[nodiscard]] Result<EffectiveBuildConfiguration> resolve_configurations(

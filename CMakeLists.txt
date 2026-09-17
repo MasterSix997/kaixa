@@ -65,6 +65,7 @@ add_executable(kaixa_tests
     [[tests/command_usage.cpp]]
     [[tests/configurations.cpp]]
     [[tests/delivery.cpp]]
+    [[tests/diagnostics.cpp]]
     [[tests/manifest.cpp]]
     [[tests/package_routes.cpp]]
     [[tests/package_sets.cpp]]

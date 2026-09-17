@@ -11,7 +11,7 @@
 
 namespace kaixa {
     namespace {
-        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path);
+        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path, DiagnosticSink* sink);
 
         bool is_valid_target_template(std::string value) {
             std::size_t position = 0;
@@ -103,9 +103,10 @@ namespace kaixa {
             const Value& value,
             const std::string& path,
             const std::string& name,
-            const bool allow_package_scope
+            const bool allow_package_scope,
+            DiagnosticSink* sink
         ) {
-            auto table_result = TableReader::bind(value, path);
+            auto table_result = TableReader::bind(value, path, sink);
             if (!table_result)
                 return std::unexpected(table_result.error());
 
@@ -252,7 +253,8 @@ namespace kaixa {
                     entry.value,
                     join_config_path(commands.path(), entry.key),
                     entry.key,
-                    allow_package_scope
+                    allow_package_scope,
+                    commands.sink()
                 );
                 if (!command)
                     return std::unexpected(command.error());
@@ -279,7 +281,7 @@ namespace kaixa {
                     return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid workflow name"));
                 }
 
-                auto declaration_result = TableReader::bind(entry.value, join_config_path(workflows.path(), entry.key));
+                auto declaration_result = TableReader::bind(entry.value, join_config_path(workflows.path(), entry.key), workflows.sink());
                 if (!declaration_result)
                     return std::unexpected(declaration_result.error());
 
@@ -334,7 +336,7 @@ namespace kaixa {
             TableReader dependencies = std::move(**dependencies_result);
             result.reserve(dependencies.entries().size());
             for (const TableEntry& entry: dependencies.entries()) {
-                auto dependency = parse_dependency(entry, join_config_path(dependencies.path(), entry.key));
+                auto dependency = parse_dependency(entry, join_config_path(dependencies.path(), entry.key), dependencies.sink());
                 if (!dependency)
                     return std::unexpected(dependency.error());
 
@@ -385,7 +387,7 @@ namespace kaixa {
                     continue;
                 }
 
-                auto definition_result = TableReader::bind(entry.value, join_config_path(features.path(), entry.key));
+                auto definition_result = TableReader::bind(entry.value, join_config_path(features.path(), entry.key), features.sink());
                 if (!definition_result)
                     return std::unexpected(definition_result.error());
 
@@ -743,7 +745,7 @@ namespace kaixa {
                 return {};
 
             if (value->is_table()) {
-                auto table_result = TableReader::bind(*value, std::string(key));
+                auto table_result = TableReader::bind(*value, std::string(key), root.sink());
                 if (!table_result)
                     return std::unexpected(table_result.error());
 
@@ -762,7 +764,7 @@ namespace kaixa {
             }
 
             for (std::size_t index = 0; index < array->size(); ++index) {
-                auto table_result = TableReader::bind((*array)[index], std::string(key) + "." + std::to_string(index));
+                auto table_result = TableReader::bind((*array)[index], std::string(key) + "." + std::to_string(index), root.sink());
                 if (!table_result)
                     return std::unexpected(table_result.error());
 
@@ -809,7 +811,7 @@ namespace kaixa {
             return {};
         }
 
-        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path) {
+        Result<DependencyBinding> parse_dependency(const TableEntry& entry, const std::string& path, DiagnosticSink* sink) {
             SourceLocation location = entry.value.location();
             location.config_path = path;
 
@@ -829,7 +831,7 @@ namespace kaixa {
                 return dependency;
             }
 
-            auto table_result = TableReader::bind(entry.value, path);
+            auto table_result = TableReader::bind(entry.value, path, sink);
             if (!table_result) {
                 return std::unexpected(std::move(table_result).error().add_note("dependencies use a version string or a dependency table"));
             }
@@ -1018,12 +1020,12 @@ namespace kaixa {
             return {};
         }
 
-        Result<Manifest> parse_inline_member(const TableEntry& entry, const std::string& path) {
+        Result<Manifest> parse_inline_member(const TableEntry& entry, const std::string& path, DiagnosticSink* sink) {
             if (!is_valid_package_name(entry.key)) {
                 return std::unexpected(error_at(entry.value.location(), "`" + entry.key + "` is not a valid inline package name"));
             }
 
-            auto member_result = TableReader::bind(entry.value, path);
+            auto member_result = TableReader::bind(entry.value, path, sink);
             if (!member_result)
                 return std::unexpected(member_result.error());
 
@@ -1426,7 +1428,7 @@ namespace kaixa {
 
             TableReader members = std::move(**members_result);
             for (const TableEntry& entry: members.entries()) {
-                auto member = parse_inline_member(entry, join_config_path(members.path(), entry.key));
+                auto member = parse_inline_member(entry, join_config_path(members.path(), entry.key), members.sink());
                 if (!member)
                     return std::unexpected(member.error());
 
@@ -1486,8 +1488,8 @@ namespace kaixa {
         }
     }
 
-    Result<ManifestDocument> parse_manifest_document(const Value& document) {
-        auto root_result = TableReader::bind(document);
+    Result<ManifestDocument> parse_manifest_document(const Value& document, DiagnosticSink* sink) {
+        auto root_result = TableReader::bind(document, {}, sink);
         if (!root_result)
             return std::unexpected(root_result.error());
 
@@ -1676,12 +1678,16 @@ namespace kaixa {
         return KaixaDocument{TargetManifestDocument{path, std::move(*targets)}};
     }
 
-    Result<ManifestDocument> parse_manifest_document_string(const std::string_view text, const std::string_view source_name) {
+    Result<ManifestDocument> parse_manifest_document_string(
+        const std::string_view text,
+        const std::string_view source_name,
+        DiagnosticSink* sink
+    ) {
         auto document = parse_string(text, source_name);
         if (!document)
             return std::unexpected(document.error());
 
-        auto manifest = parse_manifest_document(*document);
+        auto manifest = parse_manifest_document(*document, sink);
         if (!manifest)
             return std::unexpected(manifest.error());
 

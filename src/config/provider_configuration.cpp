@@ -21,7 +21,7 @@ namespace kaixa {
         for (std::size_t index = 0; index < definitions->size(); ++index) {
             const Value& entry = (*definitions)[index];
             const std::string path = "provider." + std::to_string(index);
-            auto definition_result = TableReader::bind(entry, path);
+            auto definition_result = TableReader::bind(entry, path, root.sink());
             if (!definition_result)
                 return std::unexpected(definition_result.error());
 
