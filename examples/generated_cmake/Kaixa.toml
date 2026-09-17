@@ -15,6 +15,7 @@ languages = ["CXX"]
 type = "executable"
 sources = ["src/main.cpp"]
 cxx-standard = 23
+compile-definitions = ["GENERATED_HELLO=1", "GENERATED_HELLO_NAME=generated_cmake"]
 
 [[cmake.test]]
 name = "generated_hello"

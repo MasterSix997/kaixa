@@ -10,6 +10,7 @@ kaixa run --example manifest_writer
 The remaining directories are independent example projects:
 
 - [`generated_cmake`](generated_cmake/) generates a CMake project from `Kaixa.toml`.
+- [`features_and_defines`](features_and_defines/) demonstrates default and opt-in features, an optional dependency, dependency feature forwarding, conditional products, and CMake compile definitions.
 - [`hello_cmake`](hello_cmake/) adopts an existing CMake project.
 - [`installation`](installation/) installs a runnable product with propagated runtime files and public CMake exports.
 - [`local_workspace`](local_workspace/) composes a local dependency with `add_subdirectory`.

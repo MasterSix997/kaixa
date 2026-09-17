@@ -1,0 +1,38 @@
+[package]
+name = "feature_demo"
+version = "1.0.0"
+resolver = "cmake"
+
+[dependencies]
+feature_telemetry = { path = "../telemetry", optional = true }
+
+[features]
+default = ["friendly-output"]
+friendly-output = {}
+full = { features = ["friendly-output", "diagnostics"] }
+
+[features.diagnostics]
+dependencies = ["feature_telemetry"]
+
+[features.diagnostics.dependency-features]
+feature_telemetry = ["timestamps"]
+
+[bin]
+sources = ["src/main.cpp"]
+
+[bin.defines]
+FEATURE_DEMO_API = 3
+FEATURE_DEMO_EXPERIMENTAL = false
+FEATURE_DEMO_NAME = "feature_demo"
+FEATURE_DEMO_ASSET_DIR = { path = "assets" }
+
+[[bin.when]]
+if = { feature = "friendly-output" }
+defines = { FEATURE_DEMO_FRIENDLY = true }
+
+[[bin.when]]
+if = { feature = "diagnostics" }
+defines = { FEATURE_DEMO_DIAGNOSTICS = true }
+
+[cmake]
+generation = "state"

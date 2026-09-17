@@ -1,0 +1,16 @@
+[package-set]
+name = "features_and_defines"
+members = ["app", "telemetry"]
+default = ["feature_demo"]
+
+[package-set.policy]
+cxx = 20
+warnings = "strict"
+
+[[config]]
+name = "diagnostics"
+features = { feature_demo = ["diagnostics"] }
+
+[[config]]
+name = "full"
+features = { feature_demo = ["full"] }

@@ -15,3 +15,6 @@ compile_commands.json
 /examples/generated_cmake/CMakeLists.txt
 /examples/installation/**/CMakeLists.txt
 /examples/test_adapters/**/CMakeLists.txt
+/examples/generated_cmake/Kaixa.lock
+/examples/generated_cmake/KaixaDependencies.cmake
+/examples/features_and_defines/Kaixa.lock

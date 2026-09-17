@@ -1,0 +1,22 @@
+[package]
+name = "feature_telemetry"
+version = "1.0.0"
+resolver = "cmake"
+
+[features]
+timestamps = {}
+
+[lib]
+type = "static"
+sources = ["src/telemetry.cpp"]
+public-headers = ["include/feature_telemetry/telemetry.hpp"]
+public-include = ["include"]
+defines = { FEATURE_TELEMETRY_BUILD = true }
+public-defines = { FEATURE_TELEMETRY_AVAILABLE = true }
+
+[[lib.when]]
+if = { feature = "timestamps" }
+public-defines = { FEATURE_TELEMETRY_TIMESTAMPS = true }
+
+[cmake]
+generation = "state"
