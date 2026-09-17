@@ -95,6 +95,17 @@ namespace kaixa::plugin::cmake::detail {
 #endif
     }
 
+    bool exports_compile_commands(const std::optional<std::string>& requested) {
+        if (!uses_multiple_configurations(requested))
+            return true;
+
+        const std::optional<std::string> environment = environment_variable("CMAKE_GENERATOR");
+        if (requested)
+            return requested->contains("Ninja");
+
+        return environment && environment->contains("Ninja");
+    }
+
     BuildVariant build_variant(
         const BuildEnvironment& environment,
         const detail::BuildOptions& options,

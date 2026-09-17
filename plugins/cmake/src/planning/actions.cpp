@@ -3,7 +3,9 @@
 #include <discovery/file_api.hpp>
 #include <planning/variants.hpp>
 
+#include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace kaixa::plugin::cmake::detail {
@@ -62,6 +64,9 @@ namespace kaixa::plugin::cmake::detail {
             }
             configure.argv.push_back("-DCMAKE_TOOLCHAIN_FILE=" + context.build.toolchain->string());
         }
+        if (exports_compile_commands(context.generator))
+            configure.argv.push_back("-DCMAKE_EXPORT_COMPILE_COMMANDS=ON");
+
         configure.argv.insert(configure.argv.end(), context.build.configure_arguments.begin(), context.build.configure_arguments.end());
         configure.working_directory = package.directory;
         configure.package = package.id;
@@ -73,6 +78,30 @@ namespace kaixa::plugin::cmake::detail {
         auto checked_state = configuration_state(context.directory, configure.inputs);
         configure.checked_state = route.reset ? ActionState::required : (checked_state ? *checked_state : ActionState::unknown);
         return configure;
+    }
+
+    std::optional<Action> compile_commands_action(
+        const PackageNode& package,
+        const BuildContext& context,
+        const std::filesystem::path& workspace,
+        const bool configuring
+    ) {
+        if (!exports_compile_commands(context.generator))
+            return std::nullopt;
+
+        const std::filesystem::path produced = context.directory / "compile_commands.json";
+        std::error_code failure;
+        if (!configuring && !std::filesystem::exists(produced, failure))
+            return std::nullopt;
+        const std::filesystem::path published = workspace / "compile_commands.json";
+        Action publish;
+        publish.description = "publish compile commands for " + package.name;
+        publish.argv = {"cmake", "-E", "copy_if_different", produced.string(), published.string()};
+        publish.working_directory = workspace;
+        publish.inputs.push_back(produced);
+        publish.outputs.push_back(published);
+        publish.package = package.id;
+        return publish;
     }
 
     void append_build_action(ExecutionPlan& plan, Action action, const bool installing) {

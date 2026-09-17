@@ -61,6 +61,44 @@ namespace kaixa {
             return result;
         }
 
+        Result<std::vector<std::string>> split_command_line(const std::string& text, const SourceLocation& location) {
+            std::vector<std::string> arguments;
+            std::string current;
+            bool quoted = false;
+            char quote = 0;
+            for (const char character: text) {
+                if (quote != 0) {
+                    if (character == quote) {
+                        quote = 0;
+                        continue;
+                    }
+                    current.push_back(character);
+                    continue;
+                }
+                if (character == '"' || character == '\'') {
+                    quote = character;
+                    quoted = true;
+                    continue;
+                }
+                if (character == ' ' || character == '\t') {
+                    if (!current.empty() || quoted) {
+                        arguments.push_back(std::move(current));
+                        current.clear();
+                        quoted = false;
+                    }
+                    continue;
+                }
+                current.push_back(character);
+            }
+            if (quote != 0) {
+                return std::unexpected(error_at(location, "command `run` has an unterminated quote"));
+            }
+            if (!current.empty() || quoted)
+                arguments.push_back(std::move(current));
+
+            return arguments;
+        }
+
         Result<TaskDeclaration> parse_task_declaration(
             const Value& value,
             const std::string& path,
@@ -92,11 +130,19 @@ namespace kaixa {
 
             const Value* run = table.take("run");
             if (run) {
-                auto arguments = read_string_array_value(*run, "command run");
-                if (!arguments)
-                    return std::unexpected(arguments.error());
+                if (const std::string* line = run->as_string()) {
+                    auto arguments = split_command_line(*line, run->location());
+                    if (!arguments)
+                        return std::unexpected(arguments.error());
 
-                result.run = std::move(*arguments);
+                    result.run = std::move(*arguments);
+                } else {
+                    auto arguments = read_string_array_value(*run, "command run");
+                    if (!arguments)
+                        return std::unexpected(arguments.error());
+
+                    result.run = std::move(*arguments);
+                }
             }
 
             auto tool = table.optional_string("tool");

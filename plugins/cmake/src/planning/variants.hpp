@@ -22,6 +22,7 @@ namespace kaixa::plugin::cmake::detail {
 
     [[nodiscard]] std::optional<std::string> requested_generator(const std::vector<std::string>& arguments);
     [[nodiscard]] bool uses_multiple_configurations(const std::optional<std::string>& requested);
+    [[nodiscard]] bool exports_compile_commands(const std::optional<std::string>& requested);
     [[nodiscard]] BuildVariant build_variant(
         const BuildEnvironment& environment,
         const BuildOptions& options,

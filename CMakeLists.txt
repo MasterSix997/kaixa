@@ -61,6 +61,7 @@ add_executable(kaixa_tests
     [[tests/archives.cpp]]
     [[tests/build_operations.cpp]]
     [[tests/command_line.cpp]]
+    [[tests/command_lines.cpp]]
     [[tests/command_usage.cpp]]
     [[tests/configurations.cpp]]
     [[tests/delivery.cpp]]

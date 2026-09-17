@@ -41,5 +41,11 @@ namespace kaixa::plugin::cmake::detail {
         const ConfiguredPackageInstance& instance,
         const std::filesystem::path& destination
     );
+    [[nodiscard]] std::optional<Action> compile_commands_action(
+        const PackageNode& package,
+        const BuildContext& context,
+        const std::filesystem::path& workspace,
+        bool configuring
+    );
     void append_build_action(ExecutionPlan& plan, Action action, bool installing);
 }

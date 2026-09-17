@@ -26,16 +26,16 @@ msvc-runtime = "static"
 output = { runtime = "bin", library = "lib", archive = "lib" }
 
 [command.quality]
-run = ["python", "tools/quality.py", "rules", "format", "complexity"]
+run = "python tools/quality.py rules format complexity"
 inputs = ["tools/quality.py", "tools/complexity-baseline.txt"]
 
 [command.format-check]
-run = ["python", "tools/quality.py", "format", "--all-files"]
+run = "python tools/quality.py format --all-files"
 inputs = ["tools/quality.py"]
 
 [command.tidy]
 after = ["build"]
-run = ["python", "tools/quality.py", "tidy", "--compile-commands", "${build-dir}"]
+run = "python tools/quality.py tidy"
 inputs = ["tools/quality.py"]
 
 [workflow.dev]
