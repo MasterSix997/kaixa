@@ -80,30 +80,6 @@ namespace kaixa::plugin::cmake::detail {
         return configure;
     }
 
-    std::optional<Action> compile_commands_action(
-        const PackageNode& package,
-        const BuildContext& context,
-        const std::filesystem::path& workspace,
-        const bool configuring
-    ) {
-        if (!exports_compile_commands(context.generator))
-            return std::nullopt;
-
-        const std::filesystem::path produced = context.directory / "compile_commands.json";
-        std::error_code failure;
-        if (!configuring && !std::filesystem::exists(produced, failure))
-            return std::nullopt;
-        const std::filesystem::path published = workspace / "compile_commands.json";
-        Action publish;
-        publish.description = "publish compile commands for " + package.name;
-        publish.argv = {"cmake", "-E", "copy_if_different", produced.string(), published.string()};
-        publish.working_directory = workspace;
-        publish.inputs.push_back(produced);
-        publish.outputs.push_back(published);
-        publish.package = package.id;
-        return publish;
-    }
-
     void append_build_action(ExecutionPlan& plan, Action action, const bool installing) {
         // installing needs the artifact in place before the install step, so it synchronizes
         if (installing)

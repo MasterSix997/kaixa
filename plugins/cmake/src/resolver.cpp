@@ -43,7 +43,6 @@ namespace kaixa::plugin::cmake {
         using detail::BuildContext;
         using detail::BuildVariant;
         using detail::cmake_build_root;
-        using detail::compile_commands_action;
         using detail::configure_action;
         using detail::ConfigureActionContext;
         using detail::ConfiguredRoute;
@@ -772,13 +771,7 @@ namespace kaixa::plugin::cmake {
             if (!configure)
                 return std::unexpected(configure.error());
 
-            const bool configuring = configure->checked_state != ActionState::current;
             planning.plan.synchronize(std::move(*configure));
-            if (planning.graph.is_root(planning.package.id)) {
-                auto publish = compile_commands_action(planning.package, build, planning.environment.workspace, configuring);
-                if (publish)
-                    planning.plan.synchronize(std::move(*publish));
-            }
             if (route.request.build_default) {
                 append_build_action(
                     planning.plan,

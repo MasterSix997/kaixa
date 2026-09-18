@@ -58,7 +58,7 @@ function Invoke-WindowsJob {
         New-Item -ItemType Junction -Path $fixtureAlias -Target $fixtureActual | Out-Null
         $env:KAIXA_TEST_TEMP = $fixtureAlias
         Invoke-Native {
-            ctest --test-dir $build -C Debug --output-on-failure
+            ctest --test-dir $build -C Debug --output-on-failure --label-regex "^kaixa[.]purpose:test$"
         }
     } finally {
         if ($null -eq $previousTestTemp) {

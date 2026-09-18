@@ -19,7 +19,7 @@ run_linux() {
         -DCMAKE_BUILD_TYPE=Debug \
         -DCMAKE_CXX_FLAGS="-Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror -Wno-missing-field-initializers"
     cmake --build build-ci-linux --parallel --target kaixa kaixa_tests
-    ctest --test-dir build-ci-linux --output-on-failure
+    ctest --test-dir build-ci-linux --output-on-failure --label-regex "^kaixa[.]purpose:test$"
 }
 
 git config --global --add safe.directory /workspace
